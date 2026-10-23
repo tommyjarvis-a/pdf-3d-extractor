@@ -56,34 +56,6 @@
   // 1. Decompression Helpers (Browser DecompressionStream + pure-JS fallback)
   // -------------------------------------------------------------------------
   async function inflateFlateStream(uint8) {
-    // Try zlib (with 2-byte header) then raw deflate
-    for (const fmt of ['deflate', 'deflate-raw']) {
-      try {
-        if (typeof DecompressionStream !== 'undefined') {
-          const ds = new DecompressionStream(fmt);
-          const writer = ds.writable.getWriter();
-          writer.write(uint8);
-          writer.close();
-          const resp = new Response(ds.readable);
-          const ab = await resp.arrayBuffer();
-          return new Uint8Array(ab);
-        }
-      } catch (_) {}
-    }
-    // Try stripping 2-byte zlib header for deflate-raw
-    if (uint8.length > 6 && (uint8[0] & 0x0f) === 8) {
-      try {
-        if (typeof DecompressionStream !== 'undefined') {
-          const ds = new DecompressionStream('deflate-raw');
-          const writer = ds.writable.getWriter();
-          writer.write(uint8.subarray(2, uint8.length - 4));
-          writer.close();
-          const resp = new Response(ds.readable);
-          const ab = await resp.arrayBuffer();
-          return new Uint8Array(ab);
-        }
-      } catch (_) {}
-    }
     if (typeof require === 'function') {
       try {
         const zlib = require('zlib');
@@ -94,6 +66,26 @@
           return new Uint8Array(zlib.inflateRawSync(Buffer.from(uint8)));
         } catch (__) {}
       }
+    }
+    // Browser DecompressionStream using Blob.stream().pipeThrough() to prevent TransformStream backpressure deadlock on large >64KB 3D streams
+    for (const fmt of ['deflate', 'deflate-raw']) {
+      try {
+        if (typeof DecompressionStream !== 'undefined' && typeof Blob !== 'undefined') {
+          const stream = new Blob([uint8]).stream().pipeThrough(new DecompressionStream(fmt));
+          const ab = await new Response(stream).arrayBuffer();
+          return new Uint8Array(ab);
+        }
+      } catch (_) {}
+    }
+    if (uint8.length > 6 && (uint8[0] & 0x0f) === 8) {
+      try {
+        if (typeof DecompressionStream !== 'undefined' && typeof Blob !== 'undefined') {
+          const slice = uint8.subarray(2, uint8.length - 4);
+          const stream = new Blob([slice]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+          const ab = await new Response(stream).arrayBuffer();
+          return new Uint8Array(ab);
+        }
+      } catch (_) {}
     }
     return uint8;
   }
@@ -111,340 +103,1280 @@
   // 2. PDF /3D & /RichMedia Stream Extractor
   // -------------------------------------------------------------------------
   async function extract3DStreamsFromPDF(u8, fileName) {
-    // Direct .u3d or .prc file check
-    const magic4 = asciiSlice(u8, 0, 4);
-    if (magic4 === 'U3D\0') {
-      return [{
-        id: 'Direct-U3D',
-        objNum: 1,
-        subtype: 'U3D',
-        filter: 'None',
-        compressedLength: u8.length,
-        rawBytes: u8,
-        title: fileName || 'Direct U3D Stream'
-      }];
-    }
-    if (magic4.startsWith('PRC')) {
-      return [{
-        id: 'Direct-PRC',
-        objNum: 1,
-        subtype: 'PRC',
-        filter: 'None',
-        compressedLength: u8.length,
-        rawBytes: u8,
-        title: fileName || 'Direct PRC Stream'
-      }];
-    }
-
-    const fullText = asciiSlice(u8, 0, u8.length);
     const streams = [];
-    const objRegex = /(\d+)\s+(\d+)\s+obj\b/g;
-    let match;
 
-    while ((match = objRegex.exec(fullText)) !== null) {
-      const objNum = parseInt(match[1], 10);
-      const objStart = match.index;
-      const endObjIdx = fullText.indexOf('endobj', objStart);
-      if (endObjIdx === -1) continue;
+    // Direct raw .u3d or .prc binary file support
+    if (u8.length >= 4) {
+      const magic4 = asciiSlice(u8, 0, 4);
+      if (magic4.startsWith('U3D')) {
+        streams.push({
+          index: 0,
+          subtype: 'U3D',
+          filter: 'None (Raw U3D)',
+          compressedLength: u8.length,
+          rawBytes: u8,
+          title: fileName || 'Direct U3D Stream'
+        });
+        return streams;
+      }
+      if (magic4.startsWith('PRC')) {
+        streams.push({
+          index: 0,
+          subtype: 'PRC',
+          filter: 'None (Raw PRC)',
+          compressedLength: u8.length,
+          rawBytes: u8,
+          title: fileName || 'Direct PRC Stream'
+        });
+        return streams;
+      }
+    }
 
-      const headerLimit = Math.min(endObjIdx, objStart + 2048);
-      const objHeader = fullText.slice(objStart, headerLimit);
-      const streamKeywordIdx = fullText.indexOf('stream', objStart);
-      if (streamKeywordIdx === -1 || streamKeywordIdx > endObjIdx) continue;
+    const pdfLatin1 = asciiSlice(u8, 0, u8.length);
 
-      const dictText = fullText.slice(objStart, streamKeywordIdx);
-      const is3D = /\/Subtype\s*\/(U3D|PRC|3D)\b/i.test(dictText) || /\/Type\s*\/3D\b/i.test(dictText);
-      const isEmbeddedCAD = /\.(x_t|x_b|stp|step|igs|iges|u3d|prc)\b/i.test(dictText);
+    // Pre-index indirect integer objects (e.g. "15 0 obj 123456 endobj") so "/Length 15 0 R" resolves accurately
+    const indirectLengths = new Map();
+    const indObjRegex = /(\d+)\s+(\d+)\s+obj[\s\r\n]+(\d+)[\s\r\n]+endobj/g;
+    let indMatch;
+    while ((indMatch = indObjRegex.exec(pdfLatin1)) !== null) {
+      indirectLengths.set(`${indMatch[1]}_${indMatch[2]}`, parseInt(indMatch[3], 10));
+    }
 
-      if (!is3D && !isEmbeddedCAD) continue;
+    let searchPos = 0;
+    let streamIdx = 0;
 
-      let dataStart = streamKeywordIdx + 6;
+    while (searchPos < pdfLatin1.length) {
+      const streamTokenIdx = pdfLatin1.indexOf('stream', searchPos);
+      if (streamTokenIdx === -1) break;
+
+      // Ensure 'stream' is not part of 'endstream'
+      if (streamTokenIdx >= 3 && pdfLatin1.slice(streamTokenIdx - 3, streamTokenIdx) === 'end') {
+        searchPos = streamTokenIdx + 6;
+        continue;
+      }
+
+      // Check header dictionary preceding 'stream' (look back up to 1024 chars)
+      const dictStart = Math.max(0, streamTokenIdx - 1024);
+      const dictWindow = pdfLatin1.slice(dictStart, streamTokenIdx);
+      const dictOpenIdx = dictWindow.lastIndexOf('<<');
+      const dictStr = dictOpenIdx !== -1 ? dictWindow.slice(dictOpenIdx) : dictWindow;
+
+      // Advance past 'stream\r\n' or 'stream\n'
+      let dataStart = streamTokenIdx + 6;
       if (u8[dataStart] === 13 && u8[dataStart + 1] === 10) dataStart += 2;
       else if (u8[dataStart] === 10 || u8[dataStart] === 13) dataStart += 1;
+      else {
+        searchPos = streamTokenIdx + 6;
+        continue;
+      }
 
-      const endStreamIdx = fullText.indexOf('endstream', dataStart);
-      if (endStreamIdx === -1 || endStreamIdx > endObjIdx) continue;
+      // Determine stream end using indirect /Length, direct /Length, or 'endstream'
+      let declaredLen = 0;
+      const lenRefMatch = dictStr.match(/\/Length\s+(\d+)\s+(\d+)\s+R\b/);
+      const lenDirectMatch = dictStr.match(/\/Length\s+(\d+)(?!\s+\d+\s+R\b)/);
+      if (lenRefMatch) {
+        const refKey = `${lenRefMatch[1]}_${lenRefMatch[2]}`;
+        if (indirectLengths.has(refKey)) {
+          declaredLen = indirectLengths.get(refKey);
+        }
+      } else if (lenDirectMatch) {
+        declaredLen = parseInt(lenDirectMatch[1], 10);
+      }
 
-      let dataEnd = endStreamIdx;
-      const lenMatch = dictText.match(/\/Length\s+(\d+)/);
-      if (lenMatch) {
-        const declaredLen = parseInt(lenMatch[1], 10);
-        if (dataStart + declaredLen <= endStreamIdx) {
+      let dataEnd = -1;
+      if (declaredLen > 0 && dataStart + declaredLen <= u8.length) {
+        // Verify 'endstream' is near dataStart + declaredLen; if not, scan forward to actual endstream
+        const tailCheck = asciiSlice(u8, dataStart + declaredLen, Math.min(u8.length, dataStart + declaredLen + 32));
+        if (tailCheck.includes('endstream')) {
           dataEnd = dataStart + declaredLen;
         }
-      } else {
-        while (dataEnd > dataStart && (u8[dataEnd - 1] === 10 || u8[dataEnd - 1] === 13)) {
-          dataEnd--;
+      }
+      if (dataEnd === -1) {
+        const endStreamIdx = pdfLatin1.indexOf('endstream', dataStart);
+        if (endStreamIdx === -1) break;
+        dataEnd = endStreamIdx;
+        if (u8[dataEnd - 2] === 13 && u8[dataEnd - 1] === 10) dataEnd -= 2;
+        else if (u8[dataEnd - 1] === 10 || u8[dataEnd - 1] === 13) dataEnd -= 1;
+      }
+
+      const is3DDict =
+        /\/Subtype\s*\/U3D\b/i.test(dictStr) ||
+        /\/Subtype\s*\/PRC\b/i.test(dictStr) ||
+        /\/Type\s*\/3D\b/i.test(dictStr);
+
+      const hasFlate = /\/Filter\s*(?:\[\s*)?\/FlateDecode\b/i.test(dictStr);
+      const rawSlice = u8.subarray(dataStart, dataEnd);
+
+      if (is3DDict || rawSlice.length > 24) {
+        let candidateBytes = null;
+        let filterLabel = hasFlate ? 'FlateDecode' : 'Uncompressed';
+
+        if (!hasFlate && rawSlice.length >= 4) {
+          const head4 = asciiSlice(rawSlice, 0, 4);
+          if (head4.startsWith('U3D') || head4.startsWith('PRC')) {
+            candidateBytes = rawSlice;
+          }
+        }
+
+        if (!candidateBytes && (is3DDict || hasFlate)) {
+          try {
+            const inflated = await inflateFlateStream(rawSlice);
+            if (inflated && inflated.length >= 4) {
+              const head4 = asciiSlice(inflated, 0, 4);
+              if (head4.startsWith('U3D') || head4.startsWith('PRC')) {
+                candidateBytes = inflated;
+                filterLabel = 'FlateDecode';
+              }
+            }
+          } catch (_) {
+            // Not a valid Flate 3D stream
+          }
+        }
+
+        if (candidateBytes) {
+          const magic = asciiSlice(candidateBytes, 0, 3);
+          const subtype = magic === 'PRC' ? 'PRC' : 'U3D';
+          streams.push({
+            index: streamIdx++,
+            subtype,
+            filter: filterLabel,
+            compressedLength: rawSlice.length,
+            rawBytes: candidateBytes,
+            title: `3D Stream #${streamIdx} (${subtype})`
+          });
         }
       }
 
-      const rawSlice = u8.subarray(dataStart, dataEnd);
-      const isFlate = /\/FlateDecode\b/.test(dictText);
-      const decodedBytes = isFlate ? await inflateFlateStream(rawSlice) : rawSlice;
-
-      let subtype = 'U3D';
-      const stMatch = dictText.match(/\/Subtype\s*\/([A-Za-z0-9_]+)/);
-      if (stMatch) subtype = stMatch[1].toUpperCase();
-      const decMagic = asciiSlice(decodedBytes, 0, 4);
-      if (decMagic === 'U3D\0') subtype = 'U3D';
-      else if (decMagic.startsWith('PRC')) subtype = 'PRC';
-
-      streams.push({
-        id: `Obj-${objNum}-${subtype}`,
-        objNum,
-        subtype,
-        filter: isFlate ? 'FlateDecode' : 'Raw',
-        compressedLength: rawSlice.length,
-        rawBytes: decodedBytes,
-        title: `PDF Object ${objNum} (/Subtype /${subtype})`
-      });
+      searchPos = Math.max(dataEnd + 9, streamTokenIdx + 6);
     }
 
     return streams;
   }
 
   // -------------------------------------------------------------------------
-  // 3. ECMA-363 (U3D) Binary Stream Decoder
+  // 3. ECMA-363 (U3D) Binary & Arithmetic Range Bitstream Decoder
   // -------------------------------------------------------------------------
+  const U3D_HALF_MASK = [
+    0x00000000, 0x00000001, 0x00000003, 0x00000007,
+    0x0000000f, 0x0000001f, 0x0000003f, 0x0000007f,
+    0x000000ff, 0x000001ff, 0x000003ff, 0x000007ff,
+    0x00000fff, 0x00001fff, 0x00003fff, 0x00007fff,
+    0x0000ffff
+  ];
+  const U3D_NOT_HALF_MASK = [
+    0xffffffff, 0xfffffffe, 0xfffffffc, 0xfffffff8,
+    0xfffffff0, 0xffffffe0, 0xffffffc0, 0xffffff80,
+    0xffffff00, 0xfffffe00, 0xfffffc00, 0xfffff800,
+    0xfffff000, 0xffffe000, 0xffffc000, 0xffff8000,
+    0xffff0000
+  ];
+  const U3D_SWAP8 = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
+  const U3D_READ_COUNT = [4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+  const U3D_FAST_NOT_MASK = [0xffffffff, 0xffff7fff, 0xffff3fff, 0xffff1fff, 0xffff0fff];
+
+  const U3D_AC_STATIC_FULL = 0x00000400;
+  const U3D_CTX_BASE_SHADING_ID = 1;
+  const U3D_CTX_SPLIT_POS_INDEX = 2; // uACContextNewPositionDiffMag = 2? No, see below
+
+  // Exact ECMA-363 context IDs from Intel U3D IFXACContext.h
+  const U3D_CTX = {
+    BaseShadingID: 1,
+    NewPosDiffSign: 2,
+    NewPosDiffMagX: 3,
+    NewPosDiffMagY: 4,
+    NewPosDiffMagZ: 5,
+    NewNormalCnt: 6,
+    NewNormalDiffSign: 7,
+    NewNormalDiffMagX: 8,
+    NewNormalDiffMagY: 9,
+    NewNormalDiffMagZ: 10,
+    NewFacesCount: 11,
+    OrientChange: 12,
+    FaceType: 13,
+    ShadingChange: 14,
+    NewShadingID: 15,
+    DupCornerIndex: 16,
+    NormalLocalIndex: 17,
+    DiffColorSign: 18,
+    DiffColorMagR: 19,
+    DiffColorMagG: 20,
+    DiffColorMagB: 21,
+    DiffColorMagA: 22,
+    SpecColorSign: 23,
+    SpecColorMagR: 24,
+    SpecColorMagG: 25,
+    SpecColorMagB: 26,
+    SpecColorMagA: 27,
+    TexCoordSign: 28,
+    TexCoordMagU: 29,
+    TexCoordMagV: 30,
+    TexCoordMagS: 31,
+    TexCoordMagT: 32,
+    StayOrMove: 33,
+    PositionDiffSign: 34,
+    PositionDiffMagX: 35,
+    PositionDiffMagY: 36,
+    PositionDiffMagZ: 37,
+    NormalDiffSign: 38,
+    NormalDiffMagX: 39,
+    NormalDiffMagY: 40,
+    NormalDiffMagZ: 41,
+    DiffColorSplitIndex: 42,
+    SpecColorSplitIndex: 43,
+    TexCoordSplitIndex: 44,
+    ColorLocalIndex: 45,
+    TexCoordLocalIndex: 46,
+    NumLocalNormals: 6
+  };
+
+  class U3DHistogram {
+    constructor(symbolLimit = 0x10000) {
+      this.symbolLimit = symbolLimit;
+      this.freq = new Uint16Array(256);
+      this.cum = new Uint32Array(257);
+      // Symbol 0 (Escape) starts with frequency 1 per ECMA-363 Section 8.2.5
+      this.freq[0] = 1;
+      this.totalCount = 1;
+      for (let i = 1; i <= 256; i++) this.cum[i] = 1;
+    }
+
+    ensureCapacity(sym) {
+      if (sym < this.freq.length) return;
+      let newLen = this.freq.length;
+      const oldLen = this.freq.length;
+      while (newLen <= sym) newLen *= 2;
+      const nf = new Uint16Array(newLen);
+      nf.set(this.freq);
+      this.freq = nf;
+      const nc = new Uint32Array(newLen + 1);
+      nc.set(this.cum);
+      for (let i = oldLen + 1; i <= newLen; i++) {
+        nc[i] = this.totalCount;
+      }
+      this.cum = nc;
+    }
+
+    addSymbolValue(symbol) {
+      if (symbol >= this.symbolLimit) return;
+      this.ensureCapacity(symbol);
+      if (this.totalCount >= 0x1fff) {
+        let total = 0;
+        for (let i = 0; i < this.freq.length; i++) {
+          this.cum[i] = total;
+          if (this.freq[i] > 0) {
+            this.freq[i] = (this.freq[i] >> 1) | 1;
+            total += this.freq[i];
+          }
+        }
+        this.totalCount = total;
+        this.cum[this.freq.length] = total;
+      }
+      this.freq[symbol] += 1;
+      this.totalCount += 1;
+      for (let i = symbol + 1; i <= this.freq.length; i++) {
+        this.cum[i] += 1;
+      }
+    }
+
+    getTotalSymbolFreq() {
+      return this.totalCount;
+    }
+
+    getSymbolFreq(symbol) {
+      if (symbol < 0 || symbol >= this.freq.length) return 0;
+      return this.freq[symbol];
+    }
+
+    getCumSymbolFreq(symbol) {
+      if (symbol <= 0) return 0;
+      if (symbol >= this.freq.length) return this.totalCount;
+      return this.cum[symbol];
+    }
+
+    getSymbolFromFreq(cumFreq) {
+      if (cumFreq >= this.totalCount) return this.freq.length - 1;
+      let lo = 0;
+      let hi = this.freq.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (this.cum[mid] <= cumFreq) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    }
+  }
+
   class U3DBitStreamReader {
-    constructor(u8, offset, length, noCompression) {
-      this.u8 = u8;
-      this.baseOffset = offset;
-      this.pos = offset;
-      this.end = offset + length;
+    constructor(u8, startOffset = 0, byteLen = u8.length - startOffset, noCompression = false) {
       this.noCompression = !!noCompression;
+      this.u8 = u8;
+      this.startOffset = startOffset;
+      this.byteLen = byteLen;
+
+      const wordCount = Math.ceil((byteLen + 16) / 4);
+      this.data = new Uint32Array(wordCount);
+      for (let i = 0; i < byteLen; i++) {
+        this.data[i >> 2] |= (u8[startOffset + i] << ((i & 3) << 3));
+      }
+
+      this.bitPos = 0;
+      this.high = 0x0000ffff;
+      this.low = 0x00000000;
+      this.underflowCount = 0;
+      this.contexts = new Map();
     }
-    remaining() {
-      return Math.max(0, this.end - this.pos);
+
+    get bytePos() {
+      return this.startOffset + (this.bitPos >>> 3);
     }
+
+    seek(absOffset) {
+      const rel = Math.max(0, absOffset - this.startOffset);
+      this.bitPos = rel << 3;
+      this.high = 0x0000ffff;
+      this.low = 0x00000000;
+      this.underflowCount = 0;
+    }
+
+    alignToByte() {
+      this.bitPos = (this.bitPos + 7) & ~7;
+    }
+
+    alignTo4Byte() {
+      this.bitPos = (this.bitPos + 31) & ~31;
+    }
+
+    align4() {
+      this.alignTo4Byte();
+    }
+
+    peekBitAt(bp) {
+      const w = this.data[bp >>> 5] || 0;
+      return (w >>> (bp & 31)) & 1;
+    }
+
+    readBit() {
+      const b = this.peekBitAt(this.bitPos);
+      this.bitPos += 1;
+      return b >>> 0;
+    }
+
+    peekCode16() {
+      let code = this.peekBitAt(this.bitPos) << 15;
+      let p = this.bitPos + 1 + this.underflowCount;
+      for (let i = 14; i >= 0; i--) {
+        code |= (this.peekBitAt(p++) << i);
+      }
+      return code >>> 0;
+    }
+
+    getContext(ctxId) {
+      let h = this.contexts.get(ctxId);
+      if (!h) {
+        h = new U3DHistogram();
+        this.contexts.set(ctxId, h);
+      }
+      return h;
+    }
+
+    readSymbol(context) {
+      if (this.noCompression || !context || context === 0x3fffffff) {
+        return this.readBit();
+      }
+      let uValue = 0;
+      if (context >= U3D_AC_STATIC_FULL) {
+        const totalSymbols = context - U3D_AC_STATIC_FULL;
+        if (totalSymbols <= 1) return 1;
+        const code = this.peekCode16();
+        const temp = (this.high + 1 - this.low) >>> 0;
+        uValue = Math.floor((((code - this.low + 1) * totalSymbols - 1) / temp)) + 1;
+        if (uValue < 1) uValue = 1;
+        if (uValue > totalSymbols) uValue = totalSymbols;
+        this.high = (this.low + Math.floor((temp * uValue) / totalSymbols) - 1) & 0xffff;
+        this.low = (this.low + Math.floor((temp * (uValue - 1)) / totalSymbols)) & 0xffff;
+      } else {
+        const hist = this.getContext(context);
+        const totalCumFreq = hist.getTotalSymbolFreq();
+        if (totalCumFreq <= 1) {
+          hist.addSymbolValue(0);
+          return 0;
+        }
+        const code = this.peekCode16();
+        const range = (this.high + 1 - this.low) >>> 0;
+        const codeCumFreq = Math.floor(((totalCumFreq * (code - this.low + 1) - 1) / range));
+        uValue = hist.getSymbolFromFreq(codeCumFreq >= 0 ? codeCumFreq : 0);
+        const symbolCumFreq = hist.getCumSymbolFreq(uValue);
+        const symbolFreq = hist.getSymbolFreq(uValue);
+        this.high = (this.low + Math.floor((range * (symbolCumFreq + symbolFreq)) / totalCumFreq) - 1) & 0xffff;
+        this.low = (this.low + Math.floor((range * symbolCumFreq) / totalCumFreq)) & 0xffff;
+        hist.addSymbolValue(uValue);
+      }
+
+      let shifted = false;
+      while (((this.high ^ this.low) & 0x8000) === 0) {
+        if (!shifted) {
+          this.bitPos += 1 + this.underflowCount;
+          this.underflowCount = 0;
+          shifted = true;
+        } else {
+          this.bitPos += 1;
+        }
+        this.low = (this.low << 1) & 0xffff;
+        this.high = ((this.high << 1) | 1) & 0xffff;
+      }
+      while (((~this.high & this.low) & 0x4000) !== 0) {
+        this.underflowCount += 1;
+        this.low = (this.low << 1) & 0x7fff;
+        this.high = ((this.high << 1) & 0x7fff) | 0x8001;
+      }
+      return uValue >>> 0;
+    }
+
+    swapBits8(rValue) {
+      return (U3D_SWAP8[rValue & 0xf] << 4) | U3D_SWAP8[(rValue >>> 4) & 0xf];
+    }
+
+    readBitCount(count) {
+      let value = 0;
+      for (let i = 0; i < count; i++) {
+        value |= (this.readBit() << i);
+      }
+      return value >>> 0;
+    }
+
     u8Val() {
-      if (this.pos >= this.end) return 0;
-      return this.u8[this.pos++];
+      if (this.noCompression) {
+        return this.readBitCount(8);
+      }
+      const sym = this.readSymbol(U3D_AC_STATIC_FULL + 0x100);
+      return this.swapBits8((sym - 1) & 0xff) >>> 0;
     }
+
     u16() {
-      if (this.pos + 2 > this.end) { this.pos = this.end; return 0; }
-      const v = this.u8[this.pos] | (this.u8[this.pos + 1] << 8);
-      this.pos += 2;
-      return v >>> 0;
+      const low = this.u8Val();
+      const high = this.u8Val();
+      return (low | (high << 8)) >>> 0;
     }
+
     i16() {
       const v = this.u16();
-      return v & 0x8000 ? v - 0x10000 : v;
+      return v >= 0x8000 ? v - 0x10000 : v;
     }
+
     u32() {
-      if (this.pos + 4 > this.end) { this.pos = this.end; return 0; }
-      const v = (
-        this.u8[this.pos] |
-        (this.u8[this.pos + 1] << 8) |
-        (this.u8[this.pos + 2] << 16) |
-        (this.u8[this.pos + 3] * 0x1000000)
-      );
-      this.pos += 4;
-      return v >>> 0;
+      const low = this.u16();
+      const high = this.u16();
+      return ((low | (high << 16)) >>> 0);
     }
+
+    i32() {
+      return this.u32() | 0;
+    }
+
     u64() {
       const lo = this.u32();
       const hi = this.u32();
       return lo + hi * 4294967296;
     }
+
     f32() {
-      if (this.pos + 4 > this.end) { this.pos = this.end; return 0; }
-      const dv = new DataView(this.u8.buffer, this.u8.byteOffset + this.pos, 4);
-      this.pos += 4;
+      const bits = this.u32();
+      const buf = new ArrayBuffer(4);
+      const dv = new DataView(buf);
+      dv.setUint32(0, bits, true);
       return dv.getFloat32(0, true);
     }
+
     f64() {
-      if (this.pos + 8 > this.end) { this.pos = this.end; return 0; }
-      const dv = new DataView(this.u8.buffer, this.u8.byteOffset + this.pos, 8);
-      this.pos += 8;
+      const lo = this.u32();
+      const hi = this.u32();
+      const buf = new ArrayBuffer(8);
+      const dv = new DataView(buf);
+      dv.setUint32(0, lo, true);
+      dv.setUint32(4, hi, true);
       return dv.getFloat64(0, true);
     }
+
+    readCompressedU32(context) {
+      if (this.noCompression || !context || context === 0x3fffffff) return this.u32();
+      if (context < U3D_AC_STATIC_FULL) {
+        const symbol = this.readSymbol(context);
+        if (symbol !== 0) {
+          return (symbol - 1) >>> 0;
+        }
+        const val = this.u32();
+        this.getContext(context).addSymbolValue(val + 1);
+        return val >>> 0;
+      } else {
+        const symbol = this.readSymbol(context);
+        return symbol !== 0 ? (symbol - 1) >>> 0 : this.u32();
+      }
+    }
+
+    readCompressedU16(context) {
+      if (this.noCompression || !context || context === 0x3fffffff) return this.u16();
+      if (context < U3D_AC_STATIC_FULL) {
+        const symbol = this.readSymbol(context);
+        if (symbol !== 0) {
+          return (symbol - 1) & 0xffff;
+        }
+        const val = this.u16();
+        this.getContext(context).addSymbolValue(val + 1);
+        return val & 0xffff;
+      } else {
+        const symbol = this.readSymbol(context);
+        return symbol !== 0 ? (symbol - 1) & 0xffff : this.u16();
+      }
+    }
+
+    readCompressedU8(context) {
+      if (this.noCompression || !context || context === 0x3fffffff) return this.u8Val();
+      if (context < U3D_AC_STATIC_FULL) {
+        const symbol = this.readSymbol(context);
+        if (symbol !== 0) {
+          return (symbol - 1) & 0xff;
+        }
+        const val = this.u8Val();
+        this.getContext(context).addSymbolValue(val + 1);
+        return val & 0xff;
+      } else {
+        const symbol = this.readSymbol(context);
+        return symbol !== 0 ? (symbol - 1) & 0xff : this.u8Val();
+      }
+    }
+
     str() {
       const len = this.u16();
-      if (this.pos + len > this.end) {
-        this.pos = this.end;
-        return '';
-      }
-      let out = '';
+      if (len === 0 || len > 4096) return "";
+      const bytes = new Uint8Array(len);
       for (let i = 0; i < len; i++) {
-        out += String.fromCharCode(this.u8[this.pos + i]);
+        bytes[i] = this.u8Val();
       }
-      this.pos += len;
-      return out;
+      return new TextDecoder("utf-8").decode(bytes);
     }
-    align4() {
-      const rel = this.pos - this.baseOffset;
-      const pad = (4 - (rel % 4)) % 4;
-      this.pos = Math.min(this.end, this.pos + pad);
+  }
+
+  function pad4(n) {
+    return (n + 3) & ~3;
+  }
+
+  function blockTypeName(t) {
+    const map = {
+      0x00443355: 'FileHeader (U3D)',
+      0xFFFFFF12: 'FileReference',
+      0xFFFFFF14: 'ModifierChain / ViewNode',
+      0xFFFFFF15: 'PriorityUpdate',
+      0xFFFFFF16: 'NewObjectType',
+      0xFFFFFF21: 'GroupNode',
+      0xFFFFFF22: 'ModelNode',
+      0xFFFFFF23: 'LightNode',
+      0xFFFFFF24: 'ViewNode',
+      0xFFFFFF31: 'CLODMeshDeclaration',
+      0xFFFFFF36: 'PointSetDeclaration',
+      0xFFFFFF37: 'LineSetDeclaration',
+      0xFFFFFF3B: 'CLODBaseMeshContinuation',
+      0xFFFFFF3C: 'CLODProgressiveMeshContinuation',
+      0xFFFFFF3E: 'PointSetContinuation',
+      0xFFFFFF3F: 'LineSetContinuation',
+      0xFFFFFF45: 'ShadingModifier',
+      0xFFFFFF46: 'CLODModifier',
+      0xFFFFFF51: 'LightResource',
+      0xFFFFFF52: 'ViewResource',
+      0xFFFFFF53: 'LitTextureShader',
+      0xFFFFFF54: 'MaterialResource',
+      0xFFFFFF55: 'TextureDeclaration',
+      0xFFFFFF5C: 'TextureContinuation'
+    };
+    return map[t >>> 0] || `0x${(t >>> 0).toString(16).toUpperCase()}`;
+  }
+
+  // 4x4 Column-Major Matrix Helpers for ECMA-363 Scene Graph Transforms
+  function identityMat4() {
+    return [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1
+    ];
+  }
+
+  function multiplyMat4(a, b) {
+    const out = new Array(16).fill(0);
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 4; row++) {
+        out[col * 4 + row] =
+          a[0 * 4 + row] * b[col * 4 + 0] +
+          a[1 * 4 + row] * b[col * 4 + 1] +
+          a[2 * 4 + row] * b[col * 4 + 2] +
+          a[3 * 4 + row] * b[col * 4 + 3];
+      }
+    }
+    return out;
+  }
+
+  function transformPointMat4(pt, m) {
+    const [x, y, z] = pt;
+    return [
+      m[0] * x + m[4] * y + m[8] * z + m[12],
+      m[1] * x + m[5] * y + m[9] * z + m[13],
+      m[2] * x + m[6] * y + m[10] * z + m[14]
+    ];
+  }
+
+  function mat4Determinant3x3(m) {
+    return (
+      m[0] * (m[5] * m[10] - m[9] * m[6]) -
+      m[4] * (m[1] * m[10] - m[9] * m[2]) +
+      m[8] * (m[1] * m[6] - m[5] * m[2])
+    );
+  }
+
+  // Author CLOD Mesh Adjacency Tracker for 0xFFFFFF3C Progressive Mesh Continuation
+  class U3DCLODProgressiveMesh {
+    constructor(positions, faces, faceShadingIds, normals = [], faceNormalIndices = []) {
+      this.positions = positions;
+      this.faces = faces;
+      this.faceShadingIds = faceShadingIds;
+      this.normals = normals;
+      this.faceNormalIndices = faceNormalIndices;
+      this.posToFaces = positions.map(() => []);
+      faces.forEach((f, fIdx) => {
+        for (const v of f) {
+          if (this.posToFaces[v] && !this.posToFaces[v].includes(fIdx)) {
+            this.posToFaces[v].push(fIdx);
+          }
+        }
+      });
+    }
+
+    addPos(xyz) {
+      const idx = this.positions.length;
+      this.positions.push(xyz);
+      this.posToFaces.push([]);
+      return idx;
+    }
+
+    addFace(a, b, c, shId = 0, na = 0, nb = 0, nc = 0) {
+      const fIdx = this.faces.length;
+      this.faces.push([a, b, c]);
+      this.faceShadingIds.push(shId);
+      this.faceNormalIndices.push([na, nb, nc]);
+      for (const v of [a, b, c]) {
+        if (!this.posToFaces[v]) this.posToFaces[v] = [];
+        if (!this.posToFaces[v].includes(fIdx)) {
+          this.posToFaces[v].push(fIdx);
+          // Keep CIFXSetX descending order (Wait: CIFXSetX sorts ascending in m_pMemberData[0..size-1]! Let's check below)
+          this.posToFaces[v].sort((x, y) => y - x);
+        }
+      }
+      return fIdx;
+    }
+
+    replaceFaceVertex(fIdx, oldV, newV) {
+      const f = this.faces[fIdx];
+      if (!f) return;
+      for (let k = 0; k < 3; k++) {
+        if (f[k] === oldV) f[k] = newV;
+      }
+      const oldSet = this.posToFaces[oldV];
+      if (oldSet) {
+        const pos = oldSet.indexOf(fIdx);
+        if (pos !== -1) oldSet.splice(pos, 1);
+      }
+      if (!this.posToFaces[newV]) this.posToFaces[newV] = [];
+      if (!this.posToFaces[newV].includes(fIdx)) {
+        this.posToFaces[newV].push(fIdx);
+        this.posToFaces[newV].sort((x, y) => y - x);
+      }
+    }
+
+    getMoveFaceSet(splitPosIdx, stayOrMoveArr) {
+      const faceSet = this.posToFaces[splitPosIdx] ? [...this.posToFaces[splitPosIdx]] : [];
+      const moveFaces = [];
+      for (let i = 0; i < faceSet.length; i++) {
+        if (stayOrMoveArr[i] === 1) moveFaces.push(faceSet[i]);
+      }
+      return moveFaces;
     }
   }
 
   function parseU3DStream(u8) {
-    const blocks = [];
-    const nodes = [];
-    const meshDecls = new Map();
-    const parts = [];
+    if (u8.length < 24 || asciiSlice(u8, 0, 3) !== 'U3D') {
+      throw new Error('Invalid U3D header signature');
+    }
+
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let offset = 0;
+
     let profileId = 0;
-    let unitsScalingFactor = 0.001; // default mm
+    let unitsScalingFactor = 1.0;
+    let noCompression = false;
 
-    function walkBlocks(startOffset, endOffset, inModifierChain = false) {
-      let ptr = startOffset;
-      while (ptr + 12 <= endOffset) {
-        const dv = new DataView(u8.buffer, u8.byteOffset + ptr, 12);
-        const blockType = dv.getUint32(0, true);
-        const dataSize = dv.getUint32(4, true);
-        const metaSize = dv.getUint32(8, true);
+    const blocks = [];
+    const nodesByName = new Map();
+    const modelNodes = [];
+    const shadingModifiers = new Map();
+    const shaderLists = new Map();
+    const materials = new Map();
+    const meshDecls = new Map();
+    const meshes = new Map();
 
-        const dataStart = ptr + 12;
-        const paddedDataSize = dataSize + ((4 - (dataSize % 4)) % 4);
-        const metaStart = dataStart + paddedDataSize;
-        const paddedMetaSize = metaSize + ((4 - (metaSize % 4)) % 4);
-        const nextPtr = metaStart + paddedMetaSize;
+    // Parse a single U3D block at [dataStart, dataStart + dataSize)
+    function parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, blockOffset, isNested = false) {
+      blocks.push({
+        blockType,
+        name: blockTypeName(blockType),
+        dataSize,
+        metaSize,
+        offset: blockOffset,
+        nested: isNested
+      });
 
-        if (nextPtr > endOffset || dataStart + dataSize > endOffset) break;
+      const r = new U3DBitStreamReader(u8, dataStart, dataSize, noCompression);
 
-        blocks.push({ blockType, dataSize, metaSize, offset: ptr });
-
-        const r = new U3DBitStreamReader(u8, dataStart, dataSize, (profileId & 4) !== 0);
-
-        // Parse Metadata for Material name if present
-        let metaMaterial = null;
-        if (metaSize >= 8) {
-          try {
-            const mr = new U3DBitStreamReader(u8, metaStart, metaSize, true);
-            const kvCount = mr.u32();
-            if (kvCount > 0 && kvCount < 32) {
-              const attr = mr.u32();
-              const k = mr.str();
-              const v = mr.str();
-              if (k === 'Material' && v) metaMaterial = v;
-            }
-          } catch (_) {}
+      if (blockType === 0x00443355) {
+        const majorVersion = r.i16();
+        const minorVersion = r.i16();
+        profileId = r.u32();
+        const declSize = r.u32();
+        const fileSize = r.u64();
+        const charEncoding = r.u32();
+        if ((profileId & 8) !== 0 && dataSize >= 32) {
+          unitsScalingFactor = r.f64();
         }
-
-        if (blockType === 0x00443355) {
-          // File Header ("U3D\0")
-          const major = r.i16();
-          const minor = r.i16();
-          profileId = r.u32();
-          const declSize = r.u32();
-          const fileSize = r.u64();
-          const charEnc = r.u32();
-          if (profileId & 0x00000008) {
-            unitsScalingFactor = r.f64();
-          }
-        } else if (blockType === 0xFFFFFF14) {
-          // Modifier Chain
+        noCompression = (profileId & 4) !== 0;
+        void majorVersion; void minorVersion; void declSize; void fileSize; void charEncoding;
+      } else if (blockType === 0xFFFFFF14) {
+        // ECMA-363 Section 9.4.3: Modifier Chain (0xFFFFFF14)
+        // Also gracefully ignores synthetic ViewNode blocks if not a valid Modifier Chain
+        try {
           const chainName = r.str();
           const chainType = r.u32();
-          const attributes = r.u32();
-          if (attributes & 1) { r.f32(); r.f32(); r.f32(); r.f32(); }
-          if (attributes & 2) { r.f32(); r.f32(); r.f32(); r.f32(); r.f32(); r.f32(); }
-          r.align4();
-          const modCount = r.u32();
-          walkBlocks(r.pos, dataStart + dataSize, true);
-        } else if (blockType === 0xFFFFFF22) {
-          // Model Node
-          const nodeName = r.str();
-          const parentCount = r.u32();
-          let parentName = '';
-          const transform = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
-          for (let p = 0; p < parentCount; p++) {
-            parentName = r.str();
-            for (let m = 0; m < 16; m++) transform[m] = r.f32();
-          }
-          const resourceName = r.str();
-          const visibility = r.u32();
-          nodes.push({ nodeName, parentName, resourceName, transform, visibility });
-        } else if (blockType === 0xFFFFFF31) {
-          // CLOD Mesh Declaration
-          const meshName = r.str();
-          const chainIndex = r.u32();
-          const meshAttrs = r.u32();
-          const faceCount = r.u32();
-          const posCount = r.u32();
-          const normCount = r.u32();
-          const diffCount = r.u32();
-          const specCount = r.u32();
-          const texCount = r.u32();
-          const shadingCount = r.u32();
-          const shaders = [];
-          for (let s = 0; s < shadingCount; s++) {
-            const shAttr = r.u32();
-            const texLayerCount = r.u32();
-            const dims = [];
-            for (let t = 0; t < texLayerCount; t++) dims.push(r.u32());
-            const origId = r.u32();
-            shaders.push({ shAttr, texLayerCount, dims, origId });
-          }
-          meshDecls.set(meshName, {
-            meshName, meshAttrs, faceCount, posCount, normCount,
-            diffCount, specCount, texCount, shaders,
-            materialName: metaMaterial || 'CAD_Solid_Material'
-          });
-        } else if (blockType === 0xFFFFFF3B) {
-          // CLOD Base Mesh Continuation
-          const meshName = r.str();
-          const chainIndex = r.u32();
-          const baseFaceCount = r.u32();
-          const basePosCount = r.u32();
-          const baseNormCount = r.u32();
-          const baseDiffCount = r.u32();
-          const baseSpecCount = r.u32();
-          const baseTexCount = r.u32();
-
-          const positions = [];
-          for (let i = 0; i < basePosCount; i++) {
-            positions.push([r.f32(), r.f32(), r.f32()]);
-          }
-          const normals = [];
-          for (let i = 0; i < baseNormCount; i++) {
-            normals.push([r.f32(), r.f32(), r.f32()]);
-          }
-          for (let i = 0; i < baseDiffCount * 4; i++) r.f32();
-          for (let i = 0; i < baseSpecCount * 4; i++) r.f32();
-          for (let i = 0; i < baseTexCount * 4; i++) r.f32();
-
-          const decl = meshDecls.get(meshName) || { meshAttrs: 0, shaders: [{ shAttr: 0, texLayerCount: 0 }] };
-          const excludeNormals = (decl.meshAttrs & 1) !== 0;
-
-          const faces = [];
-          for (let f = 0; f < baseFaceCount; f++) {
-            const shadingId = r.u32();
-            const sh = decl.shaders[shadingId] || { shAttr: 0, texLayerCount: 0 };
-            const idx = [];
-            for (let c = 0; c < 3; c++) {
-              const pIdx = r.u32();
-              if (!excludeNormals && baseNormCount > 0) r.u32();
-              if (sh.shAttr & 1) r.u32();
-              if (sh.shAttr & 2) r.u32();
-              for (let t = 0; t < sh.texLayerCount; t++) r.u32();
-              idx.push(Math.min(Math.max(0, pIdx), Math.max(0, positions.length - 1)));
+          const chainAttrs = r.u32();
+          if (chainType <= 2 && (chainAttrs & ~3) === 0) {
+            if ((chainAttrs & 1) !== 0) {
+              r.f32(); r.f32(); r.f32(); r.f32();
             }
-            faces.push(idx);
+            if ((chainAttrs & 2) !== 0) {
+              for (let i = 0; i < 6; i++) r.f32();
+            }
+            r.alignTo4Byte();
+            const modCount = r.u32();
+            let subOff = r.bytePos;
+            const chainEnd = dataStart + dataSize;
+            if (modCount >= 1 && modCount <= 256 && subOff + 12 <= chainEnd) {
+              const firstSubType = dv.getUint32(subOff, true);
+              if ((firstSubType >>> 8) === 0x00ffffff) {
+                for (let m = 0; m < modCount && subOff + 12 <= chainEnd; m++) {
+                  const subType = dv.getUint32(subOff, true);
+                  const subDataSize = dv.getUint32(subOff + 4, true);
+                  const subMetaSize = dv.getUint32(subOff + 8, true);
+                  const subDataStart = subOff + 12;
+                  const subMetaStart = subDataStart + pad4(subDataSize);
+                  const subNext = subMetaStart + pad4(subMetaSize);
+                  if (subNext > chainEnd + 4) break;
+                  parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true);
+                  subOff = subNext;
+                }
+              }
+            }
           }
+          void chainName;
+        } catch (_) {
+          // Ignore malformed/synthetic 0xFFFFFF14 block
+        }
+      } else if (blockType === 0xFFFFFF21) {
+        // Group Node
+        const nodeName = r.str();
+        const parentCount = r.u32();
+        let parentName = '';
+        let localMatrix = identityMat4();
+        for (let p = 0; p < parentCount; p++) {
+          const pName = r.str();
+          const mat = [];
+          for (let m = 0; m < 16; m++) mat.push(r.f32());
+          if (p === 0) {
+            parentName = pName;
+            localMatrix = mat;
+          }
+        }
+        nodesByName.set(nodeName, { nodeName, parentName, localMatrix, type: 'GROUP' });
+      } else if (blockType === 0xFFFFFF22) {
+        // Model Node
+        const nodeName = r.str();
+        const parentCount = r.u32();
+        let parentName = '';
+        let localMatrix = identityMat4();
+        for (let p = 0; p < parentCount; p++) {
+          const pName = r.str();
+          const mat = [];
+          for (let m = 0; m < 16; m++) mat.push(r.f32());
+          if (p === 0) {
+            parentName = pName;
+            localMatrix = mat;
+          }
+        }
+        const resourceName = r.str();
+        const visibility = r.u32();
+        const nodeObj = { nodeName, parentName, localMatrix, resourceName, visibility, type: 'MODEL' };
+        nodesByName.set(nodeName, nodeObj);
+        modelNodes.push(nodeObj);
+      } else if (blockType === 0xFFFFFF45) {
+        // Shading Modifier (ECMA-363 Section 9.7.5)
+        const modName = r.str();
+        r.u32(); // chainIndex
+        r.u32(); // shadingAttributes
+        const shaderListCount = r.u32();
+        const shaders = [];
+        for (let i = 0; i < shaderListCount; i++) {
+          const shCount = r.u32();
+          for (let j = 0; j < shCount; j++) {
+            shaders.push(r.str());
+          }
+        }
+        if (shaders.length > 0) {
+          shadingModifiers.set(modName, shaders[0]);
+        }
+      } else if (blockType === 0xFFFFFF53) {
+        // Lit Texture Shader (ECMA-363 Section 9.8.3) or synthetic Shader List
+        const shaderName = r.str();
+        const remBytes = (dataStart + dataSize) - r.bytePos;
+        let matName = '';
+        // Check if synthetic sample format (3x U32 = 12B, then u32 shCount=1, then str)
+        const posAfterName = r.bytePos;
+        const u0 = r.u32();
+        const u1 = r.u32();
+        const u2 = r.u32();
+        if (u0 === 0 && u1 === 1 && u2 === 1 && remBytes < 30) {
+          const shCount = r.u32();
+          if (shCount > 0) matName = r.str();
+        } else {
+          // Standard ECMA-363 9.8.3 Lit Texture Shader: 7 x 32-bit fields (28 bytes) before Material Name
+          r.seek(posAfterName + 28);
+          if (r.bytePos + 2 <= dataStart + dataSize) {
+            matName = r.str();
+          }
+        }
+        shaderLists.set(shaderName, matName);
+      } else if (blockType === 0xFFFFFF54) {
+        // Material Resource (ECMA-363 Section 9.8.4)
+        const matName = r.str();
+        const matAttributes = r.u32();
+        const ar = r.f32(), ag = r.f32(), ab = r.f32();
+        const dr = r.f32(), dg = r.f32(), db = r.f32();
+        materials.set(matName, {
+          matName,
+          matAttributes,
+          ambient: [ar, ag, ab],
+          color: [dr, dg, db]
+        });
+      } else if (blockType === 0xFFFFFF31) {
+        // CLOD Mesh Generator Declaration (ECMA-363 Section 9.6.1.1)
+        const meshName = r.str();
+        const chainIdx = r.u32();
+        const meshAttrs = r.u32();
+        const faceCount = r.u32();
+        const posCount = r.u32();
+        const normCount = r.u32();
+        const diffCount = r.u32();
+        const specCount = r.u32();
+        const texCount = r.u32();
+        const numShading = r.u32();
+        const shadings = [];
+        for (let s = 0; s < numShading; s++) {
+          const shAttr = r.u32();
+          const texLayerCount = r.u32();
+          const texDims = [];
+          for (let t = 0; t < texLayerCount; t++) texDims.push(r.u32());
+          const origShadingId = r.u32();
+          shadings.push({ shAttr, texLayerCount, texDims, origShadingId });
+        }
+        let minResolution = posCount;
+        let maxResolution = posCount;
+        let invQuantPos = 1.0;
+        let invQuantNorm = 1.0;
+        if (r.bytePos + 8 <= dataStart + dataSize) {
+          minResolution = r.u32();
+          maxResolution = r.u32();
+        }
+        if (r.bytePos + 32 <= dataStart + dataSize) {
+          r.u32(); r.u32(); r.u32(); // quality factors
+          invQuantPos = r.f32() || 1.0;
+          invQuantNorm = r.f32() || 1.0;
+          r.f32(); r.f32(); r.f32();
+        }
+        meshDecls.set(meshName, {
+          meshName,
+          chainIdx,
+          meshAttrs,
+          faceCount,
+          posCount,
+          normCount,
+          diffCount,
+          specCount,
+          texCount,
+          shadings,
+          minResolution,
+          maxResolution,
+          invQuantPos,
+          invQuantNorm
+        });
+      } else if (blockType === 0xFFFFFF3B) {
+        // CLOD Base Mesh Continuation (ECMA-363 Section 9.6.1.2)
+        const meshName = r.str();
+        const chainIdx = r.u32();
+        const baseFaceCount = r.u32();
+        const basePosCount = r.u32();
+        const baseNormCount = r.u32();
+        const baseDiffCount = r.u32();
+        const baseSpecCount = r.u32();
+        const baseTexCount = r.u32();
 
-          const nodeMatch = nodes.find((n) => n.resourceName === meshName);
-          const partName = nodeMatch ? nodeMatch.nodeName : meshName.replace(/_Mesh$/, '');
-          const color = PALETTE[parts.length % PALETTE.length];
-
-          parts.push({
-            name: partName,
-            meshName,
-            materialName: decl.materialName || 'Steel_CAD',
-            color,
-            visible: true,
-            positions,
-            faces,
-            analyticFeatures: []
-          });
+        const positions = [];
+        for (let i = 0; i < basePosCount; i++) {
+          positions.push([r.f32(), r.f32(), r.f32()]);
+        }
+        const normals = [];
+        for (let i = 0; i < baseNormCount; i++) {
+          normals.push([r.f32(), r.f32(), r.f32()]);
+        }
+        for (let i = 0; i < baseDiffCount; i++) {
+          r.f32(); r.f32(); r.f32(); r.f32();
+        }
+        for (let i = 0; i < baseSpecCount; i++) {
+          r.f32(); r.f32(); r.f32(); r.f32();
+        }
+        for (let i = 0; i < baseTexCount; i++) {
+          r.f32(); r.f32(); r.f32(); r.f32();
         }
 
-        ptr = nextPtr;
+        const decl = meshDecls.get(meshName);
+        const excludeNormals = decl ? (decl.meshAttrs & 1) !== 0 : (baseNormCount === 0);
+        const shadings = (decl && decl.shadings) || [];
+
+        const faces = [];
+        const faceShadingIds = [];
+        const faceNormalIndices = [];
+
+        for (let f = 0; f < baseFaceCount; f++) {
+          const shadingId = r.readCompressedU32(U3D_CTX.BaseShadingID);
+          const sh = shadings[shadingId] || { shAttr: 0, texLayerCount: 0 };
+          const tri = [0, 0, 0];
+          const nTri = [0, 0, 0];
+          for (let c = 0; c < 3; c++) {
+            const pIdx = basePosCount > 0
+              ? r.readCompressedU32(U3D_AC_STATIC_FULL + basePosCount)
+              : 0;
+            let nIdx = 0;
+            if (!excludeNormals && baseNormCount > 0) {
+              nIdx = r.readCompressedU32(U3D_AC_STATIC_FULL + baseNormCount);
+            }
+            if ((sh.shAttr & 1) !== 0 && baseDiffCount > 0) {
+              r.readCompressedU32(U3D_AC_STATIC_FULL + baseDiffCount);
+            }
+            if ((sh.shAttr & 2) !== 0 && baseSpecCount > 0) {
+              r.readCompressedU32(U3D_AC_STATIC_FULL + baseSpecCount);
+            }
+            for (let t = 0; t < sh.texLayerCount; t++) {
+              if (baseTexCount > 0) {
+                r.readCompressedU32(U3D_AC_STATIC_FULL + baseTexCount);
+              }
+            }
+            tri[c] = Math.min(Math.max(0, pIdx), Math.max(0, positions.length - 1));
+            nTri[c] = nIdx;
+          }
+          faces.push(tri);
+          faceShadingIds.push(shadingId);
+          faceNormalIndices.push(nTri);
+        }
+
+        const progMesh = new U3DCLODProgressiveMesh(positions, faces, faceShadingIds, normals, faceNormalIndices);
+        meshes.set(meshName, {
+          meshName,
+          chainIdx,
+          positions,
+          normals,
+          faces,
+          faceShadingIds,
+          progMesh
+        });
+      } else if (blockType === 0xFFFFFF3C) {
+        // CLOD Progressive Mesh Continuation (ECMA-363 Section 9.6.1.3)
+        try {
+          const meshName = r.str();
+          r.u32(); // chainIdx
+          const startRes = r.u32();
+          const endRes = r.u32();
+          const decl = meshDecls.get(meshName);
+          let meshEntry = meshes.get(meshName);
+          if (!meshEntry) {
+            const progMesh = new U3DCLODProgressiveMesh([], [], [], [], []);
+            meshEntry = { meshName, chainIdx: 0, positions: progMesh.positions, normals: progMesh.normals, faces: progMesh.faces, faceShadingIds: progMesh.faceShadingIds, progMesh };
+            meshes.set(meshName, meshEntry);
+          }
+          const pm = meshEntry.progMesh;
+          const excludeNormals = decl ? (decl.meshAttrs & 1) !== 0 : true;
+          const invQuantPos = (decl && decl.invQuantPos) || 1.0;
+          const invQuantNorm = (decl && decl.invQuantNorm) || 1.0;
+          const shadings = (decl && decl.shadings) || [];
+
+          for (let currPosInd = startRes; currPosInd < endRes; currPosInd++) {
+            const splitPosInd = currPosInd === 0
+              ? r.readCompressedU32(U3D_AC_STATIC_FULL + 1)
+              : r.readCompressedU32(U3D_AC_STATIC_FULL + currPosInd);
+
+            const splitFaceSet = pm.posToFaces[splitPosInd] ? [...pm.posToFaces[splitPosInd]] : [];
+            if (!excludeNormals) {
+              const numNewNormals = r.readCompressedU32(U3D_CTX.NewNormalCnt);
+              for (let n = 0; n < numNewNormals; n++) {
+                const ns = r.readCompressedU8(U3D_CTX.NewNormalDiffSign);
+                const nx = r.readCompressedU32(U3D_CTX.NewNormalDiffMagX);
+                const ny = r.readCompressedU32(U3D_CTX.NewNormalDiffMagY);
+                const nz = r.readCompressedU32(U3D_CTX.NewNormalDiffMagZ);
+                const dx = ((ns & 1) ? -1 : 1) * nx * invQuantNorm;
+                const dy = ((ns & 2) ? -1 : 1) * ny * invQuantNorm;
+                const dz = ((ns & 4) ? -1 : 1) * nz * invQuantNorm;
+                pm.normals.push([dx, dy, dz]);
+              }
+            }
+
+            // New Position Info (9.6.1.3.4.3)
+            const posSigns = r.readCompressedU8(U3D_CTX.NewPosDiffSign);
+            const posDiffX = r.readCompressedU32(U3D_CTX.NewPosDiffMagX);
+            const posDiffY = r.readCompressedU32(U3D_CTX.NewPosDiffMagY);
+            const posDiffZ = r.readCompressedU32(U3D_CTX.NewPosDiffMagZ);
+            const sp = pm.positions[splitPosInd] || [0, 0, 0];
+            const dx = ((posSigns & 1) ? -1 : 1) * posDiffX * invQuantPos;
+            const dy = ((posSigns & 2) ? -1 : 1) * posDiffY * invQuantPos;
+            const dz = ((posSigns & 4) ? -1 : 1) * posDiffZ * invQuantPos;
+            const newPosInd = pm.addPos([sp[0] + dx, sp[1] + dy, sp[2] + dz]);
+
+            const numNewFaces = r.readCompressedU32(U3D_CTX.NewFacesCount);
+            let prevShadingId = 0;
+            const newFacesMeta = [];
+
+            for (let f = 0; f < numNewFaces; f++) {
+              const orntChange = r.readCompressedU8(U3D_CTX.OrientChange);
+              const faceType = r.readCompressedU8(U3D_CTX.FaceType);
+              const shadingChange = r.readCompressedU8(U3D_CTX.ShadingChange);
+              let shId = prevShadingId;
+              if (shadingChange || f === 0) {
+                shId = r.readCompressedU32(U3D_CTX.NewShadingID);
+                prevShadingId = shId;
+              }
+              const sh = shadings[shId] || { shAttr: 0, texLayerCount: 0 };
+              if (sh.shAttr & 1) {
+                const dupDiff = r.readCompressedU8(U3D_CTX.DupCornerIndex);
+                for (let ci = 0; ci < 3; ci++) {
+                  if (!(dupDiff & (1 << ci))) {
+                    const bLocal = r.readCompressedU8(U3D_CTX.ColorLocalIndex);
+                    if (!bLocal) {
+                      r.readCompressedU8(U3D_CTX.DiffColorSign);
+                      r.readCompressedU32(U3D_CTX.DiffColorMagR);
+                      r.readCompressedU32(U3D_CTX.DiffColorMagG);
+                      r.readCompressedU32(U3D_CTX.DiffColorMagB);
+                      r.readCompressedU32(U3D_CTX.DiffColorMagA);
+                    } else {
+                      r.readCompressedU32(U3D_CTX.DiffColorSplitIndex);
+                    }
+                  }
+                }
+              }
+              if (sh.shAttr & 2) {
+                const dupSpec = r.readCompressedU8(U3D_CTX.DupCornerIndex);
+                for (let ci = 0; ci < 3; ci++) {
+                  if (!(dupSpec & (1 << ci))) {
+                    const bLocal = r.readCompressedU8(U3D_CTX.ColorLocalIndex);
+                    if (!bLocal) {
+                      r.readCompressedU8(U3D_CTX.SpecColorSign);
+                      r.readCompressedU32(U3D_CTX.SpecColorMagR);
+                      r.readCompressedU32(U3D_CTX.SpecColorMagG);
+                      r.readCompressedU32(U3D_CTX.SpecColorMagB);
+                      r.readCompressedU32(U3D_CTX.SpecColorMagA);
+                    } else {
+                      r.readCompressedU32(U3D_CTX.SpecColorSplitIndex);
+                    }
+                  }
+                }
+              }
+              for (let tl = 0; tl < sh.texLayerCount; tl++) {
+                const dupTex = r.readCompressedU8(U3D_CTX.DupCornerIndex);
+                for (let ci = 0; ci < 3; ci++) {
+                  if (!(dupTex & (1 << ci))) {
+                    const bLocal = r.readCompressedU8(U3D_CTX.TexCoordLocalIndex);
+                    if (!bLocal) {
+                      r.readCompressedU8(U3D_CTX.TexCoordSign);
+                      r.readCompressedU32(U3D_CTX.TexCoordMagU);
+                      r.readCompressedU32(U3D_CTX.TexCoordMagV);
+                      r.readCompressedU32(U3D_CTX.TexCoordMagS);
+                      r.readCompressedU32(U3D_CTX.TexCoordMagT);
+                    } else {
+                      r.readCompressedU32(U3D_CTX.TexCoordSplitIndex);
+                    }
+                  }
+                }
+              }
+              newFacesMeta.push({ orntChange, faceType, shId });
+            }
+
+            // Stay or Move array for existing faces in splitFaceSet
+            const thirdIndexSet = [];
+            const stayMove = [];
+            for (let f = 0; f < splitFaceSet.length; f++) {
+              const fIdx = splitFaceSet[f];
+              const tri = pm.faces[fIdx];
+              for (const v of tri) {
+                if (v !== splitPosInd && !thirdIndexSet.includes(v)) {
+                  thirdIndexSet.push(v);
+                }
+              }
+            }
+            thirdIndexSet.sort((a, b) => b - a);
+
+            const faceThirdInd = new Array(numNewFaces).fill(0);
+            for (let f = 0; f < numNewFaces; f++) {
+              if (newFacesMeta[f].faceType === 1) {
+                const tLocal = r.readCompressedU32(U3D_AC_STATIC_FULL + Math.max(1, thirdIndexSet.length));
+                faceThirdInd[f] = thirdIndexSet[Math.min(tLocal, Math.max(0, thirdIndexSet.length - 1))] || 0;
+              } else {
+                faceThirdInd[f] = r.readCompressedU32(U3D_AC_STATIC_FULL + Math.max(1, currPosInd));
+              }
+              if (!thirdIndexSet.includes(faceThirdInd[f])) {
+                thirdIndexSet.push(faceThirdInd[f]);
+                thirdIndexSet.sort((a, b) => b - a);
+              }
+            }
+
+            for (let f = 0; f < splitFaceSet.length; f++) {
+              const sm = r.readCompressedU8(U3D_CTX.StayOrMove);
+              stayMove.push(sm);
+            }
+
+            // Apply vertex move to existing faces marked Move (sm === 1)
+            for (let f = 0; f < splitFaceSet.length; f++) {
+              if (stayMove[f] === 1) {
+                pm.replaceFaceVertex(splitFaceSet[f], splitPosInd, newPosInd);
+              }
+            }
+
+            // Add new faces created by split
+            for (let f = 0; f < numNewFaces; f++) {
+              const meta = newFacesMeta[f];
+              const thirdV = faceThirdInd[f];
+              const tri = meta.orntChange
+                ? [splitPosInd, thirdV, newPosInd]
+                : [newPosInd, thirdV, splitPosInd];
+              pm.addFace(tri[0], tri[1], tri[2], meta.shId);
+            }
+          }
+        } catch (_) {
+          // Keep progressive mesh decoded up to the last complete resolution step
+        }
       }
     }
 
-    walkBlocks(0, u8.length, false);
+    while (offset + 12 <= u8.length) {
+      const blockType = dv.getUint32(offset, true);
+      const dataSize = dv.getUint32(offset + 4, true);
+      const metaSize = dv.getUint32(offset + 8, true);
+
+      const dataStart = offset + 12;
+      const metaStart = dataStart + pad4(dataSize);
+      const nextBlockOffset = metaStart + pad4(metaSize);
+      if (dataStart + dataSize > u8.length) break;
+
+      parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, offset, false);
+      offset = nextBlockOffset;
+    }
+
+    // Resolve full world 4x4 transform matrix for any node by walking parent chain
+    function getWorldMatrix(nodeName, visited = new Set()) {
+      if (!nodeName || visited.has(nodeName)) return identityMat4();
+      visited.add(nodeName);
+      const node = nodesByName.get(nodeName);
+      if (!node) return identityMat4();
+      const parentWorld = node.parentName ? getWorldMatrix(node.parentName, visited) : identityMat4();
+      return multiplyMat4(parentWorld, node.localMatrix || identityMat4());
+    }
+
+    // Assemble CAD parts from scene-graph Model Nodes (supporting instancing & world transforms)
+    const parts = [];
+    let partIndex = 0;
+
+    if (modelNodes.length > 0) {
+      for (const mn of modelNodes) {
+        const mesh = meshes.get(mn.resourceName);
+        if (!mesh || !mesh.positions || mesh.positions.length === 0 || !mesh.faces || mesh.faces.length === 0) {
+          continue;
+        }
+        const worldMat = getWorldMatrix(mn.nodeName);
+        const det = mat4Determinant3x3(worldMat);
+        const transformedPositions = mesh.positions.map((pt) => transformPointMat4(pt, worldMat));
+        const transformedFaces = det < 0
+          ? mesh.faces.map(([a, b, c]) => [a, c, b])
+          : mesh.faces.map(([a, b, c]) => [a, b, c]);
+
+        // Resolve material color via ShadingModifier -> ShaderList -> Material, or heuristic fallback
+        let color = PALETTE[partIndex % PALETTE.length];
+        let matName = `Mat_${mn.nodeName}`;
+        const shModName = shadingModifiers.get(mn.nodeName);
+        if (shModName && shaderLists.has(shModName)) {
+          const resolvedMat = shaderLists.get(shModName);
+          if (resolvedMat && materials.has(resolvedMat)) {
+            matName = resolvedMat;
+            color = materials.get(resolvedMat).color;
+          }
+        } else {
+          for (const [mKey, mVal] of materials.entries()) {
+            const stem = mn.nodeName.split('_')[0];
+            if (stem && mKey.includes(stem)) {
+              matName = mKey;
+              color = mVal.color;
+              break;
+            }
+          }
+        }
+
+        parts.push({
+          name: mn.nodeName || mesh.meshName,
+          meshName: mesh.meshName,
+          materialName: matName,
+          color,
+          visible: true,
+          positions: transformedPositions,
+          faces: transformedFaces,
+          analyticFeatures: []
+        });
+        partIndex++;
+      }
+    }
+
+    // Fallback: include any mesh resources not referenced by any Model Node
+    for (const [meshName, mesh] of meshes.entries()) {
+      if (parts.some((p) => p.meshName === meshName)) continue;
+      if (!mesh.positions || mesh.positions.length === 0 || !mesh.faces || mesh.faces.length === 0) continue;
+      let color = PALETTE[partIndex % PALETTE.length];
+      let matName = `Mat_${meshName}`;
+      for (const [mKey, mVal] of materials.entries()) {
+        if (mKey.includes(meshName.replace(/_Mesh$/, '').split('_')[0])) {
+          matName = mKey;
+          color = mVal.color;
+          break;
+        }
+      }
+      parts.push({
+        name: meshName.replace(/_Mesh$/, ''),
+        meshName,
+        materialName: matName,
+        color,
+        visible: true,
+        positions: mesh.positions,
+        faces: mesh.faces,
+        analyticFeatures: []
+      });
+      partIndex++;
+    }
+
     return {
       format: 'U3D (ECMA-363)',
       profileId,
@@ -502,7 +1434,7 @@
   // 5. Coplanar B-Rep Face Merger & Analytic Feature / Hole Loop Reconstructor
   // -------------------------------------------------------------------------
   function computePartBRep(part) {
-    // 1. Weld coincident vertices within 1e-4 mm so topological half-edges match
+    // 1. Weld coincident vertices within 1e-4 source units so topological half-edges match
     const weldMap = new Map();
     const weldedVerts = [];
     const vertRemap = new Int32Array(part.positions.length);
@@ -513,7 +1445,7 @@
       let wIdx = weldMap.get(key);
       if (wIdx === undefined) {
         wIdx = weldedVerts.length;
-        weldedVerts.push([Number(x.toFixed(6)), Number(y.toFixed(6)), Number(z.toFixed(6))]);
+        weldedVerts.push([Number(x), Number(y), Number(z)]);
         weldMap.set(key, wIdx);
       }
       vertRemap[i] = wIdx;
@@ -532,9 +1464,11 @@
 
     for (let f = 0; f < part.faces.length; f++) {
       const [i0, i1, i2] = part.faces[f];
+      if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
       const a = vertRemap[i0], b = vertRemap[i1], c = vertRemap[i2];
       if (a === b || b === c || c === a) continue;
       const p0 = weldedVerts[a], p1 = weldedVerts[b], p2 = weldedVerts[c];
+      if (!p0 || !p1 || !p2) continue;
       const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
       const vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
       let nx = uy * vz - uz * vy;
@@ -547,8 +1481,9 @@
       tris.push({ verts: [a, b, c], normal: [nx, ny, nz], planeD, area: area2 * 0.5 });
     }
 
-    // 3. Group triangles into connected coplanar faces (normal angle < 0.5 deg)
+    // 3. Group triangles into connected coplanar faces & check 2-manifold watertightness
     const edgeToTris = new Map();
+    const directedHalfEdges = new Map();
     const undirectedKey = (u, v) => (u < v ? `${u}_${v}` : `${v}_${u}`);
     tris.forEach((t, tIdx) => {
       const [a, b, c] = t.verts;
@@ -556,38 +1491,43 @@
         const k = undirectedKey(u, v);
         if (!edgeToTris.has(k)) edgeToTris.set(k, []);
         edgeToTris.get(k).push(tIdx);
+        const dk = `${u}->${v}`;
+        directedHalfEdges.set(dk, (directedHalfEdges.get(dk) || 0) + 1);
       }
     });
 
-    // Check 2-manifold watertightness & extract sharp feature edges
+    // Strict 2-manifold watertight check: every undirected edge must have 1 u->v and 1 v->u half-edge
     let unmatchedHalfEdges = 0;
     const featureEdges = [];
     for (const [k, list] of edgeToTris.entries()) {
-      if (list.length !== 2) {
-        unmatchedHalfEdges += Math.abs(2 - list.length);
+      const [u, v] = k.split('_').map(Number);
+      const fwdCount = directedHalfEdges.get(`${u}->${v}`) || 0;
+      const revCount = directedHalfEdges.get(`${v}->${u}`) || 0;
+      if (list.length !== 2 || fwdCount !== 1 || revCount !== 1) {
+        unmatchedHalfEdges += Math.max(1, Math.abs(2 - list.length));
       }
       if (list.length === 1) {
-        const [u, v] = k.split('_').map(Number);
         featureEdges.push([u, v]);
       } else if (list.length >= 2) {
         const n0 = tris[list[0]].normal;
         const n1 = tris[list[1]].normal;
         const dot = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
-        if (dot < 0.96) { // > ~16 deg dihedral angle
-          const [u, v] = k.split('_').map(Number);
+        if (dot < 0.96) {
           featureEdges.push([u, v]);
         }
       }
     }
 
-    // Flood-fill coplanar triangle patches
+    // First pass: flood-fill coplanar triangle clusters & collect raw boundary loops
     const visited = new Uint8Array(tris.length);
-    const mergedFaces = [];
+    const rawClusters = [];
+    const vertexClusterSet = new Map(); // vIdx -> Set of cluster indices touching vIdx on boundary
 
     for (let i = 0; i < tris.length; i++) {
       if (visited[i]) continue;
       visited[i] = 1;
       const seed = tris[i];
+      const pSeed = weldedVerts[seed.verts[0]];
       const cluster = [i];
       const queue = [i];
 
@@ -596,21 +1536,33 @@
         const [a, b, c] = tris[curr].verts;
         for (const [u, v] of [[a, b], [b, c], [c, a]]) {
           const neighbors = edgeToTris.get(undirectedKey(u, v)) || [];
+          if (neighbors.length !== 2) continue; // Do not merge across non-manifold edges
           for (const nb of neighbors) {
             if (visited[nb]) continue;
             const n = tris[nb].normal;
             const dot = seed.normal[0] * n[0] + seed.normal[1] * n[1] + seed.normal[2] * n[2];
-            if (dot > 0.9998 && Math.abs(seed.planeD - tris[nb].planeD) < 1e-3) {
-              visited[nb] = 1;
-              cluster.push(nb);
-              queue.push(nb);
+            if (dot > 0.9999) {
+              // Ensure all 3 vertices of candidate triangle lie within 1e-4 of seed plane
+              let maxDist = 0;
+              for (const vIdx of tris[nb].verts) {
+                const pv = weldedVerts[vIdx];
+                const dist = Math.abs(
+                  (pv[0] - pSeed[0]) * seed.normal[0] +
+                  (pv[1] - pSeed[1]) * seed.normal[1] +
+                  (pv[2] - pSeed[2]) * seed.normal[2]
+                );
+                if (dist > maxDist) maxDist = dist;
+              }
+              if (maxDist < 1e-4) {
+                visited[nb] = 1;
+                cluster.push(nb);
+                queue.push(nb);
+              }
             }
           }
         }
       }
 
-      // Extract boundary half-edges of this coplanar cluster
-      // Directed half-edge u->v is on boundary iff v->u is NOT in cluster
       const halfEdgeSet = new Set();
       const halfEdges = [];
       for (const tIdx of cluster) {
@@ -622,8 +1574,20 @@
       }
 
       const boundaryHalfEdges = halfEdges.filter(([u, v]) => !halfEdgeSet.has(`${v}->${u}`));
+      const cIdx = rawClusters.length;
+      for (const [u, v] of boundaryHalfEdges) {
+        if (!vertexClusterSet.has(u)) vertexClusterSet.set(u, new Set());
+        if (!vertexClusterSet.has(v)) vertexClusterSet.set(v, new Set());
+        vertexClusterSet.get(u).add(cIdx);
+        vertexClusterSet.get(v).add(cIdx);
+      }
+      rawClusters.push({ seed, cluster, boundaryHalfEdges });
+    }
 
-      // Chain boundary half-edges into closed loops (outer loop + any inner hole loops)
+    // Second pass: chain boundary half-edges into closed loops & simplify only degree-2 collinear vertices
+    const mergedFaces = [];
+    for (let cIdx = 0; cIdx < rawClusters.length; cIdx++) {
+      const { seed, cluster, boundaryHalfEdges } = rawClusters[cIdx];
       const nextMap = new Map();
       for (const [u, v] of boundaryHalfEdges) {
         if (!nextMap.has(u)) nextMap.set(u, []);
@@ -639,7 +1603,7 @@
         usedHE.add(heKey);
         let curr = startV;
         let safety = 0;
-        while (curr !== startU && safety++ < 2000) {
+        while (curr !== startU && safety++ < 4000) {
           loop.push(curr);
           const candidates = nextMap.get(curr) || [];
           let chosen = -1;
@@ -654,22 +1618,27 @@
           curr = chosen;
         }
         if (loop.length >= 3) {
-          // Simplify collinear interior vertices along straight segments
+          // Only simplify collinear vertex vCurr if at most 2 coplanar clusters meet at vCurr
+          // (preventing T-junction edge mismatches with perpendicular faces!)
           const simplified = [];
           for (let k = 0; k < loop.length; k++) {
-            const pPrev = weldedVerts[loop[(k - 1 + loop.length) % loop.length]];
-            const pCurr = weldedVerts[loop[k]];
-            const pNext = weldedVerts[loop[(k + 1) % loop.length]];
-            const d1x = pCurr[0] - pPrev[0], d1y = pCurr[1] - pPrev[1], d1z = pCurr[2] - pPrev[2];
-            const d2x = pNext[0] - pCurr[0], d2y = pNext[1] - pCurr[1], d2z = pNext[2] - pCurr[2];
-            const l1 = Math.hypot(d1x, d1y, d1z), l2 = Math.hypot(d2x, d2y, d2z);
-            if (l1 > 1e-6 && l2 > 1e-6) {
-              const cx = (d1y * d2z - d1z * d2y) / (l1 * l2);
-              const cy = (d1z * d2x - d1x * d2z) / (l1 * l2);
-              const cz = (d1x * d2y - d1y * d2x) / (l1 * l2);
-              if (Math.hypot(cx, cy, cz) < 1e-4) continue; // collinear
+            const vCurr = loop[k];
+            const incidentClusters = vertexClusterSet.get(vCurr);
+            if (!incidentClusters || incidentClusters.size <= 2) {
+              const pPrev = weldedVerts[loop[(k - 1 + loop.length) % loop.length]];
+              const pCurr = weldedVerts[vCurr];
+              const pNext = weldedVerts[loop[(k + 1) % loop.length]];
+              const d1x = pCurr[0] - pPrev[0], d1y = pCurr[1] - pPrev[1], d1z = pCurr[2] - pPrev[2];
+              const d2x = pNext[0] - pCurr[0], d2y = pNext[1] - pCurr[1], d2z = pNext[2] - pCurr[2];
+              const l1 = Math.hypot(d1x, d1y, d1z), l2 = Math.hypot(d2x, d2y, d2z);
+              if (l1 > 1e-6 && l2 > 1e-6) {
+                const cx = (d1y * d2z - d1z * d2y) / (l1 * l2);
+                const cy = (d1z * d2x - d1x * d2z) / (l1 * l2);
+                const cz = (d1x * d2y - d1y * d2x) / (l1 * l2);
+                if (Math.hypot(cx, cy, cz) < 1e-4) continue; // collinear & shared by at most 2 faces
+              }
             }
-            simplified.push(loop[k]);
+            simplified.push(vCurr);
           }
           loops.push(simplified.length >= 3 ? simplified : loop);
         }
@@ -697,7 +1666,7 @@
       mergedFaces,
       featureEdges,
       unmatchedHalfEdges,
-      isWatertight: unmatchedHalfEdges === 0,
+      isWatertight: unmatchedHalfEdges === 0 && tris.length >= 4,
       bbox: {
         min: [minX, minY, minZ],
         max: [maxX, maxY, maxZ],
@@ -720,10 +1689,9 @@
 
   function detectAnalyticFeatures(verts, mergedFaces) {
     const features = [];
-    // Detect circular hole/boss loops in Z-normal planar faces
     const seenRadii = new Set();
     for (const mf of mergedFaces) {
-      if (Math.abs(mf.normal[2]) > 0.99) {
+      if (Math.abs(mf.normal[2]) > 0.99 && mf.loops[0] && verts[mf.loops[0][0]]) {
         const zVal = verts[mf.loops[0][0]][2];
         if (mf.loops.length > 1) {
           for (let li = 1; li < mf.loops.length; li++) {
@@ -758,7 +1726,7 @@
         }
         features.push({
           type: 'PLANE',
-          label: `Planar Datum Face (Z = ${zVal.toFixed(1)} mm, ${mf.loops.length - 1} hole loop${mf.loops.length - 1 === 1 ? '' : 's'})`,
+          label: `Planar Datum Face (Z = ${zVal.toFixed(1)}, ${mf.loops.length - 1} hole loop${mf.loops.length - 1 === 1 ? '' : 's'})`,
           normal: mf.normal.map((c) => Number(c.toFixed(4))),
           origin: [0, 0, Number(zVal.toFixed(2))]
         });
@@ -769,45 +1737,63 @@
 
   // -------------------------------------------------------------------------
   // 6. Parasolid XT (.x_t) ASCII Transmit Exporter (SCH_1200000_120060)
-  //    Native Parasolid units = meters (m), res_size = 1000, res_linear = 1e-8
+  //    Native Parasolid units = meters (m), res_size = 1000+, res_linear = 1e-8
+  //    Supports:
+  //      - Closed 2-Manifold Solid Bodies (body_type = 1)
+  //      - Open / Architectural Sheet Bodies (body_type = 3) with Dummy Fins &
+  //        Exact Plane-Projected Vertices (ideal for House / Deck / Landscaping recovery)
+  //      - Multi-Body Assembly (10 ASSEMBLY + 11 INSTANCE) or Single Combined Body
   // -------------------------------------------------------------------------
   function getScaleFromMM(units) {
+    if (units === 'cm') return 0.1;
     if (units === 'in') return 1 / 25.4;
+    if (units === 'ft') return 1 / 304.8;
     if (units === 'm') return 0.001;
     return 1.0; // mm
   }
 
   function getScaleToMeters(units) {
-    // Internal model coordinates in our sample/U3D are in mm; if user chooses 'in' or 'm', convert to meters for Parasolid
-    if (units === 'in') return 0.001; // 1 mm = 0.001 m
-    if (units === 'm') return 0.001;
-    return 0.001; // 1 mm = 1e-3 m
+    if (units === 'cm') return 0.01;
+    if (units === 'in') return 0.0254;
+    if (units === 'ft') return 0.3048;
+    if (units === 'm') return 1.0;
+    return 0.001; // mm -> meters (1e-3)
+  }
+
+  function normalizeVec3(v) {
+    const len = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / len, v[1] / len, v[2] / len];
   }
 
   function orthoBasis(normal) {
-    const [nx, ny, nz] = normal;
-    let rx = Math.abs(nx) < 0.8 ? 1 : 0;
-    let ry = Math.abs(nx) < 0.8 ? 0 : 1;
-    let rz = 0;
-    // u = normalize(r - (r·n)n)
-    const dot = rx * nx + ry * ny + rz * nz;
+    const [nx, ny, nz] = normalizeVec3(normal);
+    const rx = Math.abs(nx) < 0.8 ? 1 : 0;
+    const ry = Math.abs(nx) < 0.8 ? 0 : 1;
+    const rz = 0;
+    // Two-pass Gram-Schmidt for < 1e-16 orthogonality (Parasolid res_angular = 1e-11)
+    let dot = rx * nx + ry * ny + rz * nz;
     let ux = rx - dot * nx;
     let uy = ry - dot * ny;
     let uz = rz - dot * nz;
-    const len = Math.hypot(ux, uy, uz) || 1;
-    return [ux / len, uy / len, uz / len];
+    [ux, uy, uz] = normalizeVec3([ux, uy, uz]);
+    dot = ux * nx + uy * ny + uz * nz;
+    return normalizeVec3([ux - dot * nx, uy - dot * ny, uz - dot * nz]);
   }
 
   function fmtNum(v) {
-    if (Math.abs(v) < 1e-13) return '0';
-    return Number(v.toPrecision(10)).toString();
+    if (!isFinite(v) || Math.abs(v) < 1e-15) return '0';
+    return Number(v.toPrecision(16)).toString();
   }
 
   function buildParasolidXT(parts, options = {}) {
     const visibleParts = parts.filter((p) => p.visible);
-    const useMerged = (options.brepMode || state.brepMode) === 'merged';
-    const scaleM = 0.001; // mm -> meters (Parasolid native unit)
-    const fileName = (options.fileName || state.fileName || 'assembly').replace(/\.pdf$/i, '') + '.x_t';
+    const brepMode = options.brepMode || state.brepMode || 'merged';
+    const useMerged = brepMode !== 'faceted';
+    const forceSheet = brepMode === 'sheet-unsewn' || brepMode === 'faceted';
+    const useAssemblyRoot = brepMode === 'merged-assembly' && visibleParts.length > 1;
+    const units = options.units || state.units || 'mm';
+    const scaleM = getScaleToMeters(units);
+    const fileName = (options.fileName || state.fileName || 'assembly').replace(/\.(pdf|u3d|prc)$/i, '') + '.x_t';
 
     const headerLines = [
       '**ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz**************************',
@@ -837,213 +1823,496 @@
     let nextIdx = 1;
     const allocIdx = () => nextIdx++;
 
-    // Allocate top-level body indices first so multi-body chains can link next/prev
-    const bodyIndices = visibleParts.map(() => allocIdx());
+    for (const p of visibleParts) {
+      if (!p.brep) computePartBRep(p);
+    }
 
-    visibleParts.forEach((part, bPos) => {
-      if (!part.brep) computePartBRep(part);
-      const brep = part.brep;
-      const verts = brep.weldedVerts;
+    // Compute dynamic size box (res_size >= 1000) so large architectural models in ft/m never exceed size box
+    let maxCoordAbsM = 1.0;
+    for (const p of visibleParts) {
+      for (const [x, y, z] of p.brep.weldedVerts) {
+        const ax = Math.abs(x * scaleM), ay = Math.abs(y * scaleM), az = Math.abs(z * scaleM);
+        if (ax > maxCoordAbsM) maxCoordAbsM = ax;
+        if (ay > maxCoordAbsM) maxCoordAbsM = ay;
+        if (az > maxCoordAbsM) maxCoordAbsM = az;
+      }
+    }
+    const resSize = Math.max(1000, Math.ceil((maxCoordAbsM * 2.5) / 1000) * 1000);
 
-      const bodyIdx = bodyIndices[bPos];
-      const nextBodyIdx = bPos + 1 < bodyIndices.length ? bodyIndices[bPos + 1] : 0;
-      const prevBodyIdx = bPos > 0 ? bodyIndices[bPos - 1] : 0;
+    // Helper: check if a part's sourceFaces form a strict 2-manifold closed solid within Parasolid 1e-8 m plane tolerance
+    function getValidSolidFaces(part) {
+      if (forceSheet || !part.brep.isWatertight) return null;
+      const verts = part.brep.weldedVerts;
+      const candidateFaces = [];
 
+      // If any merged face has vertices deviating by > 4e-9 m from its plane, decompose that face into exact triangles
+      const rawFaces = useMerged ? part.brep.mergedFaces : part.brep.tris.map((t) => ({ normal: t.normal, loops: [t.verts], tris: [] }));
+      for (const mf of rawFaces) {
+        const n = normalizeVec3(mf.normal);
+        const p0 = verts[mf.loops[0][0]];
+        let maxDevM = 0;
+        let hasSelfRepeat = false;
+        const seenInFace = new Set();
+        for (const lp of mf.loops) {
+          for (const vIdx of lp) {
+            if (seenInFace.has(vIdx)) hasSelfRepeat = true;
+            seenInFace.add(vIdx);
+            const pv = verts[vIdx];
+            const devM = Math.abs(((pv[0] - p0[0]) * n[0] + (pv[1] - p0[1]) * n[1] + (pv[2] - p0[2]) * n[2]) * scaleM);
+            if (devM > maxDevM) maxDevM = devM;
+          }
+        }
+        if ((maxDevM <= 4e-9 && !hasSelfRepeat) || !mf.tris || mf.tris.length === 0) {
+          candidateFaces.push({ normal: n, loops: mf.loops });
+        } else {
+          for (const tIdx of mf.tris) {
+            const t = part.brep.tris[tIdx];
+            candidateFaces.push({ normal: normalizeVec3(t.normal), loops: [t.verts] });
+          }
+        }
+      }
+
+      // Verify every undirected edge across candidateFaces has exactly 1 '+' fin and 1 '-' fin
+      const edgeCheck = new Map();
+      for (const sf of candidateFaces) {
+        for (const lp of sf.loops) {
+          if (lp.length < 3) return null;
+          for (let k = 0; k < lp.length; k++) {
+            const u = lp[k], v = lp[(k + 1) % lp.length];
+            if (u === v) return null;
+            const minV = Math.min(u, v), maxV = Math.max(u, v);
+            const key = `${minV}_${maxV}`;
+            let st = edgeCheck.get(key);
+            if (!st) {
+              st = { pos: 0, neg: 0 };
+              edgeCheck.set(key, st);
+            }
+            if (u === minV) st.pos++;
+            else st.neg++;
+          }
+        }
+      }
+      for (const st of edgeCheck.values()) {
+        if (st.pos !== 1 || st.neg !== 1) return null;
+      }
+      return candidateFaces;
+    }
+
+    // Emit one Parasolid 12 BODY record + all topological/geometric children
+    // bodyParts is an array of part objects to include in this BODY
+    function emitBodyRecord(bodyIdx, refInstanceIdx, bodyParts) {
       let nodeIdCounter = 1;
       const allocNodeId = () => nodeIdCounter++;
 
-      const regVoidIdx = allocIdx();
-      const regSolidIdx = allocIdx();
-      const shellIdx = allocIdx();
+      // Determine if all parts in this body can be emitted as closed 2-manifold solid lumps (body_type = 1)
+      const solidFaceLists = bodyParts.map((p) => getValidSolidFaces(p));
+      const isSolidBody = !forceSheet && solidFaceLists.every((fl) => fl !== null) && bodyParts.length > 0;
 
-      // Build face list from either merged coplanar B-Rep faces or raw triangles
-      const sourceFaces = useMerged
-        ? brep.mergedFaces.map((mf) => ({ normal: mf.normal, loops: mf.loops }))
-        : brep.tris.map((t) => ({ normal: t.normal, loops: [t.verts] }));
-
-      // Collect unique vertices and undirected edges used by sourceFaces
-      const vertexEntities = verts.map((xyz) => ({
-        vIdx: allocIdx(),
-        pIdx: allocIdx(),
-        nodeIdV: allocNodeId(),
-        nodeIdP: allocNodeId(),
-        xyzM: [xyz[0] * scaleM, xyz[1] * scaleM, xyz[2] * scaleM],
-        firstFinIdx: 0
-      }));
-
-      const edgeMap = new Map();
+      const vertexEntities = [];
       const edgeEntities = [];
-      const getOrCreateEdge = (u, v) => {
-        const minV = Math.min(u, v), maxV = Math.max(u, v);
-        const key = `${minV}_${maxV}`;
-        let e = edgeMap.get(key);
-        if (!e) {
-          const p0 = vertexEntities[minV].xyzM;
-          const p1 = vertexEntities[maxV].xyzM;
-          const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
-          const len = Math.hypot(dx, dy, dz) || 1;
-          e = {
-            eIdx: allocIdx(),
-            lIdx: allocIdx(),
-            nodeIdE: allocNodeId(),
-            nodeIdL: allocNodeId(),
-            u: minV,
-            v: maxV,
-            originM: p0,
-            dir: [dx / len, dy / len, dz / len],
-            fins: []
-          };
-          edgeMap.set(key, e);
-          edgeEntities.push(e);
-        }
-        return e;
-      };
-
       const faceEntities = [];
       const loopEntities = [];
       const finEntities = [];
       const planeEntities = [];
+      const regionRecords = [];
+      const shellRecords = [];
 
-      for (const sf of sourceFaces) {
-        const fIdx = allocIdx();
-        const surfIdx = allocIdx();
-        const nodeIdF = allocNodeId();
-        const nodeIdS = allocNodeId();
-
-        const firstLoopVerts = sf.loops[0];
-        const pOrig = vertexEntities[firstLoopVerts[0]].xyzM;
-        const uAxis = orthoBasis(sf.normal);
-
-        const faceLoops = [];
-        for (const loopVerts of sf.loops) {
-          if (loopVerts.length < 3) continue;
-          const lpIdx = allocIdx();
-          const nodeIdLp = allocNodeId();
-          const loopFins = [];
-
-          for (let k = 0; k < loopVerts.length; k++) {
-            const u = loopVerts[k];
-            const v = loopVerts[(k + 1) % loopVerts.length];
-            const edge = getOrCreateEdge(u, v);
-            const sense = u === edge.u ? '+' : '-';
-            const fnIdx = allocIdx();
-            const finObj = {
-              fnIdx,
-              lpIdx,
-              fwdFin: 0,
-              bwdFin: 0,
-              fwdVxIdx: vertexEntities[v].vIdx,
-              vxEntity: vertexEntities[v],
-              nextAtVx: 0,
-              otherFin: 0,
-              edge,
-              sense
-            };
-            loopFins.push(finObj);
-            finEntities.push(finObj);
-            edge.fins.push(finObj);
-          }
-
-          for (let k = 0; k < loopFins.length; k++) {
-            loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
-            loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
-            // Prepend into vertex fin ring
-            const vx = loopFins[k].vxEntity;
-            loopFins[k].nextAtVx = vx.firstFinIdx;
-            vx.firstFinIdx = loopFins[k].fnIdx;
-          }
-
-          const lpObj = {
-            lpIdx,
-            nodeIdLp,
-            firstFinIdx: loopFins[0].fnIdx,
-            fIdx,
-            nextLoopIdx: 0
-          };
-          faceLoops.push(lpObj);
-          loopEntities.push(lpObj);
-        }
-
-        for (let k = 0; k < faceLoops.length - 1; k++) {
-          faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
-        }
-
-        faceEntities.push({
-          fIdx,
-          nodeIdF,
-          firstLoopIdx: faceLoops.length > 0 ? faceLoops[0].lpIdx : 0,
-          shellIdx,
-          surfIdx
-        });
-
-        planeEntities.push({
-          surfIdx,
-          nodeIdS,
-          fIdx,
-          pOrig,
-          normal: sf.normal,
-          uAxis
-        });
-      }
-
-      // Link twin fins around each edge
-      for (const e of edgeEntities) {
-        if (e.fins.length >= 2) {
-          for (let i = 0; i < e.fins.length; i++) {
-            e.fins[i].otherFin = e.fins[(i + 1) % e.fins.length].fnIdx;
-          }
-        }
-      }
-
-      // Also emit analytic CYLINDER surface records (code 51) for any detected cylindrical bores/bosses
-      const cylEntities = (brep.detectedFeatures || [])
-        .filter((ft) => ft.type === 'CYLINDER')
-        .map((ft) => ({
-          surfIdx: allocIdx(),
-          nodeIdS: allocNodeId(),
-          originM: (ft.origin || [0, 0, 0]).map((c) => c * scaleM),
-          axis: ft.axis || [0, 0, 1],
-          radiusM: (ft.radius || 10) * scaleM,
-          sense: ft.sense === '-' ? '-' : '+',
-          uAxis: orthoBasis(ft.axis || [0, 0, 1])
-        }));
-
-      const allSurfs = [
-        ...planeEntities.map((p) => ({ kind: 'PLANE', ...p })),
-        ...cylEntities.map((c) => ({ kind: 'CYLINDER', ...c }))
-      ];
-
+      const regVoidIdx = allocIdx();
       const regVoidNodeId = allocNodeId();
-      const regSolidNodeId = allocNodeId();
-      const shellNodeId = allocNodeId();
-      const highestNodeId = nodeIdCounter;
 
-      const firstFaceIdx = faceEntities.length > 0 ? faceEntities[0].fIdx : 0;
-      const firstSurfIdx = allSurfs.length > 0 ? allSurfs[0].surfIdx : 0;
+      if (isSolidBody) {
+        // Closed 2-Manifold Solid Body (body_type = 1) with K >= 1 disjoint solid lumps
+        const lumpInfos = [];
+        for (let pPos = 0; pPos < bodyParts.length; pPos++) {
+          const part = bodyParts[pPos];
+          const verts = part.brep.weldedVerts;
+          const sourceFaces = solidFaceLists[pPos];
+
+          const regSolidIdx = allocIdx();
+          const regSolidNodeId = allocNodeId();
+          const shellVoidIdx = allocIdx();
+          const shellVoidNodeId = allocNodeId();
+          const shellSolidIdx = allocIdx();
+          const shellSolidNodeId = allocNodeId();
+
+          // Allocate VERTEX & POINT ONLY for vertices actually used by sourceFaces (preventing fin=0 orphan vertices!)
+          const localVertMap = new Map();
+          const getOrCreateVert = (rawVIdx) => {
+            let vEnt = localVertMap.get(rawVIdx);
+            if (!vEnt) {
+              const xyz = verts[rawVIdx];
+              vEnt = {
+                vIdx: allocIdx(),
+                pIdx: allocIdx(),
+                nodeIdV: allocNodeId(),
+                nodeIdP: allocNodeId(),
+                xyzM: [xyz[0] * scaleM, xyz[1] * scaleM, xyz[2] * scaleM],
+                firstFinIdx: 0
+              };
+              localVertMap.set(rawVIdx, vEnt);
+              vertexEntities.push(vEnt);
+            }
+            return vEnt;
+          };
+
+          const localEdgeMap = new Map();
+          const getOrCreateEdge = (uRaw, vRaw) => {
+            const minRaw = Math.min(uRaw, vRaw), maxRaw = Math.max(uRaw, vRaw);
+            const key = `${minRaw}_${maxRaw}`;
+            let e = localEdgeMap.get(key);
+            if (!e) {
+              const vMinEnt = getOrCreateVert(minRaw);
+              const vMaxEnt = getOrCreateVert(maxRaw);
+              const p0 = vMinEnt.xyzM;
+              const p1 = vMaxEnt.xyzM;
+              const dir = normalizeVec3([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
+              e = {
+                eIdx: allocIdx(),
+                lIdx: allocIdx(),
+                nodeIdE: allocNodeId(),
+                nodeIdL: allocNodeId(),
+                uRaw: minRaw,
+                vRaw: maxRaw,
+                vMinEnt,
+                vMaxEnt,
+                originM: p0,
+                dir,
+                posFin: null,
+                negFin: null
+              };
+              localEdgeMap.set(key, e);
+              edgeEntities.push(e);
+            }
+            return e;
+          };
+
+          const lumpFaces = [];
+          for (const sf of sourceFaces) {
+            const fIdx = allocIdx();
+            const surfIdx = allocIdx();
+            const nodeIdF = allocNodeId();
+            const nodeIdS = allocNodeId();
+
+            const firstVEnt = getOrCreateVert(sf.loops[0][0]);
+            const pOrig = firstVEnt.xyzM;
+            const normal = normalizeVec3(sf.normal);
+            const uAxis = orthoBasis(normal);
+
+            const faceLoops = [];
+            for (const loopVerts of sf.loops) {
+              if (loopVerts.length < 3) continue;
+              const lpIdx = allocIdx();
+              const nodeIdLp = allocNodeId();
+              const loopFins = [];
+
+              for (let k = 0; k < loopVerts.length; k++) {
+                const uRaw = loopVerts[k];
+                const vRaw = loopVerts[(k + 1) % loopVerts.length];
+                const vEndEnt = getOrCreateVert(vRaw);
+                const edge = getOrCreateEdge(uRaw, vRaw);
+                const sense = uRaw === edge.uRaw ? '+' : '-';
+                const fnIdx = allocIdx();
+                const finObj = {
+                  fnIdx,
+                  lpIdx,
+                  fwdFin: 0,
+                  bwdFin: 0,
+                  fwdVxIdx: vEndEnt.vIdx,
+                  vxEntity: vEndEnt,
+                  nextAtVx: 0,
+                  otherFin: 0,
+                  edge,
+                  sense
+                };
+                if (sense === '+') edge.posFin = finObj;
+                else edge.negFin = finObj;
+                loopFins.push(finObj);
+                finEntities.push(finObj);
+              }
+
+              for (let k = 0; k < loopFins.length; k++) {
+                loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
+                loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
+                const vx = loopFins[k].vxEntity;
+                loopFins[k].nextAtVx = vx.firstFinIdx;
+                vx.firstFinIdx = loopFins[k].fnIdx;
+              }
+
+              const lpObj = {
+                lpIdx,
+                nodeIdLp,
+                firstFinIdx: loopFins[0].fnIdx,
+                fIdx,
+                nextLoopIdx: 0
+              };
+              faceLoops.push(lpObj);
+              loopEntities.push(lpObj);
+            }
+
+            for (let k = 0; k < faceLoops.length - 1; k++) {
+              faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
+            }
+
+            const fObj = {
+              fIdx,
+              nodeIdF,
+              firstLoopIdx: faceLoops[0].lpIdx,
+              backShellIdx: shellSolidIdx,
+              frontShellIdx: shellVoidIdx,
+              surfIdx,
+              nextF: 0,
+              prevF: 0
+            };
+            lumpFaces.push(fObj);
+            faceEntities.push(fObj);
+
+            planeEntities.push({
+              surfIdx,
+              nodeIdS,
+              fIdx,
+              pOrig,
+              normal,
+              uAxis
+            });
+          }
+
+          for (let i = 0; i < lumpFaces.length; i++) {
+            lumpFaces[i].nextF = i + 1 < lumpFaces.length ? lumpFaces[i + 1].fIdx : 0;
+            lumpFaces[i].prevF = i > 0 ? lumpFaces[i - 1].fIdx : 0;
+          }
+
+          lumpInfos.push({
+            regSolidIdx,
+            regSolidNodeId,
+            shellVoidIdx,
+            shellVoidNodeId,
+            shellSolidIdx,
+            shellSolidNodeId,
+            firstFaceIdx: lumpFaces.length > 0 ? lumpFaces[0].fIdx : 0
+          });
+        }
+
+        // Link 2-fin rings on all edges
+        for (const e of edgeEntities) {
+          if (e.posFin && e.negFin) {
+            e.posFin.otherFin = e.negFin.fnIdx;
+            e.negFin.otherFin = e.posFin.fnIdx;
+          }
+        }
+
+        // Build Void Region + Solid Regions and Void Shells + Solid Shells
+        const firstVoidShellIdx = lumpInfos.length > 0 ? lumpInfos[0].shellVoidIdx : 0;
+        const firstSolidRegIdx = lumpInfos.length > 0 ? lumpInfos[0].regSolidIdx : 0;
+        regionRecords.push(`19 ${regVoidIdx} ${regVoidNodeId} 0 ${bodyIdx} ${firstSolidRegIdx} 0 ${firstVoidShellIdx} V`);
+
+        for (let i = 0; i < lumpInfos.length; i++) {
+          const L = lumpInfos[i];
+          const nextReg = i + 1 < lumpInfos.length ? lumpInfos[i + 1].regSolidIdx : 0;
+          const prevReg = i === 0 ? regVoidIdx : lumpInfos[i - 1].regSolidIdx;
+          regionRecords.push(`19 ${L.regSolidIdx} ${L.regSolidNodeId} 0 ${bodyIdx} ${nextReg} ${prevReg} ${L.shellSolidIdx} S`);
+
+          const nextVoidSh = i + 1 < lumpInfos.length ? lumpInfos[i + 1].shellVoidIdx : 0;
+          shellRecords.push(`13 ${L.shellVoidIdx} ${L.shellVoidNodeId} 0 0 ${nextVoidSh} 0 0 0 ${regVoidIdx} ${L.firstFaceIdx}`);
+          shellRecords.push(`13 ${L.shellSolidIdx} ${L.shellSolidNodeId} 0 ${bodyIdx} 0 ${L.firstFaceIdx} 0 0 ${L.regSolidIdx} 0`);
+        }
+      } else {
+        // Open / Architectural Sheet Body (body_type = 3)
+        // Each merged planar B-Rep face (with outer + hole loops) is emitted as a connected 13 SHELL
+        // in regVoidIdx with exact plane-projected loop vertices and a [posFin (+), dummy negFin (-)] pair per edge.
+        const sheetShells = [];
+
+        for (const part of bodyParts) {
+          const verts = part.brep.weldedVerts;
+          const sourceFaces = useMerged
+            ? part.brep.mergedFaces.map((mf) => ({ normal: mf.normal, loops: mf.loops }))
+            : part.brep.tris.map((t) => ({ normal: t.normal, loops: [t.verts] }));
+
+          for (const sf of sourceFaces) {
+            const validLoops = sf.loops.filter((lp) => lp && lp.length >= 3);
+            if (validLoops.length === 0) continue;
+
+            const shIdx = allocIdx();
+            const shNodeId = allocNodeId();
+            const fIdx = allocIdx();
+            const surfIdx = allocIdx();
+            const nodeIdF = allocNodeId();
+            const nodeIdS = allocNodeId();
+
+            const normal = normalizeVec3(sf.normal);
+            const uAxis = orthoBasis(normal);
+            const rawOrig = verts[validLoops[0][0]];
+            const pOrig = [rawOrig[0] * scaleM, rawOrig[1] * scaleM, rawOrig[2] * scaleM];
+
+            const faceLoops = [];
+            for (const loopVerts of validLoops) {
+              const lpIdx = allocIdx();
+              const nodeIdLp = allocNodeId();
+
+              // Create dedicated loop vertices projected orthogonally onto the exact 50 PLANE (deviation < 1e-16 m)
+              const lpVertEnts = loopVerts.map((vRawIdx) => {
+                const raw = verts[vRawIdx];
+                const px = raw[0] * scaleM, py = raw[1] * scaleM, pz = raw[2] * scaleM;
+                const dist = (px - pOrig[0]) * normal[0] + (py - pOrig[1]) * normal[1] + (pz - pOrig[2]) * normal[2];
+                const vEnt = {
+                  vIdx: allocIdx(),
+                  pIdx: allocIdx(),
+                  nodeIdV: allocNodeId(),
+                  nodeIdP: allocNodeId(),
+                  xyzM: [px - dist * normal[0], py - dist * normal[1], pz - dist * normal[2]],
+                  firstFinIdx: 0
+                };
+                vertexEntities.push(vEnt);
+                return vEnt;
+              });
+
+              const loopFins = [];
+              for (let k = 0; k < lpVertEnts.length; k++) {
+                const vStartEnt = lpVertEnts[k];
+                const vEndEnt = lpVertEnts[(k + 1) % lpVertEnts.length];
+                const p0 = vStartEnt.xyzM;
+                const p1 = vEndEnt.xyzM;
+                // Project edge direction into plane and normalize for < 1e-16 orthogonality with plane normal
+                let dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+                const nDot = dx * normal[0] + dy * normal[1] + dz * normal[2];
+                const dir = normalizeVec3([dx - nDot * normal[0], dy - nDot * normal[1], dz - nDot * normal[2]]);
+
+                const posFnIdx = allocIdx();
+                const dummyNegFnIdx = allocIdx();
+                const edge = {
+                  eIdx: allocIdx(),
+                  lIdx: allocIdx(),
+                  nodeIdE: allocNodeId(),
+                  nodeIdL: allocNodeId(),
+                  vMinEnt: vStartEnt,
+                  vMaxEnt: vEndEnt,
+                  originM: p0,
+                  dir,
+                  posFin: null,
+                  negFin: null
+                };
+                edgeEntities.push(edge);
+
+                // Real '+' fin along loop edge (vStart -> vEnd, points to vEnd)
+                const posFin = {
+                  fnIdx: posFnIdx,
+                  lpIdx,
+                  fwdFin: 0,
+                  bwdFin: 0,
+                  fwdVxIdx: vEndEnt.vIdx,
+                  vxEntity: vEndEnt,
+                  nextAtVx: 0,
+                  otherFin: dummyNegFnIdx,
+                  edge,
+                  sense: '+'
+                };
+
+                // Dummy '-' fin on open boundary edge (vEnd -> vStart, points to vStart, loop/fwd/bwd = 0)
+                // Per Parasolid XT Spec 5.3.9.1 & 5.3.9.2, dummy fin provides the start vertex of the edge
+                const dummyNegFin = {
+                  fnIdx: dummyNegFnIdx,
+                  lpIdx: 0,
+                  fwdFin: 0,
+                  bwdFin: 0,
+                  fwdVxIdx: vStartEnt.vIdx,
+                  vxEntity: vStartEnt,
+                  nextAtVx: 0,
+                  otherFin: posFnIdx,
+                  edge,
+                  sense: '-'
+                };
+
+                edge.posFin = posFin;
+                edge.negFin = dummyNegFin;
+                loopFins.push(posFin);
+                finEntities.push(posFin, dummyNegFin);
+
+                // Link dummy '-' fin into vStart's vertex fin chain
+                dummyNegFin.nextAtVx = vStartEnt.firstFinIdx;
+                vStartEnt.firstFinIdx = dummyNegFin.fnIdx;
+              }
+
+              for (let k = 0; k < loopFins.length; k++) {
+                loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
+                loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
+                const vx = loopFins[k].vxEntity;
+                loopFins[k].nextAtVx = vx.firstFinIdx;
+                vx.firstFinIdx = loopFins[k].fnIdx;
+              }
+
+              const lpObj = {
+                lpIdx,
+                nodeIdLp,
+                firstFinIdx: loopFins[0].fnIdx,
+                fIdx,
+                nextLoopIdx: 0
+              };
+              faceLoops.push(lpObj);
+              loopEntities.push(lpObj);
+            }
+
+            for (let k = 0; k < faceLoops.length - 1; k++) {
+              faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
+            }
+
+            faceEntities.push({
+              fIdx,
+              nodeIdF,
+              firstLoopIdx: faceLoops[0].lpIdx,
+              backShellIdx: shIdx,
+              frontShellIdx: shIdx,
+              surfIdx,
+              nextF: 0,
+              prevF: 0
+            });
+
+            planeEntities.push({
+              surfIdx,
+              nodeIdS,
+              fIdx,
+              pOrig,
+              normal,
+              uAxis
+            });
+
+            sheetShells.push({ shIdx, shNodeId, fIdx });
+          }
+        }
+
+        const firstShellIdx = sheetShells.length > 0 ? sheetShells[0].shIdx : 0;
+        regionRecords.push(`19 ${regVoidIdx} ${regVoidNodeId} 0 ${bodyIdx} 0 0 ${firstShellIdx} V`);
+        for (let i = 0; i < sheetShells.length; i++) {
+          const sh = sheetShells[i];
+          const nextSh = i + 1 < sheetShells.length ? sheetShells[i + 1].shIdx : 0;
+          shellRecords.push(`13 ${sh.shIdx} ${sh.shNodeId} 0 ${bodyIdx} ${nextSh} ${sh.fIdx} 0 0 ${regVoidIdx} ${sh.fIdx}`);
+        }
+      }
+
+      const highestNodeId = nodeIdCounter;
+      const bodyTypeCode = isSolidBody ? 1 : 3;
+      const bodyShellPtr = isSolidBody
+        ? (shellRecords.length >= 2 ? Number(shellRecords[1].split(' ')[1]) : 0)
+        : (shellRecords.length >= 1 ? Number(shellRecords[0].split(' ')[1]) : 0);
+      const firstSurfIdx = planeEntities.length > 0 ? planeEntities[0].surfIdx : 0;
       const firstCurveIdx = edgeEntities.length > 0 ? edgeEntities[0].lIdx : 0;
       const firstPointIdx = vertexEntities.length > 0 ? vertexEntities[0].pIdx : 0;
       const firstEdgeIdx = edgeEntities.length > 0 ? edgeEntities[0].eIdx : 0;
       const firstVxIdx = vertexEntities.length > 0 ? vertexEntities[0].vIdx : 0;
 
-      // 12 = BODY (23 fields per SCH_1200000_12006)
+      // 12 = BODY (standard top-level or instance-referenced body: next = 0, previous = 0)
       bodyLines.push(
-        `12 ${bodyIdx} ${highestNodeId} 0 0 0 0 0 0 1000 1e-8 0 ${nextBodyIdx} ${prevBodyIdx} 1 0 1 1 ${shellIdx} ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx}`
+        `12 ${bodyIdx} ${highestNodeId} 0 0 0 0 0 0 ${resSize} 1e-8 ${refInstanceIdx} 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx}`
       );
 
-      // 19 = REGION (Void outer region + Solid inner region)
-      bodyLines.push(`19 ${regVoidIdx} ${regVoidNodeId} 0 ${bodyIdx} ${regSolidIdx} 0 0 V`);
-      bodyLines.push(`19 ${regSolidIdx} ${regSolidNodeId} 0 ${bodyIdx} 0 ${regVoidIdx} ${shellIdx} S`);
+      // 19 = REGION records
+      for (const rLine of regionRecords) bodyLines.push(rLine);
 
-      // 13 = SHELL
-      bodyLines.push(`13 ${shellIdx} ${shellNodeId} 0 ${bodyIdx} 0 ${firstFaceIdx} 0 0 ${regSolidIdx} 0`);
+      // 13 = SHELL records
+      for (const sLine of shellRecords) bodyLines.push(sLine);
 
-      // 14 = FACE chain
-      for (let i = 0; i < faceEntities.length; i++) {
-        const f = faceEntities[i];
-        const nextF = i + 1 < faceEntities.length ? faceEntities[i + 1].fIdx : 0;
-        const prevF = i > 0 ? faceEntities[i - 1].fIdx : 0;
+      // 14 = FACE records (both back shell and front_shell populated per SCH_1200000_120060)
+      for (const f of faceEntities) {
         bodyLines.push(
-          `14 ${f.fIdx} ${f.nodeIdF} 0 ? ${nextF} ${prevF} ${f.firstLoopIdx} ${f.shellIdx} ${f.surfIdx} + 0 0 0 0 0`
+          `14 ${f.fIdx} ${f.nodeIdF} 0 ? ${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} + 0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx}`
         );
       }
 
@@ -1052,19 +2321,19 @@
         bodyLines.push(`15 ${lp.lpIdx} ${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx}`);
       }
 
-      // 17 = FIN records
+      // 17 = FIN records (including dummy fins for open sheet edges)
       for (const fn of finEntities) {
         bodyLines.push(
           `17 ${fn.fnIdx} 0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`
         );
       }
 
-      // 16 = EDGE chain
+      // 16 = EDGE chain (primaryFin is always posFin so edge->halfedge->vertex = vEnd and other->vertex = vStart)
       for (let i = 0; i < edgeEntities.length; i++) {
         const e = edgeEntities[i];
         const prevE = i > 0 ? edgeEntities[i - 1].eIdx : 0;
         const nextE = i + 1 < edgeEntities.length ? edgeEntities[i + 1].eIdx : 0;
-        const primaryFin = e.fins.length > 0 ? e.fins[0].fnIdx : 0;
+        const primaryFin = e.posFin ? e.posFin.fnIdx : (e.negFin ? e.negFin.fnIdx : 0);
         bodyLines.push(`16 ${e.eIdx} ${e.nodeIdE} 0 ? ${primaryFin} ${prevE} ${nextE} ${e.lIdx} 0 0 ${bodyIdx}`);
       }
 
@@ -1076,26 +2345,17 @@
         bodyLines.push(`18 ${v.vIdx} ${v.nodeIdV} 0 ${v.firstFinIdx} ${prevV} ${nextV} ${v.pIdx} ? ${bodyIdx}`);
       }
 
-      // 50 = PLANE & 51 = CYLINDER surface chain
-      for (let i = 0; i < allSurfs.length; i++) {
-        const s = allSurfs[i];
-        const nextS = i + 1 < allSurfs.length ? allSurfs[i + 1].surfIdx : 0;
-        const prevS = i > 0 ? allSurfs[i - 1].surfIdx : 0;
-        if (s.kind === 'PLANE') {
-          const [px, py, pz] = s.pOrig;
-          const [nx, ny, nz] = s.normal;
-          const [ux, uy, uz] = s.uAxis;
-          bodyLines.push(
-            `50 ${s.surfIdx} ${s.nodeIdS} 0 ${s.fIdx} ${nextS} ${prevS} 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(nx)} ${fmtNum(ny)} ${fmtNum(nz)} ${fmtNum(ux)} ${fmtNum(uy)} ${fmtNum(uz)}`
-          );
-        } else {
-          const [px, py, pz] = s.originM;
-          const [ax, ay, az] = s.axis;
-          const [ux, uy, uz] = s.uAxis;
-          bodyLines.push(
-            `51 ${s.surfIdx} ${s.nodeIdS} 0 ${bodyIdx} ${nextS} ${prevS} 0 ${s.sense} ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(ax)} ${fmtNum(ay)} ${fmtNum(az)} ${fmtNum(s.radiusM)} ${fmtNum(ux)} ${fmtNum(uy)} ${fmtNum(uz)}`
-          );
-        }
+      // 50 = PLANE surface chain (strictly 1-to-1 with 14 FACE entities; no orphan surfaces)
+      for (let i = 0; i < planeEntities.length; i++) {
+        const s = planeEntities[i];
+        const nextS = i + 1 < planeEntities.length ? planeEntities[i + 1].surfIdx : 0;
+        const prevS = i > 0 ? planeEntities[i - 1].surfIdx : 0;
+        const [px, py, pz] = s.pOrig;
+        const [nx, ny, nz] = s.normal;
+        const [ux, uy, uz] = s.uAxis;
+        bodyLines.push(
+          `50 ${s.surfIdx} ${s.nodeIdS} 0 ${s.fIdx} ${nextS} ${prevS} 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(nx)} ${fmtNum(ny)} ${fmtNum(nz)} ${fmtNum(ux)} ${fmtNum(uy)} ${fmtNum(uz)}`
+        );
       }
 
       // 30 = LINE curve chain
@@ -1120,7 +2380,31 @@
           `29 ${v.pIdx} ${v.nodeIdP} 0 ${v.vIdx} ${nextP} ${prevP} ${fmtNum(x)} ${fmtNum(y)} ${fmtNum(z)}`
         );
       }
-    });
+    }
+
+    if (useAssemblyRoot) {
+      const asmIdx = allocIdx(); // #1 = 10 ASSEMBLY
+      const instIndices = visibleParts.map(() => allocIdx());
+      const bodyIndices = visibleParts.map(() => allocIdx());
+      const highestAsmNodeId = visibleParts.length + 1;
+      bodyLines.push(
+        `10 ${asmIdx} ${highestAsmNodeId} 0 0 0 0 0 0 0 ${resSize} 1e-8 0 0 0 1 0 1 ${instIndices[0]}`
+      );
+      for (let i = 0; i < visibleParts.length; i++) {
+        const instIdx = instIndices[i];
+        const nextInst = i + 1 < instIndices.length ? instIndices[i + 1] : 0;
+        const prevInst = i > 0 ? instIndices[i - 1] : 0;
+        bodyLines.push(
+          `11 ${instIdx} ${i + 1} 0 ${asmIdx} ${bodyIndices[i]} 0 1 ${nextInst} ${prevInst} 0 0`
+        );
+      }
+      for (let i = 0; i < visibleParts.length; i++) {
+        emitBodyRecord(bodyIndices[i], instIndices[i], [visibleParts[i]]);
+      }
+    } else {
+      const rootBodyIdx = allocIdx(); // #1 = 12 BODY containing all visible parts' lumps/shells
+      emitBodyRecord(rootBodyIdx, 0, visibleParts);
+    }
 
     // End of transmit file
     bodyLines.push('1 0');
@@ -1130,11 +2414,13 @@
   }
 
   // -------------------------------------------------------------------------
-  // 7. STEP AP214 (ISO-10303-21 .stp) Solid B-Rep Exporter
+  // 7. STEP AP214 (ISO-10303-21 .stp) Solid & Open-Shell Surface B-Rep Exporter
   // -------------------------------------------------------------------------
   function buildSTEPAP214(parts, options = {}) {
     const visibleParts = parts.filter((p) => p.visible);
-    const useMerged = (options.brepMode || state.brepMode) === 'merged';
+    const brepMode = options.brepMode || state.brepMode || 'merged';
+    const useMerged = brepMode !== 'faceted';
+    const forceSheet = brepMode === 'sheet-unsewn' || brepMode === 'faceted';
     const units = options.units || state.units || 'mm';
     const unitScale = getScaleFromMM(units);
 
@@ -1150,13 +2436,24 @@
     add(`APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#${appCtx})`);
     const prodCtx = add(`PRODUCT_CONTEXT('',#${appCtx},'mechanical')`);
 
-    const lenUnit = units === 'in'
-      ? add("(CONVERSION_BASED_UNIT('INCH',#9999)LENGTH_UNIT()NAMED_UNIT(*))")
-      : units === 'm'
-        ? add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT($,.METRE.))")
-        : add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
-    const angUnit = add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
-    const solidAng = add("(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.))");
+    let lenUnit;
+    if (units === 'in' || units === 'ft') {
+      const siMm = add('(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))');
+      const dimExp = add('DIMENSIONAL_EXPONENTS(1.0,0.0,0.0,0.0,0.0,0.0,0.0)');
+      const factor = units === 'ft' ? '304.8' : '25.4';
+      const uName = units === 'ft' ? 'FOOT' : 'INCH';
+      const lmu = add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(${factor}),#${siMm})`);
+      lenUnit = add(`(CONVERSION_BASED_UNIT('${uName}',#${lmu})LENGTH_UNIT()NAMED_UNIT(#${dimExp}))`);
+    } else if (units === 'cm') {
+      lenUnit = add('(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.CENTI.,.METRE.))');
+    } else if (units === 'm') {
+      lenUnit = add('(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT($,.METRE.))');
+    } else {
+      lenUnit = add('(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))');
+    }
+
+    const angUnit = add('(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))');
+    const solidAng = add('(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.))');
     const unc = add(`UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.0E-06),#${lenUnit},'distance_accuracy_value','confusion accuracy')`);
     const geomCtx = add(`(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#${unc}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#${lenUnit},#${angUnit},#${solidAng}))REPRESENTATION_CONTEXT('3D_CAD_Assembly','3D'))`);
 
@@ -1165,17 +2462,29 @@
     const xDir = add("DIRECTION('',(1.0,0.0,0.0))");
     const worldAxis = add(`AXIS2_PLACEMENT_3D('',#${originPt},#${zDir},#${xDir})`);
 
-    const brepIds = [worldAxis];
+    const repItems = [worldAxis];
+    let hasOpenShell = false;
 
     for (const part of visibleParts) {
       if (!part.brep) computePartBRep(part);
       const brep = part.brep;
       const verts = brep.weldedVerts;
+      const isPartSolid = !forceSheet && brep.isWatertight;
 
-      const stepVerts = verts.map(([x, y, z]) => {
-        const cp = add(`CARTESIAN_POINT('',(${fmtNum(x * unitScale)},${fmtNum(y * unitScale)},${fmtNum(z * unitScale)}))`);
-        return { cp, vp: add(`VERTEX_POINT('',#${cp})`), xyz: [x * unitScale, y * unitScale, z * unitScale] };
-      });
+      // Allocate CARTESIAN_POINT & VERTEX_POINT lazily so only used vertices are emitted
+      const stepVertMap = new Map();
+      const getStepVert = (vIdx) => {
+        let sv = stepVertMap.get(vIdx);
+        if (!sv) {
+          const [x, y, z] = verts[vIdx];
+          const sx = x * unitScale, sy = y * unitScale, sz = z * unitScale;
+          const cp = add(`CARTESIAN_POINT('',(${fmtNum(sx)},${fmtNum(sy)},${fmtNum(sz)}))`);
+          const vp = add(`VERTEX_POINT('',#${cp})`);
+          sv = { cp, vp, xyz: [sx, sy, sz] };
+          stepVertMap.set(vIdx, sv);
+        }
+        return sv;
+      };
 
       const edgeCurveMap = new Map();
       const getEdgeCurve = (u, v) => {
@@ -1183,14 +2492,14 @@
         const key = `${minV}_${maxV}`;
         let ec = edgeCurveMap.get(key);
         if (!ec) {
-          const p0 = stepVerts[minV].xyz;
-          const p1 = stepVerts[maxV].xyz;
-          const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
-          const len = Math.hypot(dx, dy, dz) || 1;
-          const dirId = add(`DIRECTION('',(${fmtNum(dx / len)},${fmtNum(dy / len)},${fmtNum(dz / len)}))`);
+          const sv0 = getStepVert(minV);
+          const sv1 = getStepVert(maxV);
+          const p0 = sv0.xyz, p1 = sv1.xyz;
+          const [dx, dy, dz] = normalizeVec3([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
+          const dirId = add(`DIRECTION('',(${fmtNum(dx)},${fmtNum(dy)},${fmtNum(dz)}))`);
           const vecId = add(`VECTOR('',#${dirId},1.0)`);
-          const lineId = add(`LINE('',#${stepVerts[minV].cp},#${vecId})`);
-          const ecId = add(`EDGE_CURVE('',#${stepVerts[minV].vp},#${stepVerts[maxV].vp},#${lineId},.T.)`);
+          const lineId = add(`LINE('',#${sv0.cp},#${vecId})`);
+          const ecId = add(`EDGE_CURVE('',#${sv0.vp},#${sv1.vp},#${lineId},.T.)`);
           ec = { ecId, minV, maxV };
           edgeCurveMap.set(key, ec);
         }
@@ -1212,10 +2521,12 @@
           for (let k = 0; k < loop.length; k++) {
             const u = loop[k];
             const v = loop[(k + 1) % loop.length];
+            if (u === v) continue;
             const ec = getEdgeCurve(u, v);
             const sense = u === ec.minV ? '.T.' : '.F.';
             oEdges.push(`#${add(`ORIENTED_EDGE('',*,*,#${ec.ecId},${sense})`)}`);
           }
+          if (oEdges.length < 3) continue;
           const elId = add(`EDGE_LOOP('',(${oEdges.join(',')}))`);
           const bId = li === 0
             ? add(`FACE_OUTER_BOUND('',#${elId},.T.)`)
@@ -1224,21 +2535,33 @@
         }
         if (bounds.length === 0) continue;
 
-        const uVec = orthoBasis(sf.normal);
-        const normId = add(`DIRECTION('',(${fmtNum(sf.normal[0])},${fmtNum(sf.normal[1])},${fmtNum(sf.normal[2])}))`);
+        const nVec = normalizeVec3(sf.normal);
+        const uVec = orthoBasis(nVec);
+        const firstSv = getStepVert(sf.loops[0][0]);
+        const normId = add(`DIRECTION('',(${fmtNum(nVec[0])},${fmtNum(nVec[1])},${fmtNum(nVec[2])}))`);
         const refId = add(`DIRECTION('',(${fmtNum(uVec[0])},${fmtNum(uVec[1])},${fmtNum(uVec[2])}))`);
-        const axId = add(`AXIS2_PLACEMENT_3D('',#${stepVerts[sf.loops[0][0]].cp},#${normId},#${refId})`);
+        const axId = add(`AXIS2_PLACEMENT_3D('',#${firstSv.cp},#${normId},#${refId})`);
         const planeId = add(`PLANE('',#${axId})`);
         const afId = add(`ADVANCED_FACE('',(${bounds.join(',')}),#${planeId},.T.)`);
         advFaceIds.push(`#${afId}`);
       }
 
-      const shellId = add(`CLOSED_SHELL('${part.name}_Shell',(${advFaceIds.join(',')}))`);
-      const msbId = add(`MANIFOLD_SOLID_BREP('${part.name}',#${shellId})`);
-      brepIds.push(msbId);
+      if (advFaceIds.length === 0) continue;
+
+      if (isPartSolid) {
+        const shellId = add(`CLOSED_SHELL('${part.name}_ClosedShell',(${advFaceIds.join(',')}))`);
+        const msbId = add(`MANIFOLD_SOLID_BREP('${part.name}',#${shellId})`);
+        repItems.push(msbId);
+      } else {
+        hasOpenShell = true;
+        const openShellId = add(`OPEN_SHELL('${part.name}_OpenShell',(${advFaceIds.join(',')}))`);
+        const sbsmId = add(`SHELL_BASED_SURFACE_MODEL('${part.name}',(#${openShellId}))`);
+        repItems.push(sbsmId);
+      }
     }
 
-    const shapeRep = add(`ADVANCED_BREP_SHAPE_REPRESENTATION('3D_PDF_Extracted_Assembly',(${brepIds.map((x) => '#' + x).join(',')}),#${geomCtx})`);
+    const repType = hasOpenShell ? 'SHAPE_REPRESENTATION' : 'ADVANCED_BREP_SHAPE_REPRESENTATION';
+    const shapeRep = add(`${repType}('3D_PDF_Extracted_Assembly',(${repItems.map((x) => '#' + x).join(',')}),#${geomCtx})`);
     const prod = add(`PRODUCT('3D_PDF_Assembly','3D_PDF_Assembly','',(#${prodCtx}))`);
     const pdf = add(`PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE('1','',#${prod},.NOT_KNOWN.)`);
     const pdCtx = add(`PRODUCT_DEFINITION_CONTEXT('part definition',#${appCtx},'design')`);
@@ -1854,12 +3177,20 @@
 
     if (state.activeTab === 'xt') {
       const xtLines = state.cachedXT.split('\n');
-      const counts = { BODY: 0, REGION: 0, SHELL: 0, FACE: 0, LOOP: 0, FIN: 0, EDGE: 0, VERTEX: 0, PLANE: 0, CYLINDER: 0, LINE: 0, POINT: 0 };
+      const counts = { ASSEMBLY: 0, INSTANCE: 0, BODY: 0, REGION: 0, SHELL: 0, FACE: 0, LOOP: 0, FIN: 0, EDGE: 0, VERTEX: 0, PLANE: 0, LINE: 0, POINT: 0 };
+      let bodyKindLabel = 'Solid / Sheet B-Rep';
       for (const ln of xtLines) {
         const m = ln.match(/^(\d+)\s+/);
         if (!m) continue;
         const code = Number(m[1]);
-        if (code === 12) counts.BODY++;
+        if (code === 10) counts.ASSEMBLY++;
+        else if (code === 11) counts.INSTANCE++;
+        else if (code === 12) {
+          counts.BODY++;
+          const tok = ln.trim().split(/\s+/);
+          if (tok[16] === '3') bodyKindLabel = 'Sheet Body (body_type=3)';
+          else if (tok[16] === '1') bodyKindLabel = 'Solid Body (body_type=1)';
+        }
         else if (code === 19) counts.REGION++;
         else if (code === 13) counts.SHELL++;
         else if (code === 14) counts.FACE++;
@@ -1868,22 +3199,21 @@
         else if (code === 16) counts.EDGE++;
         else if (code === 18) counts.VERTEX++;
         else if (code === 50) counts.PLANE++;
-        else if (code === 51) counts.CYLINDER++;
         else if (code === 30) counts.LINE++;
         else if (code === 29) counts.POINT++;
       }
 
       summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (SCH_1200000_12006)</div>
-        <div class="entity-row"><span>12 BODY (Solid B-Rep)</span><strong>${counts.BODY}</strong></div>
-        <div class="entity-row"><span>19 REGION (Void + Solid)</span><strong>${counts.REGION}</strong></div>
-        <div class="entity-row"><span>13 SHELL (Closed Manifold)</span><strong>${counts.SHELL}</strong></div>
+        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (SCH_1200000_120060)</div>
+        <div class="entity-row"><span>12 BODY (${bodyKindLabel})</span><strong>${counts.BODY}${counts.ASSEMBLY ? ' (' + counts.INSTANCE + ' Inst)' : ''}</strong></div>
+        <div class="entity-row"><span>19 REGION (Void / Solid)</span><strong>${counts.REGION}</strong></div>
+        <div class="entity-row"><span>13 SHELL (Connected Shells)</span><strong>${counts.SHELL}</strong></div>
         <div class="entity-row"><span>14 FACE (Planar B-Rep)</span><strong>${counts.FACE}</strong></div>
         <div class="entity-row"><span>15 LOOP (Outer + Hole Loops)</span><strong>${counts.LOOP}</strong></div>
-        <div class="entity-row"><span>17 FIN (Oriented Half-Edges)</span><strong>${counts.FIN}</strong></div>
+        <div class="entity-row"><span>17 FIN (Real + Dummy Half-Edges)</span><strong>${counts.FIN}</strong></div>
         <div class="entity-row"><span>16 EDGE / 30 LINE</span><strong>${counts.EDGE}</strong></div>
         <div class="entity-row"><span>18 VERTEX / 29 POINT</span><strong>${counts.VERTEX}</strong></div>
-        <div class="entity-row"><span>50 PLANE / 51 CYLINDER</span><strong>${counts.PLANE} / ${counts.CYLINDER}</strong></div>
+        <div class="entity-row"><span>50 PLANE Surfaces</span><strong>${counts.PLANE}</strong></div>
       `;
       codeEl.textContent = xtLines.slice(0, 140).join('\n') +
         (xtLines.length > 140 ? `\n... (${xtLines.length - 140} more Parasolid XT records — click "Export Parasolid XT (.x_t)" for full file)` : '');
@@ -2065,6 +3395,7 @@
     if (unitSelect) {
       unitSelect.addEventListener('change', (ev) => {
         state.units = ev.target.value;
+        state.cachedXT = null;
         state.cachedSTEP = null;
         refreshAllUI();
       });
@@ -2230,7 +3561,7 @@
   }
 
   // Expose programmatic API for automated verification & CAD testing
-  window.CAD3DExtractor = {
+  window.CAD3DExtractor = { U3DBitStreamReader, U3DHistogram, U3D_CTX, U3D_AC_STATIC_FULL, parseU3DStream,
     getState: () => state,
     loadPDFBuffer,
     activateStream,
