@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230ea5e9'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='13' fill='%2304101d'%3E3D%3C/text%3E%3C/svg%3E" />
+<title>3D PDF → CAD Geometry Extractor (Parasolid .x_t • STEP .stp • STL • OBJ)</title>
+<style>
+  :root {
+    --bg-0: #090d14;
+    --bg-1: #0f1623;
+    --bg-2: #162032;
+    --bg-3: #1e2c44;
+    --border: #273754;
+    --border-hi: #3b5580;
+    --text-0: #f0f6fc;
+    --text-1: #b8c7de;
+    --text-2: #7c91b1;
+    --cyan: #22d3ee;
+    --cyan-dim: rgba(34, 211, 238, 0.14);
+    --blue: #3b82f6;
+    --emerald: #10b981;
+    --emerald-dim: rgba(16, 185, 129, 0.15);
+    --amber: #f59e0b;
+    --purple: #a855f7;
+    --rose: #f43f5e;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-0);
+    color: var(--text-0);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Top Bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: linear-gradient(180deg, #131c2e 0%, #0d1422 100%);
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-badge {
+    width: 34px;
+    height: 34px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 100%);
+    display: grid;
+    place-items: center;
+    color: #04101e;
+    font-weight: 800;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: -0.5px;
+    box-shadow: 0 0 16px rgba(34, 211, 238, 0.35);
+  }
+  .brand-title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: var(--text-0);
+  }
+  .brand-sub {
+    font-size: 11px;
+    color: var(--text-2);
+    font-family: var(--mono);
+  }
+  .top-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  /* Export Bar */
+  .exportbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 16px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .export-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .export-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-2);
+    margin-right: 4px;
+  }
+
+  /* Buttons & Inputs */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.14s ease;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--bg-3);
+    border-color: var(--border-hi);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%);
+    color: #03101d;
+    border-color: #38bdf8;
+    font-weight: 700;
+    box-shadow: 0 2px 12px rgba(14, 165, 233, 0.28);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    border-color: #7dd3fc;
+  }
+  .btn-emerald {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+    color: #03150e;
+    border-color: #34d399;
+    font-weight: 700;
+    box-shadow: 0 2px 10px rgba(16, 185, 129, 0.24);
+  }
+  .btn-emerald:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .btn-sm {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  .btn-active {
+    background: var(--cyan-dim);
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+  .select-ctrl {
+    background: var(--bg-2);
+    color: var(--text-0);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 9px;
+    font-size: 11.5px;
+    font-family: var(--mono);
+    outline: none;
+  }
+  .select-ctrl:focus {
+    border-color: var(--cyan);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-family: var(--mono);
+    font-weight: 600;
+    background: var(--bg-3);
+    color: var(--text-1);
+    border: 1px solid var(--border);
+  }
+  .badge-cyan {
+    background: var(--cyan-dim);
+    color: var(--cyan);
+    border-color: rgba(34, 211, 238, 0.4);
+  }
+  .badge-emerald {
+    background: var(--emerald-dim);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.4);
+  }
+  .badge-amber {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.4);
+  }
+
+  /* Main Workbench Split Layout */
+  .workbench {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 390px 1fr;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Left Inspector Pane */
+  .inspector-pane {
+    background: var(--bg-1);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 12px;
+    gap: 12px;
+  }
+  .panel-card {
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 11px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-1);
+  }
+  .panel-body {
+    padding: 10px 11px;
+  }
+
+  /* Dropzone */
+  .dropzone {
+    border: 1.5px dashed var(--border-hi);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    background: rgba(22, 32, 50, 0.45);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .dropzone:hover, .dropzone.dragover {
+    border-color: var(--cyan);
+    background: var(--cyan-dim);
+  }
+  .dropzone-title {
+    font-weight: 700;
+    color: var(--text-0);
+    font-size: 12.5px;
+    margin-bottom: 3px;
+  }
+  .dropzone-sub {
+    font-size: 11px;
+    color: var(--text-2);
+    font-family: var(--mono);
+  }
+
+  /* Stream list */
+  .stream-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stream-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-1);
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  .stream-item:hover {
+    border-color: var(--border-hi);
+    background: var(--bg-2);
+  }
+  .stream-item.active {
+    border-color: var(--cyan);
+    background: var(--cyan-dim);
+  }
+  .stream-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stream-name {
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--text-0);
+  }
+  .stream-sub {
+    font-size: 10.5px;
+    font-family: var(--mono);
+    color: var(--text-2);
+  }
+
+  /* Part Tree */
+  .part-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .part-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-1);
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  .part-item:hover {
+    border-color: var(--border-hi);
+  }
+  .part-item.selected {
+    border-color: var(--cyan);
+    background: rgba(34, 211, 238, 0.08);
+  }
+  .part-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .part-left {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+  .swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.25);
+  }
+  .part-name {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .part-stats {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10.5px;
+    font-family: var(--mono);
+    color: var(--text-2);
+    padding-left: 22px;
+  }
+
+  /* Telemetry KV grid */
+  .kv-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .kv-box {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  .kv-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-2);
+  }
+  .kv-val {
+    font-size: 12px;
+    font-weight: 700;
+    font-family: var(--mono);
+    color: var(--text-0);
+    margin-top: 2px;
+  }
+
+  /* Feature list */
+  .feature-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 170px;
+    overflow-y: auto;
+  }
+  .feature-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 11px;
+  }
+  .feature-item code {
+    font-family: var(--mono);
+    color: var(--cyan);
+    font-size: 10.5px;
+  }
+
+  /* Right Pane: Viewport + Bottom Drawer */
+  .stage-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg-0);
+  }
+  .viewport-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .viewport-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 280px;
+    background: radial-gradient(circle at 50% 42%, #162238 0%, #090e17 78%);
+    overflow: hidden;
+  }
+  #viewportCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+  }
+  #viewportCanvas:active {
+    cursor: grabbing;
+  }
+  .viewport-hud-tl {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: rgba(9, 13, 20, 0.78);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-1);
+    backdrop-filter: blur(6px);
+  }
+  .viewport-hud-bl {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    pointer-events: none;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-2);
+    background: rgba(9, 13, 20, 0.75);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px 8px;
+  }
+
+  /* Bottom Schema / Entity Drawer */
+  .drawer {
+    height: 235px;
+    background: var(--bg-1);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .drawer-tabs {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    height: 34px;
+    flex-shrink: 0;
+  }
+  .tab-list {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+  }
+  .tab-btn {
+    height: 100%;
+    padding: 0 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-2);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tab-btn:hover {
+    color: var(--text-0);
+  }
+  .tab-btn.active {
+    color: var(--cyan);
+    border-bottom-color: var(--cyan);
+    background: rgba(34, 211, 238, 0.06);
+  }
+  .drawer-body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 310px 1fr;
+    overflow: hidden;
+  }
+  .drawer-summary {
+    border-right: 1px solid var(--border);
+    padding: 8px 10px;
+    overflow-y: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--bg-0);
+  }
+  .drawer-code {
+    padding: 8px 12px;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    color: #d1e0f6;
+    background: #070b11;
+    white-space: pre;
+  }
+  .entity-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 4px;
+    border-bottom: 1px solid rgba(39, 55, 84, 0.45);
+  }
+  .entity-row span:first-child {
+    color: var(--cyan);
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-badge">3D</div>
+      <div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench</div>
+        <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • Native Parasolid XT (.x_t) • STEP AP214 (.stp) • STL • OBJ</div>
+      </div>
+    </div>
+    <div class="top-controls">
+      <button class="btn btn-sm btn-active" id="btnLoadSample" title="Load built-in multi-part mechanical assembly 3D PDF">
+        Load Sample 3D PDF (NX-ASM-402)
+      </button>
+      <button class="btn btn-sm" id="btnOpenFile">Open 3D PDF / U3D / PRC…</button>
+      <input type="file" id="fileInput" accept=".pdf,.u3d,.prc" style="display:none" />
+      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Source Units:</label>
+      <select class="select-ctrl" id="unitSelect" title="CAD unit scaling for Parasolid XT (meters) and STEP/STL/OBJ">
+        <option value="mm" selected>mm (NX Default • XT 1e-3 m, UIO=1000)</option>
+        <option value="in">inch (25.4 mm • XT 0.0254 m)</option>
+        <option value="m">meter (1.0 m • XT 1.0 m)</option>
+      </select>
+      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
+      <select class="select-ctrl" id="brepModeSelect" title="Coplanar polygon merging produces clean CAD faces with inner hole loops">
+        <option value="merged" selected>Merged Coplanar B-Rep Faces + Analytic Holes</option>
+        <option value="faceted">Triangulated Faceted B-Rep (1:1 Mesh)</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- Primary CAD Export Bar -->
+  <section class="exportbar">
+    <div class="export-group">
+      <span class="export-label">CAD Export (Siemens NX Ready):</span>
+      <button class="btn btn-primary" id="btnExportXT" title="Export ASCII Parasolid Transmit (.x_t) with native meter scaling (1e-3) and BODY/REGION/SHELL/FACE/LOOP/FIN topology">
+        Export Parasolid XT (.x_t)
+      </button>
+      <button class="btn btn-emerald" id="btnExportSTEP" title="Export ISO 10303-21 STEP AP214 (.stp) MANIFOLD_SOLID_BREP assembly">
+        Export STEP AP214 (.stp)
+      </button>
+      <button class="btn" id="btnExportSTL" title="Export Binary STL mesh of visible parts">
+        Export Binary STL (.stl)
+      </button>
+      <button class="btn btn-sm" id="btnExportSTLText" title="Export ASCII STL mesh">
+        ASCII STL
+      </button>
+      <button class="btn" id="btnExportOBJ" title="Export Wavefront OBJ with part groups and vertex normals">
+        Export OBJ (.obj)
+      </button>
+      <button class="btn btn-sm" id="btnExportIGES" title="Export IGES 5.3 feature-edge wireframe curves (.igs)">
+        IGES Wireframe (.igs)
+      </button>
+      <button class="btn btn-sm" id="btnExportRaw" title="Download extracted raw U3D or PRC stream bytes">
+        Raw Stream (.u3d/.prc)
+      </button>
+    </div>
+    <div class="export-group">
+      <span class="badge badge-emerald" id="statusBadge">READY • WATER-TIGHT 2-MANIFOLD</span>
+    </div>
+  </section>
+
+  <!-- Two-Pane Workbench -->
+  <main class="workbench">
+    <!-- Left Pane: Assembly & Stream Inspector -->
+    <aside class="inspector-pane">
+      <!-- File Dropzone -->
+      <div class="dropzone" id="dropZone">
+        <div class="dropzone-title" id="docFileName">sample-cad-assembly-3d.pdf</div>
+        <div class="dropzone-sub">Drop any 3D PDF (`.pdf`), `.u3d`, or `.prc` stream here</div>
+      </div>
+
+      <!-- Embedded /3D Streams -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <span>Embedded PDF `/3D` &amp; `/RichMedia` Streams</span>
+          <span class="badge badge-cyan" id="streamCountBadge">2 Streams</span>
+        </div>
+        <div class="panel-body">
+          <div class="stream-list" id="streamList"></div>
+        </div>
+      </div>
+
+      <!-- Assembly Part Hierarchy -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <span>Assembly Part Hierarchy</span>
+          <div style="display:flex;gap:4px;">
+            <button class="btn btn-sm" id="btnShowAllParts">Show All</button>
+            <button class="btn btn-sm" id="btnInvertParts">Invert</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="part-list" id="partList"></div>
+        </div>
+      </div>
+
+      <!-- Bounding Box & Topology Summary -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <span>Bounding Box &amp; B-Rep Topology</span>
+          <span class="badge" id="unitBadge">mm</span>
+        </div>
+        <div class="panel-body">
+          <div class="kv-grid" id="bboxGrid"></div>
+        </div>
+      </div>
+
+      <!-- Detected Analytic CAD Features -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <span>Detected Analytic CAD Features</span>
+          <span class="badge badge-amber" id="featureCountBadge">0</span>
+        </div>
+        <div class="panel-body">
+          <div class="feature-list" id="featureList"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right Pane: 3D Orbit Viewport + Bottom Inspector Drawer -->
+    <section class="stage-pane">
+      <!-- Viewport Toolbar -->
+      <div class="viewport-toolbar">
+        <div class="toolbar-group">
+          <span style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Display:</span>
+          <button class="btn btn-sm btn-active" data-render="shaded-edges">Shaded + CAD Edges</button>
+          <button class="btn btn-sm" data-render="brep-faces">B-Rep Face Groups</button>
+          <button class="btn btn-sm" data-render="shaded">Shaded Smooth</button>
+          <button class="btn btn-sm" data-render="wireframe">Wireframe</button>
+          <button class="btn btn-sm" data-render="xray">X-Ray Bore View</button>
+        </div>
+        <div class="toolbar-group">
+          <span style="font-size:11px;color:var(--text-2);font-family:var(--mono);">View:</span>
+          <button class="btn btn-sm" data-view="iso">Iso</button>
+          <button class="btn btn-sm" data-view="top">Top (XY)</button>
+          <button class="btn btn-sm" data-view="front">Front (XZ)</button>
+          <button class="btn btn-sm" data-view="right">Right (YZ)</button>
+          <button class="btn btn-sm" id="btnFitView">Fit</button>
+          <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);margin-left:4px;">Explode:</label>
+          <input type="range" id="explodeSlider" min="0" max="100" value="0" style="width:75px;accent-color:var(--cyan);" />
+        </div>
+      </div>
+
+      <!-- 3D Viewport Canvas -->
+      <div class="viewport-wrap">
+        <canvas id="viewportCanvas"></canvas>
+        <div class="viewport-hud-tl" id="viewportHud">
+          <div><strong style="color:var(--cyan);" id="hudStreamTitle">Stream: /Subtype /U3D (ECMA-363)</strong></div>
+          <div id="hudAssemblyStats">Parts: 4 | Merged B-Rep Faces: -- | Tris: 480</div>
+          <div id="hudScaleInfo">Parasolid Scale: 1e-3 m/mm (UIO=1000, res_linear=1e-8)</div>
+        </div>
+        <div class="viewport-hud-bl">
+          Left-drag: Orbit • Shift/Right-drag: Pan • Scroll: Zoom • Click part in tree to highlight
+        </div>
+      </div>
+
+      <!-- Bottom Schema / Entity Inspector Drawer -->
+      <div class="drawer">
+        <div class="drawer-tabs">
+          <div class="tab-list">
+            <button class="tab-btn active" data-tab="xt">Parasolid `.x_t` Schema / Entity Inspector</button>
+            <button class="tab-btn" data-tab="step">STEP AP214 (`.stp`) B-Rep Inspector</button>
+            <button class="tab-btn" data-tab="pdf">PDF `/3D` Stream &amp; U3D/PRC Block Telemetry</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="btn btn-sm" id="btnCopyInspector">Copy Preview</button>
+          </div>
+        </div>
+        <div class="drawer-body">
+          <div class="drawer-summary" id="drawerSummary"></div>
+          <pre class="drawer-code" id="drawerCode"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgL05hbWVzIDw8IC9FbWJlZGRlZEZpbGVzIDkgMCBSID4+ID4+CmVuZG9iagoyIDAgb2JqCjw8IC9UeXBlIC9QYWdlcyAvS2lkcyBbMyAwIFJdIC9Db3VudCAxID4+CmVuZG9iagozIDAgb2JqCjw8IC9UeXBlIC9QYWdlIC9QYXJlbnQgMiAwIFIgL01lZGlhQm94IFswIDAgODQyIDU5NV0gL0NvbnRlbnRzIDQgMCBSIC9Bbm5vdHMgWzUgMCBSIDYgMCBSXSA+PgplbmRvYmoKNCAwIG9iago8PCAvTGVuZ3RoIDIzNyA+PgpzdHJlYW0KQlQgL0YxIDE0IFRmIDM2IDU1NSBUZCAoTlgtQVNNLTQwMjogRmxhbmdlZCBCZWFyaW5nIEhvdXNpbmcgQXNzZW1ibHkgLSAzRCBQREYgRW5naW5lZXJpbmcgRGF0YSBQYWNrYWdlKSBUaiBFVApCVCAvRjEgMTAgVGYgMzYgNTM1IFRkIChFbWJlZGRlZCAzRCBTdHJlYW1zOiBFQ01BLTM2MyBVM0QgW09iaiA3XSArIElTTyAxNDczOS0xIFBSQyBCLVJlcCBbT2JqIDhdIHwgVW5pdHM6IG1tIFtVSU89MTAwMF0pIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvQW5ub3QgL1N1YnR5cGUgLzNEIC9OTSAoTlhfQVNNXzQwMl9VM0RfQXNzZW1ibHkpIC9UIChOWC1BU00tNDAyIEZsYW5nZWQgQmVhcmluZyBBc3NlbWJseSBbVTNEXSkgL1JlY3QgWzM2IDUwIDgwNiA1MTVdIC8zREQgNyAwIFIgLzNEViAxMCAwIFIgLzNEQSA8PCAvQSAvUE8gL0FJUyAvTCAvVEIgdHJ1ZSAvTlAgdHJ1ZSA+PiA+PgplbmRvYmoKNiAwIG9iago8PCAvVHlwZSAvQW5ub3QgL1N1YnR5cGUgLzNEIC9OTSAoTlhfQVNNXzQwMl9QUkNfQlJlcF9Bc3NlbWJseSkgL1QgKE5YLUFTTS00MDIgRmxhbmdlZCBCZWFyaW5nIEFzc2VtYmx5IFtQUkMgQi1SZXBdKSAvUmVjdCBbMzYg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n3+zlhYwA+cwNRszP7ZoG9sRmXlM+DmMYza37DtobnA/vU3bp6VAyXjwp215O7AVfUpaaPPnWdFhlrqJdEK9BQ9/GTgNui+lYvG9ZLTZ+1eCNb+9m0+mToR616+fO7PBRLXl+WKA/wHOo2O/CmVuZHN0cmVhbQplbmRvYmoKOSAwIG9iago8PCAvTmFtZXMgW10gPj4KZW5kb2JqCjEwIDAgb2JqCjw8IC9UeXBlIC8zRFZpZXcgL1hOIChJc29tZXRyaWMgQ0FEIFZpZXcpIC9JTiAoSXNvVmlldykgL01TIC9NIC9DMlcgWzAuNzA3MSAwLjcwNzEgMCAtMC40MDgyIDAuNDA4MiAwLjgxNjUgMC41Nzc0IC0wLjU3NzQgMC41Nzc0IDE2MCAtMTYwIDE0MF0gL0NPIDIyMC4wIC9QIDw8IC9TdWJ0eXBlIC9PIC9PUyAxLjAgPj4gL1JNIDw8IC9UeXBlIC8zRFJlbmRlck1vZGUgL1MgL1NvbGlkV2lyZWZyYW1lID4+ID4+CmVuZG9iagp4cmVmCjAgMTEKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAwOTggMDAwMDAgbiAKMDAwMDAwMDE1NSAwMDAwMCBuIAowMDAwMDAwMjY0IDAwMDAwIG4gCjAwMDAwMDA1NTIgMDAwMDAgbiAKMDAwMDAwMDc2NSAwMDAwMCBuIAowMDAwMDAwOTQ1IDAwMDAwIG4gCjAwMDAwMDYwNjkgMDAwMDAgbiAKMDAwMDAxMDAyNiAwMDAwMCBuIAowMDAwMDEwMDU3IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgMTEgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjEwMzA3CiUlRU9GCg==";
+</script>
+  <script src="sample-pdf-b64.js"></script>
+  <script src="app.js?v=1.0.0"></script>
+</body>
+</html>
