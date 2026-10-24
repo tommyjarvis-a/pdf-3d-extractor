@@ -1,0 +1,208 @@
+{
+ "g01_media9_richmedia_u3d_dice.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ]
+  ]
+ },
+ "g02_media9_richmedia_3annots_u3d_prc.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ],
+   [
+    "U3D",
+    "U3D",
+    1820
+   ],
+   [
+    "PRC",
+    "PRC exact B-Rep",
+    46350
+   ]
+  ]
+ },
+ "g03_3d_u3d_nofilter_classic_xref.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ]
+  ]
+ },
+ "g04_3d_u3d_flate_png_predictor.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ]
+  ]
+ },
+ "g05_3d_u3d_rc4_128_owneronly.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ]
+  ]
+ },
+ "g06_3d_prc_brep_aes256_owneronly.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC exact B-Rep",
+    46350
+   ]
+  ]
+ },
+ "g07_3d_prc_asymptote_nurbs_only.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC exact B-Rep",
+    9160
+   ]
+  ]
+ },
+ "g08_3d_prc_asymptote_mixed_tess_nurbs.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess + exact B-Rep",
+    7396
+   ]
+  ]
+ },
+ "g09_nanoprc_outlet_compressed_tess.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    11516
+   ]
+  ]
+ },
+ "g10_3d_3annots_u3d_u3d_prc.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ],
+   [
+    "U3D",
+    "U3D",
+    1820
+   ],
+   [
+    "PRC",
+    "PRC exact B-Rep",
+    46350
+   ]
+  ]
+ },
+ "r01_nx2512_hoops_prc_tess.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    37196
+   ]
+  ]
+ },
+ "r03_tetra4d_rtm_prendergast_prc_brep.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    9445
+   ]
+  ]
+ },
+ "r04_tetra4d_outlet_prc_tess.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    11516
+   ]
+  ]
+ },
+ "r09_coretech_compare_u3d_2annots_aes128.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "none",
+    0
+   ],
+   [
+    "U3D",
+    "none",
+    0
+   ]
+  ]
+ },
+ "r11_pdf3d_car_suspension_prc_pmi_aes256r5.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    87192
+   ]
+  ]
+ },
+ "r12_pdf3d_mbd_demo_prc_word_aes256r5.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    6920
+   ]
+  ]
+ },
+ "r14_media9_manual_richmedia_pdf20.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC exact B-Rep",
+    46350
+   ],
+   [
+    "U3D",
+    "U3D",
+    4716
+   ],
+   [
+    "U3D",
+    "U3D",
+    1820
+   ]
+  ]
+ },
+ "r15_movie15_manual_3d_u3d.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ]
+  ]
+ },
+ "r17_tetra4d_auto_engine_v2024_prc_recalc_normals.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    402680
+   ]
+  ]
+ }
+}
