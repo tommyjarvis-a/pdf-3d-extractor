@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js)
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.2.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -15,6 +15,9 @@
  */
 (function () {
   'use strict';
+
+  const APP_VERSION = '1.2.0';
+  if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   const PALETTE = [
     [0.22, 0.58, 0.88],
@@ -1389,43 +1392,84 @@
   // -------------------------------------------------------------------------
   // 4. ISO 14739-1 (PRC) Binary Stream Decoder
   // -------------------------------------------------------------------------
+  // Companion decoders are separate <script> files (prc-brep.js, prc-decoder.js, pdf-extract.js, ...);
+  // in Node (tests) they are require()d from the app directory.
+  function getModule(globalName, file) {
+    const g = (typeof window !== 'undefined' && window[globalName]) || (typeof globalThis !== 'undefined' && globalThis[globalName]);
+    if (g) return g;
+    if (typeof require === 'function') { try { return require('./' + file); } catch (_) { /* fall through */ } }
+    return null;
+  }
+
+  // Legacy container written by generate-sample-pdf.js (bundled sample): "PRC" + header + zlib(JSON).
+  async function tryParseLegacySamplePRC(u8) {
+    if (u8.length < 60) return null;
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const compLen = dv.getUint32(48, true);
+    if (!(compLen > 0 && 52 + compLen <= u8.length && u8[52] === 0x78)) return null;
+    try {
+      const inflated = await inflateFlateStream(u8.subarray(52, 52 + compLen));
+      if (inflated[0] !== 0x7b) return null; // '{'
+      const data = JSON.parse(new TextDecoder('utf-8').decode(inflated));
+      return { data, minVer: dv.getUint32(4, true), authVer: dv.getUint32(8, true), numStructs: dv.getUint32(44, true), compLen };
+    } catch (_) { return null; }
+  }
+
   async function parsePRCStream(u8) {
     const magic = asciiSlice(u8, 0, 3);
     if (magic !== 'PRC') {
       throw new Error('Invalid PRC header signature');
     }
-    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-    const minVer = dv.getUint32(4, true);
-    const authVer = dv.getUint32(8, true);
-    const numStructs = dv.getUint32(44, true);
-    const compLen = dv.getUint32(48, true);
-
-    const compSlice = u8.subarray(52, 52 + compLen);
-    const inflated = await inflateFlateStream(compSlice);
-    const jsonStr = new TextDecoder('utf-8').decode(inflated);
-    const data = JSON.parse(jsonStr);
-
-    const parts = (data.parts || []).map((p, idx) => ({
-      name: p.name || `PRC_Body_${idx + 1}`,
-      meshName: `${p.name}_BRep`,
-      materialName: p.materialName || 'CAD_BRep_Solid',
-      color: p.color || PALETTE[idx % PALETTE.length],
-      visible: true,
-      positions: p.positions || [],
-      faces: p.faces || [],
-      analyticFeatures: p.analyticFeatures || []
+    const legacy = await tryParseLegacySamplePRC(u8);
+    if (legacy) {
+      const parts = (legacy.data.parts || []).map((p, idx) => ({
+        name: p.name || `PRC_Body_${idx + 1}`, meshName: `${p.name}_BRep`, materialName: p.materialName || 'CAD_BRep_Solid',
+        color: p.color || PALETTE[idx % PALETTE.length], visible: true,
+        positions: p.positions || [], faces: p.faces || [], analyticFeatures: p.analyticFeatures || []
+      }));
+      return {
+        format: 'PRC (bundled sample container)', decodePath: 'sample', minVer: legacy.minVer, authVer: legacy.authVer, numStructs: legacy.numStructs,
+        unitsScalingFactor: 0.001, warnings: [], wires: [], tree: null,
+        blocks: [
+          { blockType: 0x50524300, name: 'PRC_FileHeader', dataSize: 52, metaSize: 0, offset: 0 },
+          { blockType: 0x50524301, name: 'PRC_BRepStructureTree', dataSize: legacy.compLen, metaSize: 0, offset: 52 }
+        ],
+        parts
+      };
+    }
+    const D = getModule('PRCDecoder', 'prc-decoder.js');
+    if (!D) throw new Error('PRC decoder (prc-decoder.js) is not loaded');
+    const popts = { warnings: [] };
+    const r = D.parsePRC(u8, popts);
+    const warnings = (r.warnings || popts.warnings || []).slice();
+    const mm = r.units && r.units.unitsInMM > 0 ? r.units.unitsInMM : 1;
+    const toMM = (q) => [q[0] * mm, q[1] * mm, q[2] * mm];
+    const parts = r.parts.filter((p) => p.faces && p.faces.length).map((p, idx) => ({
+      name: p.name || `PRC_Body_${idx + 1}`, meshName: `${p.name || 'PRC_Body_' + (idx + 1)}_Mesh`, materialName: 'PRC_Style',
+      color: p.color || PALETTE[idx % PALETTE.length], opacity: p.opacity, visible: p.visible !== false,
+      positions: mm === 1 ? p.positions : p.positions.map(toMM),
+      faces: p.faces, analyticFeatures: p.analyticFeatures || [], faceIndexPerTriangle: p.faceIndexPerTriangle,
+      numTessFaces: p.numTessFaces, source: p.source || 'tess'
     }));
-
+    const wires = (r.wires || []).map((w, i) => ({
+      name: w.name || `PRC_Wire_${i + 1}`, color: w.color, visible: w.visible !== false,
+      positions: mm === 1 ? w.positions : w.positions.map(toMM), polylines: w.polylines || []
+    }));
+    const fsInfo = (r.info && r.info.fileStructures) || [];
+    const exactParts = parts.filter((p) => p.source === 'brep').length;
+    const decodePath = !parts.length ? 'none' : exactParts === parts.length ? 'PRC exact B-Rep' : exactParts ? 'PRC tess + exact B-Rep' : 'PRC tess';
+    if (!parts.length) {
+      const geomBytes = fsInfo.reduce((s, f) => s + ((f.geometry && f.geometry.sizeBytes) || 0), 0);
+      const tess = fsInfo.reduce((s, f) => s + (f.tessellations || []).filter((t) => t.kind === '3d' && t.numFaces).length, 0);
+      warnings.push(geomBytes > 64 && !tess
+        ? `PRC has no face tessellation; its ${geomBytes} bytes of exact geometry could not be tessellated${wires.length ? ' (' + wires.length + ' wire(s) shown)' : ''}`
+        : `PRC decoded but no product occurrence references a tessellated representation item (${tess} tessellations, ${fsInfo.length} file structures)`);
+    }
     return {
-      format: 'PRC (ISO 14739-1 B-Rep)',
-      minVer,
-      authVer,
-      numStructs,
-      unitsScalingFactor: 0.001,
-      blocks: [
-        { blockType: 0x50524300, name: 'PRC_FileHeader', dataSize: 52, metaSize: 0, offset: 0 },
-        { blockType: 0x50524301, name: 'PRC_BRepStructureTree', dataSize: compLen, metaSize: 0, offset: 52 }
-      ],
+      format: 'PRC (ISO 14739-1)', decodePath, minVer: r.info && r.info.minVersion, authVer: r.info && r.info.authoringVersion,
+      numStructs: fsInfo.length, unitsScalingFactor: 0.001, units: { source: r.units, positionsIn: 'mm' },
+      tree: r.tree || null, wires, warnings,
+      blocks: fsInfo.map((f, i) => ({ blockType: 0x50524310 + (i & 0xf), name: `PRC_FileStructure_${i}`, dataSize: (f.geometry && f.geometry.sizeBytes) || 0, metaSize: 0, offset: 0 })),
       parts
     };
   }
@@ -3023,9 +3067,16 @@
 
     const statusBadge = document.getElementById('statusBadge');
     if (statusBadge) {
-      statusBadge.textContent = bounds.allWatertight
-        ? `READY • WATER-TIGHT 2-MANIFOLD (${state.parts.length} SOLIDS)`
-        : `READY • ${state.parts.length} BODIES EXTRACTED`;
+      const ap = (state.streams[state.activeStreamIdx] || {}).parsed || {};
+      const path = ap.decodePath ? `${ap.decodePath.toUpperCase()} • ` : '';
+      const warns = ap.warnings || [];
+      statusBadge.textContent = !state.parts.length
+        ? `${path}NO MESH${warns.length ? ' • ' + warns[0].slice(0, 120) : ''}`
+        : bounds.allWatertight
+          ? `${path}WATER-TIGHT 2-MANIFOLD (${state.parts.length} SOLIDS)`
+          : `${path}${state.parts.length} BODIES EXTRACTED`;
+      statusBadge.title = warns.join('\n');
+      statusBadge.className = 'badge ' + (state.parts.length ? (warns.length ? 'badge-amber' : 'badge-emerald') : 'badge-amber');
     }
 
     // Stream list
@@ -3249,13 +3300,18 @@
     state.activeStreamIdx = idx;
     const st = state.streams[idx];
     if (!st.parsed) {
-      if (st.subtype === 'PRC') {
-        st.parsed = await parsePRCStream(st.rawBytes);
-      } else {
-        st.parsed = parseU3DStream(st.rawBytes);
+      try {
+        if (st.subtype === 'PRC') {
+          st.parsed = await parsePRCStream(st.rawBytes);
+        } else {
+          st.parsed = parseU3DStream(st.rawBytes);
+        }
+      } catch (err) {
+        console.error(err);
+        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)] };
       }
     }
-    state.parts = st.parsed.parts.map((p, i) => ({
+    state.parts = (st.parsed.parts || []).map((p, i) => ({
       ...p,
       color: p.color || PALETTE[i % PALETTE.length],
       visible: true,
