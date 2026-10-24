@@ -699,7 +699,7 @@ function extractPRCFromPDF(u8){
 }
 
 /* ---------------------------------------------------------------- top level */
-function getBrep(){ if(typeof PRCBrep!=='undefined') return PRCBrep; if(typeof require==='function'){ try{ return require('./prc-brep.js'); }catch(e){} } return null; }
+function getBrep(){ if(typeof PRCBrep!=='undefined') return PRCBrep; if(typeof self!=='undefined'&&self.PRCBrep) return self.PRCBrep; if(typeof globalThis!=='undefined'&&globalThis.PRCBrep) return globalThis.PRCBrep; if(typeof require==='function'){ try{ return require('./prc-brep.js'); }catch(e){} } return null; }
 function parsePRC(input, opts){
   opts=opts||{};
   let d=input instanceof Uint8Array? input : new Uint8Array(input);
@@ -780,7 +780,8 @@ function assemble(hdr, fss, model, opts){
         node.part.items.push(item);
         if(ri.type==='Set'){ ri.items.forEach(c=>walkRI(c,RM,rst,pref)); return; }
         if(ri.type==='CoordinateSystem'){ item.matrix=ri.transform&&ri.transform.matrix; return; }
-        const tess=ri.tessIndex>=0? fs.tessellations[ri.tessIndex] : null; if(!tess) return;
+        const tess=ri.tessIndex>=0? fs.tessellations[ri.tessIndex] : null;
+        if(!tess){ if(ri.type==='BrepModel' && ri.exact) exactPart(ri, RM, rst, item); return; }
         const visible=!!((ri.graphics?ri.graphics.behavior:1)&1);
         const label=pth.concat(pd.name&&pd.name!==po.name?[pd.name]:[]).concat([ri.name||(ri.type+'#'+ri.tessIndex)]).join('/');
         const pos=[]; const c=tess.coordinates||[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]]));
@@ -812,6 +813,28 @@ function assemble(hdr, fss, model, opts){
           const w={name:uniq(label), positions:pos, polylines:wirePolylines(c,tess.wireIndexes), color:col?col.rgb:[0,0,0], visible, tessIndex:ri.tessIndex, riType:ri.type};
           item.wireName=w.name; wires.push(w);
         }
+      };
+      // RI_BrepModel without tessellation: tessellate the exact B-Rep body (prc-brep.js)
+      const exactPart=(ri, RM, rst, item)=>{
+        const B=getBrep(); const cs=fs.geometry&&fs.geometry.contexts; if(!B||!cs) return;
+        // RI_BrepModel context/body indices are 1-based (0 = none) in Asymptote and Acrobat output
+        const ci=ri.topoContext-1, bi=ri.body-1;
+        const ctxE=cs[ci]; const body=ctxE&&ctxE.bodies&&ctxE.bodies[bi];
+        if(!body){ warnings.push('PRC: B-Rep body '+ri.topoContext+'/'+ri.body+' missing'); return; }
+        const key='_mesh'+bi; let m=ctxE[key];
+        if(!m){ try{ m=B.tessellateBody(ctxE, bi); }catch(e){ m={error:e.message}; } ctxE[key]=m; }
+        const label=pth.concat(pd.name&&pd.name!==po.name?[pd.name]:[]).concat([ri.name||('BrepModel#'+ri.topoContext+'.'+ri.body)]).join('/');
+        if(m.error){ warnings.push('PRC exact B-Rep '+label+': '+m.error); return; }
+        const visible=!!((ri.graphics?ri.graphics.behavior:1)&1); const col=resolveColor(fs.globals,rst);
+        if(m.tris&&m.tris.length){
+          const p={name:uniq(label), positions:m.positions.map(q=>apply(RM,q)), faces:m.tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
+            analyticFeatures:[], tessIndex:null, riType:ri.type, faceIndexPerTriangle:m.faceOf||null, numTessFaces:m.numFaces||0,
+            faceColors:null, matrix:isIdentity(RM)?null:RM, source:'brep'};
+          item.partName=p.name; parts.push(p); }
+        const pl=m.edges&&m.edges.polylines; if(pl&&pl.length&&m.edges.positions){
+          const w={name:uniq(label+' edges'), positions:m.edges.positions.map(q=>apply(RM,q)), polylines:pl, color:[0,0,0], visible, tessIndex:null, riType:ri.type, source:'brep'};
+          item.wireName=w.name; wires.push(w); }
+        if(m.skippedFaces) warnings.push('PRC exact B-Rep '+label+': '+m.skippedFaces+' face(s) not tessellated');
       };
       pd.items.forEach(ri=>walkRI(ri, M, pstyle, pth));
     }

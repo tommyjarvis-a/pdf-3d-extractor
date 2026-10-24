@@ -134,6 +134,7 @@ function makeReader(r, nameCtx){
       const [name,t,cond,size,mult,alt,expect]=fl[i];
       if(cond && !cond(o,c)) continue;
       if(alt){ const id=r.peekUint(); const a=alt[id];
+        if(id===156 && typeof readCompressedBrep==='function') return readCompressedBrep(r,{read:(t)=>read(t,depth+1)});
         if(!a){ if(SKIPPED[id]) { const e=new Error('compressed B-Rep ('+SKIPPED[id]+') is not supported'); e.compressed=true; throw e; }
           throw new Error(type+': unexpected type id '+id); }
         if(a==='PRC_TYPE_ROOT'){ r.uint(); return null; }
