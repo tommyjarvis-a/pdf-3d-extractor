@@ -818,7 +818,26 @@
     }
   }
 
+  // U3D entry point: ECMA-363 decode plus a clear diagnosis when no mesh comes out (e.g. geometry only in a
+  // vendor New Object Type such as Adobe/Right Hemisphere "RHAdobeMeshResource", whose layout is not public).
   function parseU3DStream(u8) {
+    const r = parseU3DStreamCore(u8);
+    r.warnings = r.warnings || [];
+    const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
+    r.decodePath = tris ? 'U3D' : 'none';
+    if (!tris) {
+      const G = getModule('U3DGuard', 'u3d-guard.js');
+      const sc = G ? G.scanU3D(u8) : { types: {}, newTypes: [] };
+      const meshDecl = ['ffffff31', 'ffffff36', 'ffffff37'].filter((t) => sc.types[t]);
+      r.warnings.push(sc.newTypes.length && !meshDecl.length
+        ? `Unsupported proprietary U3D mesh: geometry is only in vendor New Object Type block(s) ${sc.newTypes.join(', ')} (not defined in ECMA-363), which cannot be decoded`
+        : `U3D parsed but no mesh was produced${Object.keys(sc.types).length ? ' (block types: ' + Object.keys(sc.types).join(',') + ')' : ''}`);
+      r.errorCode = 'U3D_NO_GEOMETRY';
+    }
+    return r;
+  }
+
+  function parseU3DStreamCore(u8) {
     if (u8.length < 24 || asciiSlice(u8, 0, 3) !== 'U3D') {
       throw new Error('Invalid U3D header signature');
     }
