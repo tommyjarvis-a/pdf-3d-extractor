@@ -2469,7 +2469,49 @@
     bodyLines.push('1 0');
     bodyLines.push('');
 
-    return headerLines.concat(bodyLines).join('\n');
+    return joinLarge(headerLines.concat(bodyLines));
+  }
+
+  // -------------------------------------------------------------------------
+  // Large text output: V8 strings top out at ~2^29 chars, so exporters return a plain string for normal
+  // models and an array of line-aligned chunks (each <= 32 Mi chars) for huge ones. Concatenating the chunks
+  // gives exactly lines.join('\n'). triggerDownload() hands the chunks to Blob([...chunks]) directly.
+  // -------------------------------------------------------------------------
+  const TEXT_SINGLE_LIMIT = 1 << 27;
+  const TEXT_CHUNK = 1 << 25;
+  function joinLarge(lines) {
+    let total = 0;
+    for (let i = 0; i < lines.length; i++) total += lines[i].length + 1;
+    if (total < TEXT_SINGLE_LIMIT) return lines.join('\n');
+    const out = [];
+    let start = 0, n = 0;
+    for (let i = 0; i < lines.length; i++) {
+      n += lines[i].length + 1;
+      if (n >= TEXT_CHUNK) { out.push(lines.slice(start, i + 1).join('\n') + '\n'); start = i + 1; n = 0; }
+    }
+    if (start < lines.length) out.push(lines.slice(start).join('\n'));
+    else if (out.length) out[out.length - 1] = out[out.length - 1].slice(0, -1);
+    return out;
+  }
+  function textChunks(t) { return t == null ? [] : Array.isArray(t) ? t : [t]; }
+  function textLength(t) { return textChunks(t).reduce((n, c) => n + c.length, 0); }
+  // First `max` lines + total line count, without splitting / copying the whole text.
+  function previewLines(t, max) {
+    const lines = []; let count = 1, cur = '';
+    for (const c of textChunks(t)) {
+      let p = 0;
+      for (;;) {
+        const q = c.indexOf('\n', p);
+        if (q < 0) { if (lines.length < max) cur += c.slice(p); break; }
+        if (lines.length < max) lines.push(cur + c.slice(p, q));
+        cur = ''; count++; p = q + 1;
+      }
+    }
+    if (lines.length < max) lines.push(cur);
+    return { lines, count };
+  }
+  function forEachLine(t, fn) {
+    for (const c of textChunks(t)) { const ls = c.split('\n'); for (let i = 0; i < ls.length; i++) fn(ls[i]); }
   }
 
   // -------------------------------------------------------------------------
@@ -2628,7 +2670,7 @@
     const pds = add(`PRODUCT_DEFINITION_SHAPE('','',#${pd})`);
     add(`SHAPE_DEFINITION_REPRESENTATION(#${pds},#${shapeRep})`);
 
-    return [
+    return joinLarge([
       'ISO-10303-21;',
       'HEADER;',
       "FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');",
@@ -2640,7 +2682,7 @@
       'ENDSEC;',
       'END-ISO-10303-21;',
       ''
-    ].join('\n');
+    ]);
   }
 
   // -------------------------------------------------------------------------
@@ -2704,7 +2746,7 @@
       }
     }
     lines.push('endsolid CAD_3D_PDF_Assembly', '');
-    return lines.join('\n');
+    return joinLarge(lines);
   }
 
   function buildWavefrontOBJ(parts, units = 'mm') {
@@ -2736,7 +2778,7 @@
       nOffset += p.brep.tris.length;
       lines.push('');
     }
-    return lines.join('\n');
+    return joinLarge(lines);
   }
 
   function buildIGESWireframe(parts, units = 'mm') {
@@ -3234,20 +3276,21 @@
     const codeEl = document.getElementById('drawerCode');
     if (!summaryEl || !codeEl) return;
 
-    if (!state.cachedXT) {
+    // Built lazily, only for the tab that is showing (huge models take seconds per exporter).
+    if (state.activeTab === 'xt' && !state.cachedXT) {
       state.cachedXT = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName });
     }
-    if (!state.cachedSTEP) {
+    if (state.activeTab === 'step' && !state.cachedSTEP) {
       state.cachedSTEP = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units });
     }
 
     if (state.activeTab === 'xt') {
-      const xtLines = state.cachedXT.split('\n');
+      const xtPrev = previewLines(state.cachedXT, 140);
       const counts = { ASSEMBLY: 0, INSTANCE: 0, BODY: 0, REGION: 0, SHELL: 0, FACE: 0, LOOP: 0, FIN: 0, EDGE: 0, VERTEX: 0, PLANE: 0, LINE: 0, POINT: 0 };
       let bodyKindLabel = 'Solid / Sheet B-Rep';
-      for (const ln of xtLines) {
+      forEachLine(state.cachedXT, (ln) => {
         const m = ln.match(/^(\d+)\s+/);
-        if (!m) continue;
+        if (!m) return;
         const code = Number(m[1]);
         if (code === 10) counts.ASSEMBLY++;
         else if (code === 11) counts.INSTANCE++;
@@ -3267,7 +3310,7 @@
         else if (code === 50) counts.PLANE++;
         else if (code === 30) counts.LINE++;
         else if (code === 29) counts.POINT++;
-      }
+      });
 
       summaryEl.innerHTML = `
         <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (SCH_1200000_120060)</div>
@@ -3281,19 +3324,19 @@
         <div class="entity-row"><span>18 VERTEX / 29 POINT</span><strong>${counts.VERTEX}</strong></div>
         <div class="entity-row"><span>50 PLANE Surfaces</span><strong>${counts.PLANE}</strong></div>
       `;
-      codeEl.textContent = xtLines.slice(0, 140).join('\n') +
-        (xtLines.length > 140 ? `\n... (${xtLines.length - 140} more Parasolid XT records — click "Export Parasolid XT (.x_t)" for full file)` : '');
+      codeEl.textContent = xtPrev.lines.join('\n') +
+        (xtPrev.count > 140 ? `\n... (${xtPrev.count - 140} more Parasolid XT records — click "Export Parasolid XT (.x_t)" for full file)` : '');
     } else if (state.activeTab === 'step') {
-      const stepLines = state.cachedSTEP.split('\n');
+      const stepPrev = previewLines(state.cachedSTEP, 140);
       summaryEl.innerHTML = `
         <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">STEP AP214 (ISO 10303-21) Summary</div>
         <div class="entity-row"><span>Schema</span><strong>AUTOMOTIVE_DESIGN</strong></div>
-        <div class="entity-row"><span>Total STEP Entities</span><strong>${stepLines.length - 10}</strong></div>
+        <div class="entity-row"><span>Total STEP Entities</span><strong>${stepPrev.count - 10}</strong></div>
         <div class="entity-row"><span>MANIFOLD_SOLID_BREP</span><strong>${state.parts.filter((p) => p.visible).length}</strong></div>
         <div class="entity-row"><span>Units</span><strong>${state.units.toUpperCase()}</strong></div>
       `;
-      codeEl.textContent = stepLines.slice(0, 140).join('\n') +
-        (stepLines.length > 140 ? `\n... (${stepLines.length - 140} more STEP entities)` : '');
+      codeEl.textContent = stepPrev.lines.join('\n') +
+        (stepPrev.count > 140 ? `\n... (${stepPrev.count - 140} more STEP entities)` : '');
     } else {
       const st = state.streams[state.activeStreamIdx];
       const blocks = (st && st.parsed && st.parsed.blocks) || [];
@@ -3362,7 +3405,7 @@
   function triggerDownload(content, filename, mimeType) {
     const blob = content instanceof Uint8Array
       ? new Blob([content], { type: mimeType })
-      : new Blob([content], { type: `${mimeType};charset=utf-8` });
+      : new Blob(textChunks(content), { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -3495,11 +3538,11 @@
     const btnCopyInspector = document.getElementById('btnCopyInspector');
     if (btnCopyInspector) {
       btnCopyInspector.addEventListener('click', () => {
-        const text = state.activeTab === 'xt'
-          ? (state.cachedXT || '')
-          : state.activeTab === 'step'
-            ? (state.cachedSTEP || '')
-            : (document.getElementById('drawerCode').textContent || '');
+        // Full text for normal models; for chunked (huge) output only the visible preview is copied.
+        const full = state.activeTab === 'xt' ? state.cachedXT : state.activeTab === 'step' ? state.cachedSTEP : null;
+        const text = typeof full === 'string' && full.length < (1 << 24)
+          ? full
+          : (document.getElementById('drawerCode').textContent || '');
         if (navigator.clipboard) navigator.clipboard.writeText(text);
         btnCopyInspector.textContent = 'Copied!';
         setTimeout(() => { btnCopyInspector.textContent = 'Copy Preview'; }, 1200);
