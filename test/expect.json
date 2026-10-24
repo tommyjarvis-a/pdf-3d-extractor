@@ -204,5 +204,59 @@
     402680
    ]
   ]
+ },
+ "r05_tetra4d_grinder_prc_312fs.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    1290707
+   ]
+  ]
+ },
+ "r07_tetra4d_shoe_prc_tess_large.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    650454
+   ]
+  ]
+ },
+ "r13_pdf3d_orthodontic_prc_cairo.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    1987428
+   ]
+  ]
+ },
+ "r08_tetra4d_office_building_prc_aec.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    429271
+   ]
+  ]
+ },
+ "r10_pdf3d_palletizer_u3d_units_aes256r6.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    298807
+   ]
+  ]
+ },
+ "r16_tetra4d_grinder_v2024_prc_312fs_prototypes.pdf": {
+  "streams": [
+   [
+    "PRC",
+    "PRC tess",
+    251605
+   ]
+  ]
  }
 }
