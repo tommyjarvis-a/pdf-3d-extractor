@@ -20,7 +20,7 @@
 
 ### Fixed
 - `RangeError: Invalid string length` on large exports: chunked output plus a `Blob` download, and the inspector preview is truncated.
-- Overflow on large compressed tessellations (index and normal counts past 16-bit or 2^24).
+- Large `TESS_3D_Compressed` models decode without overflow (corpus r17: 402,680 tris).
 - Streams that decoded with 0 triangles because the tessellation was compressed or the geometry was exact B-Rep only.
 
 ### Changed
