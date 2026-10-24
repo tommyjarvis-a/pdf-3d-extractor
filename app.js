@@ -105,7 +105,22 @@
   // -------------------------------------------------------------------------
   // 2. PDF /3D & /RichMedia Stream Extractor
   // -------------------------------------------------------------------------
+  // PDF layer lives in pdf-extract.js (object parser, xref streams/ObjStm, filters+predictors, Standard security
+  // handler with empty user password, /3D + /RichMedia annotation walk). The old regex scanner remains as fallback.
   async function extract3DStreamsFromPDF(u8, fileName) {
+    const X = getModule('PDF3DExtract', 'pdf-extract.js');
+    if (X) {
+      try {
+        const res = await X.extract3DStreamsFromPDF(u8, fileName, { inflate: inflateFlateStream });
+        if (res && res.length) return res;
+      } catch (err) {
+        console.warn('pdf-extract failed, falling back to legacy scanner:', err);
+      }
+    }
+    return extract3DStreamsFromPDFLegacy(u8, fileName);
+  }
+
+  async function extract3DStreamsFromPDFLegacy(u8, fileName) {
     const streams = [];
 
     // Direct raw .u3d or .prc binary file support
