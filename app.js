@@ -29,6 +29,7 @@
   ];
 
   const state = {
+    wires: [], tree: null, attachments: [],
     fileName: 'sample-cad-assembly-3d.pdf',
     fileSize: 0,
     streams: [],
@@ -109,15 +110,19 @@
   // handler with empty user password, /3D + /RichMedia annotation walk). The old regex scanner remains as fallback.
   async function extract3DStreamsFromPDF(u8, fileName) {
     const X = getModule('PDF3DExtract', 'pdf-extract.js');
+    let attachments = [];
     if (X) {
       try {
         const res = await X.extract3DStreamsFromPDF(u8, fileName, { inflate: inflateFlateStream });
         if (res && res.length) return res;
+        attachments = (res && res.attachments) || [];
       } catch (err) {
         console.warn('pdf-extract failed, falling back to legacy scanner:', err);
       }
     }
-    return extract3DStreamsFromPDFLegacy(u8, fileName);
+    const legacy = await extract3DStreamsFromPDFLegacy(u8, fileName);
+    if (!legacy.attachments) legacy.attachments = attachments;
+    return legacy;
   }
 
   async function extract3DStreamsFromPDFLegacy(u8, fileName) {
@@ -3066,6 +3071,27 @@
       }
     }
 
+    // PRC wires / curves and exact B-Rep edges
+    if ((state.wires || []).length) {
+      let segBudget = 400000;
+      ctx.lineWidth = 1;
+      for (const wr of state.wires) {
+        if (wr.visible === false || segBudget <= 0) continue;
+        const c = (wr.color || [0, 0, 0]).map((v) => Math.round(v * 255));
+        ctx.strokeStyle = (c[0] + c[1] + c[2] < 60) ? 'rgba(226,232,240,0.55)' : `rgb(${c[0]},${c[1]},${c[2]})`;
+        ctx.beginPath();
+        for (const pl of wr.polylines || []) {
+          for (let k = 0; k < pl.length; k++) {
+            const q = wr.positions[pl[k]]; if (!q) continue;
+            const pv = projectPoint(q[0], q[1], q[2]);
+            if (k === 0) ctx.moveTo(pv.sx, pv.sy); else ctx.lineTo(pv.sx, pv.sy);
+          }
+          segBudget -= pl.length; if (segBudget <= 0) break;
+        }
+        ctx.stroke();
+      }
+    }
+
     // Draw edges
     if (renderMode === 'wireframe') {
       ctx.lineWidth = 0.85;
@@ -3124,6 +3150,48 @@
   // -------------------------------------------------------------------------
   // 10. UI Panels, Inspector Drawer & File Export Triggers
   // -------------------------------------------------------------------------
+  function escHTML(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // Product tree (PRC product occurrences) + wires + embedded file attachments
+  function renderTreeAndAttachments() {
+    const treeEl = document.getElementById('treeList');
+    if (treeEl) {
+      const rows = []; let budget = 2000;
+      const walk = (n, depth) => {
+        if (!n || budget-- <= 0) return;
+        const items = (n.part && n.part.items) || [];
+        const meshes = items.filter((it) => it.partName).length, wires = items.filter((it) => it.wireName).length;
+        rows.push(`<div class="tree-row" style="padding-left:${6 + depth * 12}px" title="${escHTML(n.matrix ? 'transformed' : '')}">` +
+          `<span>${n.children && n.children.length ? '▾' : '•'} ${escHTML(n.name || (n.part && n.part.name) || 'product')}</span>` +
+          `<code>${meshes ? meshes + ' mesh' : ''}${wires ? ' ' + wires + ' wire' : ''}</code></div>`);
+        for (const c of n.children || []) walk(c, depth + 1);
+      };
+      const tree = Array.isArray(state.tree) ? state.tree : state.tree ? [state.tree] : [];
+      tree.forEach((n) => walk(n, 0));
+      if (budget <= 0) rows.push('<div class="tree-row">… (truncated)</div>');
+      const wires = state.wires || [];
+      if (wires.length) rows.push(`<div class="tree-row"><span>Wires / curves</span><code>${wires.length}</code></div>`);
+      treeEl.innerHTML = rows.join('') || '<div class="tree-row" style="color:var(--text-2)">No product structure in this stream</div>';
+    }
+    const badge = document.getElementById('treeCountBadge');
+    if (badge) badge.textContent = `${(state.attachments || []).length} Attachment${(state.attachments || []).length === 1 ? '' : 's'}`;
+    const attEl = document.getElementById('attachList');
+    if (attEl) {
+      const atts = state.attachments || [];
+      attEl.innerHTML = atts.map((a, i) => `
+        <div class="feature-item">
+          <div><strong>${escHTML(a.name)}</strong>
+            <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);">${a.isCAD ? 'CAD file • ' : ''}${a.size.toLocaleString()} B • ${escHTML(a.where)}${a.error ? ' • ' + escHTML(a.error) : ''}</div></div>
+          ${a.bytes ? `<button class="btn btn-sm" data-att="${i}">Save</button>` : '<code>unreadable</code>'}
+        </div>`).join('');
+      attEl.querySelectorAll('button[data-att]').forEach((b) => b.addEventListener('click', () => {
+        const a = atts[+b.getAttribute('data-att')]; if (a && a.bytes) triggerDownload(a.bytes, a.name.split(/[\\/]/).pop() || 'attachment.bin', 'application/octet-stream');
+      }));
+    }
+  }
+
   function refreshAllUI() {
     for (const p of state.parts) {
       if (!p.brep) computePartBRep(p);
@@ -3146,7 +3214,10 @@
       const ap = (state.streams[state.activeStreamIdx] || {}).parsed || {};
       const path = ap.decodePath ? `${ap.decodePath.toUpperCase()} • ` : '';
       const warns = ap.warnings || [];
-      statusBadge.textContent = !state.parts.length
+      const cadAtt = (state.attachments || []).filter((a) => a.isCAD);
+      statusBadge.textContent = !state.streams.length && (state.attachments || []).length
+        ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${(cadAtt[0] || state.attachments[0]).name}`
+        : !state.parts.length
         ? `${path}NO MESH${warns.length ? ' • ' + warns[0].slice(0, 120) : ''}`
         : bounds.allWatertight
           ? `${path}WATER-TIGHT 2-MANIFOLD (${state.parts.length} SOLIDS)`
@@ -3271,6 +3342,8 @@
       `).join('');
     }
 
+    renderTreeAndAttachments();
+
     // Viewport HUD
     const activeStream = state.streams[state.activeStreamIdx];
     const hudStreamTitle = document.getElementById('hudStreamTitle');
@@ -3388,6 +3461,8 @@
         st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)] };
       }
     }
+    state.wires = st.parsed.wires || [];
+    state.tree = st.parsed.tree || null;
     state.parts = (st.parsed.parts || []).map((p, i) => ({
       ...p,
       color: p.color || PALETTE[i % PALETTE.length],
@@ -3404,8 +3479,16 @@
     state.fileName = fileName || 'document-3d.pdf';
     state.fileSize = u8.length;
     const streams = await extract3DStreamsFromPDF(u8, state.fileName);
+    state.attachments = (streams && streams.attachments) || [];
     if (streams.length === 0) {
-      alert('No embedded /3D (U3D / PRC) streams found in this file.');
+      if (state.attachments.length) {
+        // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
+        state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
+        state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
+        refreshAllUI();
+        return;
+      }
+      alert('No embedded /3D (U3D / PRC) streams or file attachments found in this file.');
       return;
     }
     state.streams = streams;

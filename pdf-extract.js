@@ -287,6 +287,7 @@
       if (Array.isArray(n.Kids)) for (const k of n.Kids) walk(k, d + 1); else out.push(n); };
     if (root && root.Pages) walk(root.Pages, 0); return out; }
 
+  const CAD_EXT = new Set(['step', 'stp', 'stpz', 'p21', 'igs', 'iges', 'x_t', 'x_b', 'xmt_txt', 'xmt_bin', 'sat', 'sab', 'jt', 'catpart', 'catproduct', 'cgr', 'prt', 'asm', 'sldprt', 'sldasm', 'ipt', 'iam', 'par', 'psm', '3dm', 'stl', 'obj', '3mf', 'ply', 'fbx', 'gltf', 'glb', 'dae', 'u3d', 'prc', 'dwg', 'dxf', 'ifc', 'vda', 'model', 'neu', 'creo', 'f3d', 'skp', 'brep']);
   async function extract3DStreamsFromPDF(u8, fileName, opts) {
     opts = opts || {};
     const head = latin1(u8, 0, 4);
@@ -331,13 +332,32 @@
         if (is3D || isEF) await take(new Ref(n, o.gen), { container: is3D ? 'stream scan' : 'EmbeddedFile scan', page: null, annot: null, title: '' }, isEF);
       }
     }
+    // embedded files (catalog /EmbeddedFiles name tree + /FileAttachment annotations): offered as downloads
+    const attachments = []; const seenEF = new Set();
+    const takeFS = async (fsRef, where) => {
+      const fsd = doc.resolve(fsRef); if (!fsd || typeof fsd !== 'object') return; const ef = doc.resolve(fsd.EF) || {}; const sref = ef.UF || ef.F;
+      if (!(sref instanceof Ref) || seenEF.has(sref.num)) return; seenEF.add(sref.num); const o = doc.getObj(sref.num); if (!o || !o.stream) return;
+      const name = textOf(doc, fsd.UF) || textOf(doc, fsd.F) || ('attachment-' + sref.num);
+      let data = null, error = null; try { data = (await doc.streamData(o, true)).data; } catch (e) { error = e.message; }
+      const ext = (/\.([A-Za-z0-9_]+)$/.exec(name) || [, ''])[1].toLowerCase();
+      attachments.push({ name, ext, isCAD: CAD_EXT.has(ext), bytes: data, size: data ? data.length : 0, error, objNum: sref.num, where, description: textOf(doc, fsd.Desc) || '' });
+    };
+    try {
+      const root = doc.resolve(doc.trailer.Root) || {}; const names = doc.resolve(root.Names) || {};
+      for (const [, fsRef] of nameTreeValues(doc, names.EmbeddedFiles, [])) await takeFS(fsRef, 'EmbeddedFiles');
+      for (let pi = 0; pi < pages.length; pi++) { const annots = doc.resolve(pages[pi].Annots); if (!Array.isArray(annots)) continue;
+        for (const ar of annots) { const a = doc.resolve(ar); if (a && isName(a.Subtype, 'FileAttachment')) await takeFS(a.FS, 'FileAttachment p' + (pi + 1)); } }
+      for (const e of seenObj.values()) if (!e.st && e.meta && e.meta.container === '/RichMedia') { /* non-3D RichMedia assets (e.g. .swf/.js) are not CAD */ }
+    } catch (e) { doc.log.push('attachments: ' + e.message); }
     const bySha = new Map();
-    return found.map((e, i) => {
+    const out = found.map((e, i) => {
       const fp = e.r.data.length + ':' + latin1(e.r.data, 0, 64) + latin1(e.r.data, Math.max(0, e.r.data.length - 64)); const same = bySha.get(fp); if (same === undefined) bySha.set(fp, i);
       return { index: i, subtype: e.st, filter: e.r.filters.join(' + ') || 'None', compressedLength: doc.rawStream(e.o).length, rawBytes: e.r.data,
         title: `${e.meta.title || '3D Stream'} #${i + 1} (${e.st}, ${e.meta.container}${e.meta.page ? ' p' + e.meta.page : ''})`, objNum: e.o.num, page: e.meta.page, annot: e.meta.annot,
         container: e.meta.container, annotations: e.refs.length, encrypted: !!doc.crypt, sameAs: same, log: i === 0 ? doc.log : undefined };
     });
+    out.attachments = attachments; out.log = doc.log;
+    return out;
   }
   return { extract3DStreamsFromPDF, _Doc: Doc, _Parser: Parser, _predictor: predictor };
 });
