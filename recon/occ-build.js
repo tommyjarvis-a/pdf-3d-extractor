@@ -208,6 +208,8 @@
     const regN = (f, v) => { const nn = input.regionNormal ? input.regionNormal(f, v) : [VN[3 * v], VN[3 * v + 1], VN[3 * v + 2]]; return nn; };
     const triArea = ts => { let A = 0; for (const t of ts) { const a = P(T[3 * t]), b = P(T[3 * t + 1]), c = P(T[3 * t + 2]); A += norm(cross(sub(b, a), sub(c, a))) / 2; } return A; };
 
+    // lastKind: the OCC surface class makeSurface actually built (a TORUS fit can become a sphere or a surface of revolution)
+    let lastKind = null;
     function makeSurface(r) {
       const t = r.type, p = r.params; const Preg = regVerts.get(r.face).map(P);
       let cen = [0, 0, 0]; for (const q of Preg) cen = add(cen, q); cen = mul(cen, 1 / Preg.length);
@@ -217,18 +219,18 @@
         for (let i = 0; i < nu; i++) for (let j = 0; j < nvv; j++) poles.SetValue(i + 1, j + 1, gp(b.poles[i][j]));
         const km = U => { const { K, M } = knotsMults(U); const KA = new oc.TColStd_Array1OfReal_2(1, K.length), MA = new oc.TColStd_Array1OfInteger_2(1, K.length); K.forEach((x, i) => { KA.SetValue(i + 1, x); MA.SetValue(i + 1, M[i]); }); return [KA, MA]; };
         const [Ku, Mu] = km(b.tu), [Kv, Mv] = km(b.tv);
-        return hS(new oc.Geom_BSplineSurface_1(poles, Ku, Kv, Mu, Mv, b.deg || 3, b.deg || 3, false, false));
+        lastKind = 'bspline'; return hS(new oc.Geom_BSplineSurface_1(poles, Ku, Kv, Mu, Mv, b.deg || 3, b.deg || 3, false, false));
       }
-      if (t === 'PLANE') { const n = p.normal; return hS(new oc.Geom_Plane_1(new oc.gp_Ax3_3(gp(p.origin), gd(n), gd(perp(n, [1, 0, 0]))))); }
-      if (t === 'CYLINDER') { const a = p.axis, c = p.origin; const x = gapDir(a, c, Preg).dir; return hS(new oc.Geom_CylindricalSurface_1(new oc.gp_Ax3_3(gp(c), gd(a), gd(perp(a, x))), p.radius)); }
+      if (t === 'PLANE') { const n = p.normal; lastKind = 'plane'; return hS(new oc.Geom_Plane_1(new oc.gp_Ax3_3(gp(p.origin), gd(n), gd(perp(n, [1, 0, 0]))))); }
+      if (t === 'CYLINDER') { const a = p.axis, c = p.origin; const x = gapDir(a, c, Preg).dir; lastKind = 'cylinder'; return hS(new oc.Geom_CylindricalSurface_1(new oc.gp_Ax3_3(gp(c), gd(a), gd(perp(a, x))), p.radius)); }
       if (t === 'SPHERE') {
         const c = p.center; const d = sub(cen, c); let x = norm(d) > 1e-9 ? mul(unit(d), -1) : perp([0, 0, 1], [1, 0, 0]);
         let a = perp(x, [0, 0, 1]); a = unit(cross(x, a));
-        return hS(new oc.Geom_SphericalSurface_1(new oc.gp_Ax3_3(gp(c), gd(a), gd(perp(a, x))), p.radius));
+        lastKind = 'sphere'; return hS(new oc.Geom_SphericalSurface_1(new oc.gp_Ax3_3(gp(c), gd(a), gd(perp(a, x))), p.radius));
       }
       if (t === 'CONE') {
         const apex = p.apex, a = unit(p.axis), al = p.half_angle_deg * Math.PI / 180; const h = dot(sub(cen, apex), a); const loc = add(apex, mul(a, h));
-        const x = gapDir(a, loc, Preg).dir; return hS(new oc.Geom_ConicalSurface_1(new oc.gp_Ax3_3(gp(loc), gd(a), gd(perp(a, x))), al, Math.abs(h) * Math.tan(al)));
+        const x = gapDir(a, loc, Preg).dir; lastKind = 'cone'; return hS(new oc.Geom_ConicalSurface_1(new oc.gp_Ax3_3(gp(loc), gd(a), gd(perp(a, x))), al, Math.abs(h) * Math.tan(al)));
       }
       if (t === 'TORUS' && p.major < 1e-3 * p.minor) return makeSurface({ face: r.face, type: 'SPHERE', params: { center: p.center, radius: p.minor } });
       if (t === 'TORUS') {
@@ -239,9 +241,9 @@
           const mv = Math.min(0.02, wr.gap / 4);
           const circ = new oc.Geom_Circle_2(new oc.gp_Ax2_2(gp(add(c, mul(x, p.major))), gd(cross(x, a)), gd(x)), p.minor);
           const arc = new oc.Geom_TrimmedCurve(hC(circ), wr.lo - mv, wr.hi + mv, true, true);
-          return hS(new oc.Geom_SurfaceOfRevolution(hC(arc), new oc.gp_Ax1_2(gp(c), gd(a))));
+          lastKind = 'revolution'; return hS(new oc.Geom_SurfaceOfRevolution(hC(arc), new oc.gp_Ax1_2(gp(c), gd(a))));
         }
-        return hS(new oc.Geom_ToroidalSurface_1(new oc.gp_Ax3_3(gp(c), gd(a), gd(x)), p.major, p.minor));
+        lastKind = 'torus'; return hS(new oc.Geom_ToroidalSurface_1(new oc.gp_Ax3_3(gp(c), gd(a), gd(x)), p.major, p.minor));
       }
       throw new Error('unknown surface type ' + t);
     }
@@ -318,7 +320,7 @@
       if (skip.has(f)) { finfo.push({ face: f, type: r.type, split_of: r.split_of, how: 'SKIPPED', why: skip.get(f) }); continue; }
       if (shouldStop()) return { cancelled: true };
       try {
-      let S = makeSurface(r);
+      lastKind = null; let S = makeSurface(r); const surface = lastKind;
       const dots = []; const step = Math.max(1, Math.floor(vs.length / 15));
       for (let i = 0; i < vs.length; i += step) {
         const q = P(vs[i]), n = regN(f, vs[i]); if (!n || !isFinite(n[0])) continue;
@@ -347,7 +349,7 @@
       const dA = Math.abs(fa - marea);
       if (!valid) how = 'FAILED'; else if (dA > 0.25 * marea + 0.5) how = 'loose'; else if (dA > 0.02 * marea + 0.05) how = 'approx';
       if (how !== 'FAILED') { faces.push(face); faceHow.push(how); }
-      finfo.push({ face: f, type: r.type, split_of: r.split_of, reversed: rev, how, mesh_area: marea, area: fa, why: how === 'FAILED' ? (valid ? 'trimmed area differs from mesh' : 'invalid trimmed face') : how === 'approx' || how === 'loose' ? 'trimmed area differs from mesh by ' + (100 * dA / marea).toFixed(1) + '%' : undefined });
+      finfo.push({ face: f, type: r.type, surface, split_of: r.split_of, reversed: rev, how, mesh_area: marea, area: fa, why: how === 'FAILED' ? (valid ? 'trimmed area differs from mesh' : 'invalid trimmed face') : how === 'approx' || how === 'loose' ? 'trimmed area differs from mesh by ' + (100 * dA / marea).toFixed(1) + '%' : undefined });
       } catch (err) { finfo.push({ face: f, type: r.type, split_of: r.split_of, how: 'FAILED', why: 'face construction failed: ' + (err && err.message || err) }); }
     }
     const tFaces = Date.now();

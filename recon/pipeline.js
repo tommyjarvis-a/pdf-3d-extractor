@@ -44,7 +44,9 @@
     return (f, v) => { const a = acc.get(f * nv + v); if (!a) return null; const l = Math.hypot(a[0], a[1], a[2]); if (!(l > 0)) return null; return [a[0] / l, a[1] / l, a[2] / l]; };
   }
 
-  const zeroTypes = () => ({ plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, bspline: 0 });
+  // per-part byType counts the OCC surface class each face was built on (not the fitter's label); the export total is
+  // recounted from the written STEP by stepFaceTypes (the STEP writer re-encodes some tori as surfaces of revolution)
+  const zeroTypes = () => ({ plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, revolution: 0, bspline: 0 });
 
   // Run one part -> {shape|null, status:'solid'|'shell'|'mesh_only', reason, summary} or {cancelled:true}
   function runPart(oc, mesh, name, opt) {
@@ -84,12 +86,36 @@
         : bad.length + ' of ' + res.finfo.length + ' faces could not be fitted or trimmed';
     }
     const byType = zeroTypes();
-    for (const f of good) { const k = f.type === 'FREEFORM' ? 'bspline' : String(f.type).toLowerCase(); if (k in byType) byType[k]++; }
+    for (const f of good) { const k = f.surface || (f.type === 'FREEFORM' ? 'bspline' : String(f.type).toLowerCase()); byType[k] = (byType[k] || 0) + 1; }
     return { shape, status, reason, fit, res, check: chk,
       summary: { name: base, faces: good.length, byType, closed: status === 'solid', valid: status === 'solid', unfitFaces, meshFallback: status !== 'solid', check: chk, fitStats: fit.stats, timings: tm } };
   }
 
   const writeFitted = (oc, bodies, productName) => Occ.writeStep(oc, bodies, productName);
-  const api = { baseName, meshFromPart, regionNormalFn, runPart, writeFitted };
+
+  // Count ADVANCED_FACE / FACE_SURFACE geometry by STEP surface entity -> {plane, cylinder, cone, sphere, torus, revolution, bspline[, other]}
+  const STEP_KIND = { PLANE: 'plane', CYLINDRICAL_SURFACE: 'cylinder', CONICAL_SURFACE: 'cone', SPHERICAL_SURFACE: 'sphere',
+    TOROIDAL_SURFACE: 'torus', DEGENERATE_TOROIDAL_SURFACE: 'torus', SURFACE_OF_REVOLUTION: 'revolution',
+    B_SPLINE_SURFACE_WITH_KNOTS: 'bspline', B_SPLINE_SURFACE: 'bspline', BEZIER_SURFACE: 'bspline', RATIONAL_B_SPLINE_SURFACE: 'bspline' };
+  function stepFaceTypes(step) {
+    const text = typeof step === 'string' ? step : new TextDecoder().decode(step);
+    const ents = new Map(); const re = /#(\d+)\s*=\s*([A-Z_0-9]*)\s*\(([\s\S]*?)\)\s*;/g; let m;
+    while ((m = re.exec(text))) {
+      let ty = m[2], args = m[3];
+      if (!ty) { const ks = (args.match(/[A-Z_0-9]+(?=\s*\()/g) || []); ty = ks.find((k) => STEP_KIND[k]) || ks[0] || ''; }
+      ents.set(m[1], { ty, args });
+    }
+    const out = zeroTypes();
+    const kindOf = (id, depth) => { const e = ents.get(id); if (!e) return 'other'; if (STEP_KIND[e.ty]) return STEP_KIND[e.ty];
+      if ((e.ty === 'RECTANGULAR_TRIMMED_SURFACE' || e.ty === 'OFFSET_SURFACE') && depth < 4) { const r = e.args.match(/#(\d+)/); if (r) return kindOf(r[1], depth + 1); }
+      return 'other'; };
+    for (const e of ents.values()) {
+      if (e.ty !== 'ADVANCED_FACE' && e.ty !== 'FACE_SURFACE') continue;
+      const refs = e.args.match(/#\d+/g); if (!refs) continue;
+      const k = kindOf(refs[refs.length - 1].slice(1), 0); out[k] = (out[k] || 0) + 1;
+    }
+    return out;
+  }
+  const api = { baseName, meshFromPart, regionNormalFn, runPart, writeFitted, stepFaceTypes, zeroTypes };
   if (isNode) module.exports = api; else root.PDF3DCadPipeline = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -21,6 +21,8 @@
     - Selections above 1M triangles (r05 grinder, r13) are refused (`too_large`).
     - Fit failures or out-of-memory fall back to the mesh body.
   - Not available in the single-file offline build or from `file://`. The menu item and button are disabled with an explanation.
+  - The kernel wasm is kept in Cache Storage after the first download, so later exports start without downloading it;
+    the "first use downloads 13.7 MB" note checks that cache. Offline or blocked downloads give a plain message and the mesh body.
   - Scripting API for the UI: `PDF3D.canExportCadSurfaces(partIds)` and `PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal })`. See `recon/README.md`.
 - `CAD3DExtractor.buildSTEPAP214({ parts })` accepts an explicit part list. The PRC decoder can return per-corner
   normal indices (`withNormals`, opt-in, used by the fitter); default output is unchanged.

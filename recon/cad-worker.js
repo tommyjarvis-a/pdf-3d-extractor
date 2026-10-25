@@ -5,7 +5,7 @@
  * in : {cmd:'run', prc:ArrayBuffer, partIdx:[i..] (index into parsePRC(...).parts.filter(p => p.faces.length) = app parts),
  *       names:[..], kernelBytes}
  * out: {type:'progress', stage, pct (0..1 within the worker's share), done, total, bytes, totalBytes, label}
- *      {type:'done', fittedStep:ArrayBuffer|null, parts:[{idx, status, reason, summary}], timings, wasmHeapPeak}
+ *      {type:'done', fittedStep:ArrayBuffer|null, byType (face count per STEP surface type)|null, parts:[{idx, status, reason, summary}], timings, wasmHeapPeak}
  *      {type:'error', message}
  */
 'use strict';
@@ -18,7 +18,21 @@ const KERNEL_RAW_BYTES = 50305130;
 const KERNEL_GZ_BYTES = 13719175;  // typical transfer size with gzip
 
 // fetch the wasm ourselves to report download progress (bytes are decompressed bytes; Content-Length may be the gzip size)
-async function fetchWasm(post) {
+// Cache Storage copy of the wasm (cacheName from cad-export.js, versioned by the kernel tag): read first, written after a
+// successful download; cad-export.js probes the same entry for estimate.kernelCached. Missing Cache Storage = HTTP cache only.
+async function openKernelCache(name) {
+  try { if (!name || typeof caches === 'undefined') return null; const c = await caches.open(name);
+    caches.keys().then(ks => ks.forEach(k => { if (k !== name && k.startsWith('pdf3d-cad-kernel-')) caches.delete(k); })).catch(() => {});
+    return c; } catch (e) { return null; }
+}
+async function fetchWasm(post, cacheName) {
+  const cache = await openKernelCache(cacheName);
+  if (cache) { try { const hit = await cache.match(KERNEL_WASM); if (hit && hit.ok) { const b = new Uint8Array(await hit.arrayBuffer()); if (b.length > 1e6) return b; } } catch (e) { /* fall through to the network */ } }
+  const out = await downloadWasm(post);
+  if (cache) { try { await cache.put(KERNEL_WASM, new Response(out, { headers: { 'Content-Type': 'application/wasm', 'Content-Length': String(out.length) } })); } catch (e) { /* quota / private mode */ } }
+  return out;
+}
+async function downloadWasm(post) {
   const r = await fetch(KERNEL_WASM); if (!r.ok) throw new Error('CAD kernel download failed (HTTP ' + r.status + ')');
   const enc = r.headers.get('content-encoding'); const cl = +r.headers.get('content-length') || 0;
   const total = !enc && cl ? cl : KERNEL_RAW_BYTES;
@@ -28,12 +42,12 @@ async function fetchWasm(post) {
     const t = now(); if (t - lastPost > 100) { lastPost = t; const fr = Math.min(got / total, 1);
       // worker share: kernel download 0-0.10, kernel start 0.10-0.12 (the whole kernel stage is 0-0.12)
       post({ stage: 'kernel', pct: fr * 0.10, bytes: got, totalBytes: total, done: got, total,
-        label: enc ? 'Loading CAD kernel ' + Math.round(fr * 100) + '% (' + (KERNEL_GZ_BYTES / 1048576).toFixed(1) + ' MB download)'
-          : 'Loading CAD kernel ' + (got / 1048576).toFixed(1) + ' / ' + (total / 1048576).toFixed(1) + ' MB' }); } }
+        label: enc ? 'Loading CAD kernel ' + Math.round(fr * 100) + '% (' + (KERNEL_GZ_BYTES / 1e6).toFixed(1) + ' MB download)'
+          : 'Loading CAD kernel ' + (got / 1e6).toFixed(1) + ' / ' + (total / 1e6).toFixed(1) + ' MB' }); } }
   const out = new Uint8Array(got); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out;
 }
-async function loadKernel(post) {
-  const t = now(); const wasmBinary = await fetchWasm(post); const tDl = now() - t;
+async function loadKernel(post, cacheName) {
+  const t = now(); const wasmBinary = await fetchWasm(post, cacheName); const tDl = now() - t;
   post({ stage: 'kernel', pct: 0.10, label: 'Starting CAD kernel…' });
   const init = (await import(KERNEL_JS)).default;
   const oc = await new init({ wasmBinary: wasmBinary.buffer, locateFile: p => (p.endsWith('.wasm') ? KERNEL_WASM : p) });
@@ -52,7 +66,8 @@ self.onmessage = async (ev) => {
     const prc = new Uint8Array(m.prc);
     const r = self.PRCDecoder.parsePRC(prc, { warnings: [], withNormals: true });
     const dparts = r.parts.filter(q => q.faces && q.faces.length); timings.decode = Math.round(now() - t);
-    const k = await loadKernel(post); oc = k.oc; heap();
+    let k; try { k = await loadKernel(post, m.cacheName); } catch (e) { if (e && typeof e === 'object') e.stage = 'kernel'; throw e; }
+    oc = k.oc; heap(); self.postMessage({ type: 'kernel', ok: true });
     timings.kernel = Math.round(k.downloadMs + k.initMs); timings.kernelDownload = Math.round(k.downloadMs);
     post({ stage: 'kernel', pct: 0.12, label: 'CAD kernel ready' }, true);
     const sel = m.partIdx.filter(i => dparts[i]);
@@ -85,12 +100,13 @@ self.onmessage = async (ev) => {
     }
     post({ stage: 'write', pct: 0.97, label: 'Writing fitted surfaces…' }, true);
     t = now(); let fitted = null;
-    if (bodies.length) { const bytes = Pipe.writeFitted(oc, bodies, Pipe.baseName(dparts[sel[0]].name)); fitted = bytes.slice().buffer; }
+    let byType = null;
+    if (bodies.length) { const bytes = Pipe.writeFitted(oc, bodies, Pipe.baseName(dparts[sel[0]].name)); fitted = bytes.slice().buffer; byType = Pipe.stepFaceTypes(new Uint8Array(fitted)); }
     timings.writeFitted = Math.round(now() - t); heap();
     timings.worker = Math.round(now() - T0);
-    self.postMessage({ type: 'done', fittedStep: fitted, parts, timings, wasmHeapPeak: heapPeak }, fitted ? [fitted] : []);
+    self.postMessage({ type: 'done', fittedStep: fitted, byType, parts, timings, wasmHeapPeak: heapPeak }, fitted ? [fitted] : []);
   } catch (e) {
     heap();
-    self.postMessage({ type: 'error', message: String((e && e.message) || e), wasmHeapPeak: heapPeak, oom: /memory|Aborted\(OOM|allocation/i.test(String(e && e.message || e)) });
+    self.postMessage({ type: 'error', message: String((e && e.message) || e), stage: (e && e.stage) || null, wasmHeapPeak: heapPeak, oom: /memory|Aborted\(OOM|allocation/i.test(String(e && e.message || e)) });
   }
 };

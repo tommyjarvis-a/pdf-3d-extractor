@@ -48,3 +48,19 @@ Never edit Designer's cad-export-ui.js; strings that live there are listed for D
   brand v1.5.0, APP_VERSION 1.5.0, canExportCadSurfaces -> unavailable, exportCadSurfaces -> skipped/unavailable, Simple item aria-disabled + Advanced button aria-disabled,
   both say "CAD surface export is not available in the single-file (offline) build — use the online version"; 0 page errors, 0 kernel/worker requests.
   (The standalone is rebuilt again after each later step that touches an inlined file.)
+- 12:55 EDT L1–L5 + size label DONE (one commit; L1–L5 touch the same preflight/result code in cad-export.js):
+  - L1: export byType is recounted from the written fitted STEP (`PDF3DCadPipeline.stepFaceTypes`, surface entity of each
+    ADVANCED_FACE). Building-class counting alone gave torus 47 / revolution 32, because the OCC STEP writer re-encodes 16
+    Geom_ToroidalSurface faces as SURFACE_OF_REVOLUTION (B-spline profile). New key `revolution`. head_test now
+    torus 31 / revolution 48 / sphere 4 (= STEP); screw 24 bspline / 8 cylinder / 2 plane.
+  - L2: the no-face-data cause names the real source format (payload magic, then parsed.format, then /Subtype). The bundled
+    sample's active stream #1 is a real U3D stream (magic "U3D\0"), so the U3D wording was right for it; the PRC stream #2 now says
+    "The bundled sample's PRC stream is a legacy container without CAD face data" instead of the generic text.
+  - L3: fitted-only skip = "<cause>. Fitted-only export: no fitted surfaces, so no file was written" (no mesh-body clause).
+  - L4: friendlyError(): HTTP n / Failed to fetch / NetworkError / dynamic import -> reasonCode kernel_download
+    "Could not download the CAD kernel (13.7 MB): you may be offline, …"; worker error / importScripts -> worker_failed.
+  - L5: worker keeps the wasm in Cache Storage (`pdf3d-cad-kernel-<tag>`), cad-export probes caches.match (no network);
+    localStorage fallback set only on a finished run that loaded the kernel. Checked: cancel during kernel -> false, after
+    full run -> true, after caches.delete -> false.
+  - Size: labels use 1e6 (13.7 MB). Designer's MB() helper still divides by 1048576 (Designer list).
+  - Standalone rebuilt and re-checked (file:// and http): unchanged PASS.

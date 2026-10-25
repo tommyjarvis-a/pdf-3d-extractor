@@ -32,7 +32,23 @@
     return null;
   };
   const appState = () => { try { return window.CAD3DExtractor && window.CAD3DExtractor.getState(); } catch (e) { return null; } };
-  const kernelCached = () => { try { return localStorage.getItem(LS_KEY) === KERNEL_TAG; } catch (e) { return false; } };
+  // kernelCached: a real check of the Cache Storage entry the worker writes after a successful kernel load (CACHE_NAME / the
+  // wasm URL; no network request). The preflight is synchronous, so it reads the last probe result; the probe re-runs on load,
+  // on every preflight (async, for the next call) and after every run. Without Cache Storage (non-secure http, some
+  // private modes) it falls back to a localStorage flag that is set only after a run that loaded the kernel and finished.
+  const CACHE_NAME = 'pdf3d-cad-kernel-' + KERNEL_TAG;
+  const WASM_URL = SRC ? new URL('vendor/opencascade/opencascade.full.wasm', SRC).href : null;
+  let cacheProbe = null;  // null = unknown / no Cache Storage, else boolean
+  let probing = null;
+  const probeKernelCache = () => {
+    if (probing || !WASM_URL || typeof caches === 'undefined' || !caches || !caches.open) return probing;
+    probing = caches.open(CACHE_NAME).then((c) => c.match(WASM_URL)).then((r) => { cacheProbe = !!(r && r.ok); }, () => { cacheProbe = null; })
+      .then(() => { probing = null; return cacheProbe; });
+    return probing;
+  };
+  const lsFlag = () => { try { return localStorage.getItem(LS_KEY) === KERNEL_TAG; } catch (e) { return false; } };
+  const kernelCached = () => { probeKernelCache(); return cacheProbe != null ? cacheProbe : lsFlag(); };
+  if (WASM_URL && location.protocol !== 'file:') probeKernelCache();
   const trisOf = (p) => (p && (p.triCount || (p.faces && p.faces.length) || (p.idx ? p.idx.length / 3 : 0))) | 0;
 
   function selection(partIds) {
@@ -42,10 +58,30 @@
     const stream = st && st.streams && st.streams[st.activeStreamIdx];
     const parsed = stream && stream.parsed;
     const fittable = !!(stream && stream.subtype === 'PRC' && stream.rawBytes && parsed && parsed.decodePath !== 'sample');
-    let mode = 'fit', why = null;
-    if (!fittable) { mode = 'mesh_only'; why = stream && stream.subtype === 'U3D' ? 'U3D models carry no CAD face data, so only the mesh body is exported' : 'This model carries no CAD face data, so only the mesh body is exported'; }
-    else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; why = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + '), so only the mesh body is exported'; }
-    return { st, ids, parts, tris, stream, mode, why };
+    let mode = 'fit', cause = null;
+    if (!fittable) { mode = 'mesh_only'; cause = noFaceDataCause(stream); }
+    else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; cause = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + ')'; }
+    // why: the preflight / mesh_only text; cause: the same without the mesh clause (fitted-only skips write nothing)
+    return { st, ids, parts, tris, stream, mode, cause, why: cause && cause + ', so only the mesh body is exported' };
+  }
+  // the source format of the active stream: payload magic first (the /Subtype can lie), then the decoder's format, then /Subtype
+  const sourceFormat = (stream) => {
+    const b = stream && stream.rawBytes;
+    if (b && b.length >= 3) { const m = String.fromCharCode(b[0], b[1], b[2]); if (m === 'PRC' || m === 'U3D') return m; }
+    const f = String((stream && stream.parsed && stream.parsed.format) || (stream && stream.subtype) || '');
+    return /^PRC/i.test(f) ? 'PRC' : /^U3D/i.test(f) ? 'U3D' : null;
+  };
+  function noFaceDataCause(stream) {
+    const fmt = sourceFormat(stream); const parsed = stream && stream.parsed;
+    if (fmt === 'U3D') {
+      return 'This U3D stream stores triangles only (no CAD face data)';
+    }
+    if (fmt === 'PRC') {
+      if (parsed && parsed.decodePath === 'sample') return 'The bundled sample\u2019s PRC stream is a legacy container without CAD face data';
+      if (!(stream && stream.rawBytes)) return 'The raw data of this PRC stream is not available, so no CAD faces can be read';
+      return 'No CAD face data could be decoded from this PRC stream';
+    }
+    return 'This model carries no CAD face data';
   }
   const fmtK = (n) => (n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 2) + ' M' : Math.round(n / 1e3) + ' k') + ' triangles';
 
@@ -59,7 +95,7 @@
     return { ok: true, reason: null, message: sel.why || '', estimate };
   }
 
-  const zeroTypes = () => ({ plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, bspline: 0 });
+  const zeroTypes = () => ({ plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, revolution: 0, bspline: 0 });
   let running = false;
 
   async function exportCadSurfaces(partIds, opts) {
@@ -87,14 +123,15 @@
       // per-part outcome -> overall status
       const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || p.status === 'shell');
       let status, reason = null, reasonCode = null;
-      if (workerErr) { status = 'mesh_only'; reasonCode = workerErr.oom ? 'out_of_memory' : 'error'; reason = (workerErr.oom ? 'Ran out of browser memory while fitting surfaces' : 'Surface fitting failed: ' + workerErr.message) + ' — exported the mesh body only'; }
-      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; reason = sel.why; }
-      else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
+      let cause = null;
+      if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only'; }
+      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
+      else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
       else { status = 'shell'; reasonCode = 'open_shell'; reason = parts.filter((p) => p.status !== 'solid').map((p) => p.summary.name + ': ' + (p.reason || p.status)).join('; '); }
       if (fittedOnly && !bodiesOk.length) {
         timings.total = Math.round(performance.now() - T0);
-        return { blob: null, filename: null, status: 'skipped', reason: (reason || 'Nothing could be fitted') + ' (fitted-only export: no file written)', reasonCode: reasonCode || 'no_fit', summary: summarize(parts, wres, sel, false, timings) };
+        return { blob: null, filename: null, status: 'skipped', reason: (cause || 'Nothing could be fitted').replace(/[.\s]+$/, '') + '. Fitted-only export: no fitted surfaces, so no file was written', reasonCode: reasonCode || 'no_fit', summary: summarize(parts, wres, sel, false, timings) };
       }
       // mesh body (app exporter, main thread) + text merge
       const workerShare = sel.mode === 'fit' ? 92 : 0;
@@ -124,11 +161,27 @@
     } finally { running = false; }
   }
 
+  // worker / kernel failures -> {code, text} a user can act on (raw 'Failed to fetch' / 'worker error' are not shown alone)
+  const KMB = () => (KERNEL_BYTES / 1e6).toFixed(1) + ' MB';
+  function friendlyError(e) {
+    const msg = String((e && e.message) || '');
+    if (e && e.oom) return { code: 'out_of_memory', text: 'Ran out of browser memory while fitting surfaces' };
+    const http = msg.match(/HTTP (\d{3})/);
+    if (http) return { code: 'kernel_download', text: 'Could not download the CAD kernel (' + KMB() + '): the server answered HTTP ' + http[1] };
+    if (/failed to fetch|networkerror|network error|load failed|err_internet|err_network|dynamically imported module/i.test(msg))
+      return { code: 'kernel_download', text: 'Could not download the CAD kernel (' + KMB() + '): you may be offline, or a firewall, proxy or extension blocked it' };
+    if ((e && e.worker) || /^worker error$|^script error\.?$|importScripts/i.test(msg) || !msg)
+      return { code: 'worker_failed', text: 'The CAD fitting worker could not start (offline, or blocked by the browser or the site\u2019s security policy)' };
+    return { code: 'error', text: 'Surface fitting failed: ' + msg.replace(/^(Uncaught\s+)?(Error:\s*)?/, '') };
+  }
+
   function summarize(parts, wres, sel, meshFallback, timings) {
     const byType = zeroTypes(); let faces = 0; const unfit = [];
     for (const p of parts) { if (p.status === 'mesh_only') { for (const f of p.summary.unfitFaces || []) unfit.push({ part: p.idx, face: f }); continue; }
       faces += p.summary.faces; for (const k in p.summary.byType) byType[k] = (byType[k] || 0) + p.summary.byType[k];
       for (const f of p.summary.unfitFaces || []) unfit.push({ part: p.idx, face: f }); }
+    // the written STEP is authoritative for the face types (the writer re-encodes some tori as surfaces of revolution)
+    if (wres && wres.byType) { for (const k in byType) byType[k] = 0; for (const k in wres.byType) if (wres.byType[k] || byType[k] != null) byType[k] = wres.byType[k]; }
     const all = parts.length > 0 && parts.every((p) => p.status === 'solid');
     if (wres) for (const k of ['kernel', 'kernelDownload', 'decode', 'segment', 'fit', 'build', 'validate']) if (wres.timings[k] != null) timings[k] = wres.timings[k];
     return { faces, byType, closed: all, valid: all, unfitFaces: unfit, meshFallback, timings, tris: sel.tris,
@@ -138,22 +191,22 @@
 
   function runWorker(sel, emit, signal) {
     return new Promise((resolve) => {
-      let w; try { w = new Worker(WORKER_URL); } catch (e) { resolve({ error: true, message: String(e && e.message || e) }); return; }
-      let done = false; let lastPct = 0; let heapPeak = 0;
-      const finish = (v) => { if (done) return; done = true; try { w.terminate(); } catch (e) { /* gone */ } if (signal) signal.removeEventListener('abort', onAbort); resolve(v); };
+      let w; try { w = new Worker(WORKER_URL); } catch (e) { resolve({ error: true, worker: true, message: String(e && e.message || e) }); return; }
+      let done = false; let lastPct = 0; let heapPeak = 0; let kernelLoaded = false;
+      const finish = (v) => { if (done) return; done = true; setTimeout(probeKernelCache, 0); try { w.terminate(); } catch (e) { /* gone */ } if (signal) signal.removeEventListener('abort', onAbort); resolve(v); };
       const onAbort = () => finish('cancelled');
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
       w.onmessage = (ev) => { const m = ev.data || {};
         if (m.type === 'progress') { const pct = Math.max(lastPct, Math.round(m.pct * 92 * 10) / 10); lastPct = pct;
-          if (m.stage === 'kernel' && m.pct >= 0.12) { try { localStorage.setItem(LS_KEY, KERNEL_TAG); } catch (e) { /* private mode */ } }
           emit({ stage: m.stage, pct, done: m.done, total: m.total, bytes: m.bytes, totalBytes: m.totalBytes, label: m.label }); }
-        else if (m.type === 'done') { heapPeak = m.wasmHeapPeak; finish({ fittedStep: m.fittedStep, parts: m.parts, timings: m.timings || {}, wasmHeapPeak: heapPeak }); }
+        else if (m.type === 'kernel') kernelLoaded = true;
+        else if (m.type === 'done') { if (kernelLoaded) { try { localStorage.setItem(LS_KEY, KERNEL_TAG); } catch (e) { /* private mode */ } } heapPeak = m.wasmHeapPeak; finish({ fittedStep: m.fittedStep, byType: m.byType || null, parts: m.parts, timings: m.timings || {}, wasmHeapPeak: heapPeak }); }
         else if (m.type === 'cancelled') finish('cancelled');
-        else if (m.type === 'error') finish({ error: true, message: m.message, oom: !!m.oom, wasmHeapPeak: m.wasmHeapPeak }); };
-      w.onerror = (e) => { e.preventDefault && e.preventDefault(); finish({ error: true, message: (e && e.message) || 'worker error', oom: /memory/i.test((e && e.message) || '') }); };
+        else if (m.type === 'error') finish({ error: true, message: m.message, stage: m.stage, oom: !!m.oom, wasmHeapPeak: m.wasmHeapPeak }); };
+      w.onerror = (e) => { e.preventDefault && e.preventDefault(); finish({ error: true, worker: true, message: (e && e.message) || 'worker error', oom: /memory/i.test((e && e.message) || '') }); };
       const prc = sel.stream.rawBytes.slice().buffer;  // copy: the app keeps its bytes
-      w.postMessage({ cmd: 'run', prc, partIdx: sel.ids, names: sel.parts.map((p) => p.name) }, [prc]);
-      emit({ stage: 'kernel', pct: 0, label: kernelCached() ? 'Starting CAD kernel…' : 'Loading CAD kernel (' + (KERNEL_BYTES / 1048576).toFixed(1) + ' MB)…', bytes: 0, totalBytes: KERNEL_BYTES });
+      w.postMessage({ cmd: 'run', cacheName: CACHE_NAME, prc, partIdx: sel.ids, names: sel.parts.map((p) => p.name) }, [prc]);
+      emit({ stage: 'kernel', pct: 0, label: kernelCached() ? 'Starting CAD kernel…' : 'Loading CAD kernel (' + (KERNEL_BYTES / 1e6).toFixed(1) + ' MB)…', bytes: 0, totalBytes: KERNEL_BYTES });
     });
   }
 

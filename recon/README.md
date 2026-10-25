@@ -32,7 +32,11 @@ onProgress({ stage: 'kernel'|'segment'|'fit'|'build'|'validate'|'write', pct, do
 ```
 
 Extras beyond the agreed contract (all additive):
-- `reasonCode`: `unavailable`, `too_large`, `no_parts`, `no_face_data`, `fit_limit`, `no_fit`, `open_shell`, `out_of_memory`, `error` or `cancelled`.
+- `reasonCode`: `unavailable`, `too_large`, `no_parts`, `no_face_data`, `fit_limit`, `no_fit`, `open_shell`, `out_of_memory`,
+  `kernel_download` (CAD kernel could not be downloaded: offline, blocked, or an HTTP error), `worker_failed` (the fitting
+  worker could not start), `error` or `cancelled`. `reason` is always user-facing text (raw "Failed to fetch" /
+  "worker error" are mapped to the two codes above). The no-face-data reason names the actual source format, read from
+  the payload magic (`U3D` / `PRC`), not only the PDF `/Subtype`.
 - `estimate.mode`: `'mesh_only'` when the export will not attempt a fit. `message` then says why.
 - `summary.parts[]`: `{ index, name, status, reason, faces, tris, check: { valid, closed, volume, area, freeEdges, … } }`.
 - `summary.tris` and `summary.wasmHeapPeak` (bytes).
@@ -60,21 +64,32 @@ exporter as *Export STEP*, merged mode, with fitted parts renamed `<part>_mesh`.
 Progress: `pct` is overall 0–100 and monotonic. The worker's share is 0–92: kernel 0–11, then the parts weighted by
 triangles. The mesh body and merge take 92–100. The kernel download reports `bytes`/`totalBytes`; these are
 decompressed bytes of the 50.3 MB wasm, since the browser hides the gzip size. The `label` says
-"Loading CAD kernel NN% (13.1 MB download)". Once the kernel has loaded, `localStorage['pdf3d.cadKernel']` records the
-kernel version, so `estimate.kernelCached` is a best guess that the HTTP cache still holds it.
+"Loading CAD kernel NN% (13.7 MB download)"; sizes in labels are decimal MB (10^6 bytes).
+
+`estimate.kernelCached` is a real cache check. After a successful download the worker stores the wasm in Cache Storage
+(`pdf3d-cad-kernel-<kernel tag>`, older tags are deleted) and reads it from there next time. `canExportCadSurfaces` is
+synchronous, so it returns the result of the last `caches.match` probe (run at page load, on every preflight for the next
+call, and after every run; no network request). When Cache Storage is unavailable (plain http on a non-localhost host,
+some private modes) it falls back to `localStorage['pdf3d.cadKernel']`, which is set only when a run loaded the kernel
+and finished (never after a cancel or a failure).
 
 ## Answers to Designer's open questions (simple-mode README)
 
 1. **partIds** are indices into `CAD3DExtractor.getState().parts`, so `[state.selectedPartIdx]` is right. `null` or
    `undefined` means all *visible* parts and skips hidden ones. Explicit indices are exported even when hidden.
    Unknown or duplicate indices are dropped.
-2. **fittedOnly with no clean fit** returns `status: 'skipped'`, `blob: null`, and a reason ending in "(fitted-only
-   export: no file written)". `mesh_only` always comes with a blob.
+2. **fittedOnly with no clean fit** returns `status: 'skipped'`, `blob: null`, and a reason of the form
+   "<cause>. Fitted-only export: no fitted surfaces, so no file was written" (the cause never says the mesh body is
+   exported). `mesh_only` always comes with a blob.
 3. **Validity:** `solid` always means every part is closed *and* valid (BRepCheck plus no free edges), so `solid` never
    pairs with `valid: false` or `closed: false`. `shell` always has `closed: false, valid: false`. Your downgrade rule
    never fires but is harmless.
-4. **byType keys** are exactly `plane`, `cylinder`, `cone`, `sphere`, `torus`, `bspline`, always present (0 if none).
-   Helical faces are B-spline surfaces and count as `bspline`.
+4. **byType keys** are exactly `plane`, `cylinder`, `cone`, `sphere`, `torus`, `revolution`, `bspline`, always present
+   (0 if none). The export total is counted from the written fitted STEP (the surface entity of every `ADVANCED_FACE`),
+   not from the fitter's labels: a torus fit that covers only part of the tube, and some tori the OCC STEP writer
+   re-encodes, are `SURFACE_OF_REVOLUTION` (`revolution`); a degenerate torus (major radius ~0) is a sphere. Helical
+   faces are B-spline surfaces and count as `bspline`. head_test: 31 torus + 48 revolution + 4 sphere. An `other` key
+   appears only if the STEP holds a surface type outside this list.
 5. **pct** is overall 0–100 and monotonic (never goes back), not per stage.
 6. **Preflight** stays synchronous and cheap: it reads the app state and sums triangle counts, and never loads the
    kernel. Calling it on every change is fine.
