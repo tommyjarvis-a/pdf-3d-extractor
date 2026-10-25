@@ -1348,6 +1348,116 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
 @keyframes sm-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 </style>
+<style data-href="cad-export-ui.css">
+/*
+ * cad-export-ui.css — styles for cad-export-ui.js (CAD surfaces STEP export).
+ * Only targets elements the add-on creates (class prefix "cad-"); uses the app's tokens
+ * (--bg-*, --border*, --text-*, --cyan, --emerald, --amber, --rose) and the Simple-mode look
+ * (glass panel, 10px radius, cyan focus ring). Integration: <link rel="stylesheet" href="cad-export-ui.css" />
+ */
+.cad-toast, .cad-mi, .cad-adv {
+  --cad-glass: rgba(15, 22, 35, 0.94);
+  --cad-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+[hidden].cad-toast, .cad-toast [hidden], .cad-mi [hidden], .cad-adv [hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- Simple: Export ▾ menu item */
+.sm-mi.cad-mi { align-items: flex-start; white-space: normal; }
+.cad-mi .cad-mi-ico { color: var(--cyan); font-size: 10px; line-height: 17px; }
+.cad-mi .sm-mi-ext { line-height: 17px; }
+.cad-mi-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cad-mi-sub, .cad-mi-sub2 { font: 400 11px var(--sans); color: var(--text-2); max-width: 230px; }
+.cad-mi-sub2 { font-size: 10.5px; }
+/* disabled but still focusable (aria-disabled) so the reason can be read; reason stays legible */
+.sm-mi.cad-mi[aria-disabled="true"], .sm-mi.cad-mi-opt[aria-disabled="true"] { cursor: not-allowed; }
+.sm-mi.cad-mi[aria-disabled="true"]:hover, .sm-mi.cad-mi-opt[aria-disabled="true"]:hover { background: transparent; }
+.cad-mi[aria-disabled="true"] .sm-mi-label, .cad-mi[aria-disabled="true"] .cad-mi-ico, .cad-mi[aria-disabled="true"] .sm-mi-ext,
+.cad-mi-opt[aria-disabled="true"] > * { opacity: 0.45; }
+.cad-mi-sub.cad-why { color: var(--text-1); }
+.cad-mi-sub.cad-why::before { content: "⊘ "; color: var(--amber); }
+.sm-mi.cad-mi-opt { padding-left: 33px; }        /* sub-option of the CAD item */
+
+/* ---------------------------------------------------------------- Advanced: export bar */
+.cad-adv { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.cad-adv-btn::before { content: "◆"; color: var(--cyan); font-size: 9px; }
+.btn.cad-adv-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn.cad-adv-btn[aria-disabled="true"]:hover { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); }
+.btn.cad-adv-btn[aria-disabled="true"]:active { transform: none; filter: none; }
+.cad-adv-opt { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--sans); color: var(--text-1); cursor: pointer; user-select: none; }
+.cad-adv-opt:hover { color: var(--text-0); }
+.cad-adv-opt input { accent-color: var(--cyan); margin: 0; cursor: pointer; }
+.cad-adv-opt:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
+.cad-adv-note { font: 400 11px var(--sans); color: var(--text-2); cursor: default; }
+.cad-adv-note.cad-why::before { content: "⊘ "; color: var(--amber); }
+
+/* ---------------------------------------------------------------- progress / result toast (non-modal) */
+.cad-toast {
+  position: fixed;
+  z-index: 75;                      /* above sheets (40), below popovers (80) and dialogs (90) */
+  right: 16px;
+  bottom: 16px;
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px 12px;
+  border: 1px solid var(--border-hi);
+  border-left: 3px solid var(--cyan);
+  border-radius: 10px;
+  background: var(--cad-glass);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--cad-shadow);
+  color: var(--text-0);
+  font: 400 12.5px var(--sans);
+}
+body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: switch moved to bottom-right corner */
+@media (max-width: 900px) { body:has(.sm-modeswitch--float) .cad-toast { bottom: 52px; } }
+.cad-toast:focus { outline: none; }
+.cad-toast:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.cad-toast[data-tone="ok"] { border-left-color: var(--emerald); }
+.cad-toast[data-tone="warn"] { border-left-color: var(--amber); }
+.cad-toast[data-tone="err"] { border-left-color: var(--rose); }
+.cad-toast[data-tone="muted"] { border-left-color: var(--border-hi); }
+.cad-t-h { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.cad-t-ico { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); flex-shrink: 0; box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18); }
+.cad-toast[data-state="running"] .cad-t-ico { animation: cad-pulse 1.2s ease-in-out infinite; }
+.cad-toast[data-tone="ok"] .cad-t-ico { background: var(--emerald); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18); }
+.cad-toast[data-tone="warn"] .cad-t-ico { background: var(--amber); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18); }
+.cad-toast[data-tone="err"] .cad-t-ico { background: var(--rose); box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.18); }
+.cad-toast[data-tone="muted"] .cad-t-ico { background: var(--text-2); box-shadow: none; }
+.cad-t-title { margin: 0; flex: 1; font: 700 13px var(--sans); color: var(--text-0); }
+.cad-t-time { font: 500 11px var(--mono); color: var(--text-2); cursor: default; }
+.cad-t-x { padding: 2px 7px; font-size: 15px; line-height: 1; }
+.cad-t-stage { margin: 8px 0 6px; color: var(--text-1); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cad-bar { position: relative; height: 6px; border-radius: 999px; background: var(--bg-0); border: 1px solid var(--border); overflow: hidden; }
+.cad-bar-fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: linear-gradient(90deg, #0ea5e9, var(--cyan)); transition: width 0.25s ease-out; }
+.cad-bar.is-indeterminate .cad-bar-fill { width: 30%; animation: cad-indet 1.1s ease-in-out infinite; }
+.cad-t-msg { margin-top: 8px; color: var(--text-1); font-size: 12px; line-height: 1.45; }
+.cad-t-msg p { margin: 0 0 4px; }
+.cad-t-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--border); font-size: 11px; }
+.cad-t-dl dt { color: var(--text-2); }
+.cad-t-dl dd { margin: 0; color: var(--text-1); font-family: var(--mono); font-size: 10.5px; overflow-wrap: anywhere; }
+.cad-t-note { margin: 8px 0 0; color: var(--text-2); font-size: 10.5px; line-height: 1.4; cursor: default; }
+.cad-t-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.cad-t-actions:not(:has(> :not([hidden]))) { display: none; }
+.cad-toast .btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.cad-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 720px) {
+  .cad-toast { left: 8px; right: 8px; bottom: 8px; width: auto; max-width: none; }
+  body:has(.sm-modeswitch--float) .cad-toast { bottom: 48px; }   /* Advanced: floating switch sits bottom-right below 900px */
+  .cad-toast .btn { min-height: 40px; min-width: 40px; justify-content: center; }
+  .cad-mi-sub, .cad-mi-sub2 { max-width: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cad-toast:not([hidden]) { animation: cad-in 0.16s ease-out; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cad-toast[data-state="running"] .cad-t-ico, .cad-bar.is-indeterminate .cad-bar-fill { animation: none; }
+}
+@keyframes cad-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes cad-pulse { 50% { opacity: 0.35; } }
+@keyframes cad-indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
+</style>
 </head>
 <body>
 
@@ -1356,7 +1466,7 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
     <div class="brand">
       <div class="brand-badge">3D</div>
       <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.4.1</span></div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.5.0</span></div>
         <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
       </div>
     </div>
@@ -3450,8 +3560,10 @@ function facePrimitives(f, cb){
 }
 function faceVertexCount(f){ let n=0; facePrimitives(f,(k,o,t,nv)=>{ n+=nv; }); return n; }
 // Returns {tris:[[a,b,c]...] (point indices, i.e. coord/3), faceOf:[faceIdx...]}
-function triangulate3d(t){
+function triangulate3d(t, wantN){
   const A=t.triangulated, tris=[], faceOf=[]; const noN=!!t.mustRecalcNormals;
+  // wantN (opt-in, used by the CAD-surfaces export): also record the normal index of every triangle corner
+  const cornerN=wantN?[]:null; let lastN=-1;
   // When normals are not stored, the writers' StartTriangulated offsets still count them:
   // recompute the offsets by running through the faces (texture indices only count if
   // the tessellation carries texture coordinates).
@@ -3459,18 +3571,18 @@ function triangulate3d(t){
   t.faces.forEach((f,fi)=>{ let p=noN? run : f.startTriangulated; const nt=(noN && !hasTex)? 0 : f.numTexIndices;
     facePrimitives(f,(kind,one,textured,nv,single)=>{
       const tex=textured; const savedNt=nt; // textured flags carry nt indices; untextured carry none
-      const take=(withNormal)=>{ if(withNormal&&!noN) p++; if(tex) p+=savedNt; const v=A[p++]; if(v===undefined) throw new Error('PRC: triangulated index overflow in face '+fi); if(v%3) throw new Error('PRC: point index not multiple of 3 in face '+fi); return v/3; };
+      const take=(withNormal)=>{ if(withNormal&&!noN){ lastN=A[p]; p++; } if(tex) p+=savedNt; const v=A[p++]; if(v===undefined) throw new Error('PRC: triangulated index overflow in face '+fi); if(v%3) throw new Error('PRC: point index not multiple of 3 in face '+fi); return v/3; };
       if(kind==='tri'){
-        for(let i=0;i<nv/3;i++){ let a,b,c; if(one){ a=take(true); b=take(false); c=take(false); } else { a=take(true); b=take(true); c=take(true); } tris.push([a,b,c]); faceOf.push(fi); }
+        for(let i=0;i<nv/3;i++){ let a,b,c,na,nb,nc; if(one){ a=take(true); na=nb=nc=lastN; b=take(false); c=take(false); } else { a=take(true); na=lastN; b=take(true); nb=lastN; c=take(true); nc=lastN; } tris.push([a,b,c]); if(cornerN) cornerN.push([na,nb,nc]); faceOf.push(fi); }
       } else {
-        const idx=[]; for(let i=0;i<nv;i++){ const wn= one ? (single ? i===0 : true) : true; idx.push(take(wn)); }
-        if(kind==='fan') for(let i=1;i+1<nv;i++){ tris.push([idx[0],idx[i],idx[i+1]]); faceOf.push(fi); }
-        else for(let i=0;i+2<nv;i++){ tris.push(i&1?[idx[i+1],idx[i],idx[i+2]]:[idx[i],idx[i+1],idx[i+2]]); faceOf.push(fi); }
+        const idx=[], nidx=[]; for(let i=0;i<nv;i++){ const wn= one ? (single ? i===0 : true) : true; idx.push(take(wn)); nidx.push(lastN); }
+        if(kind==='fan') for(let i=1;i+1<nv;i++){ tris.push([idx[0],idx[i],idx[i+1]]); if(cornerN) cornerN.push([nidx[0],nidx[i],nidx[i+1]]); faceOf.push(fi); }
+        else for(let i=0;i+2<nv;i++){ tris.push(i&1?[idx[i+1],idx[i],idx[i+2]]:[idx[i],idx[i+1],idx[i+2]]); if(cornerN) cornerN.push(i&1?[nidx[i+1],nidx[i],nidx[i+2]]:[nidx[i],nidx[i+1],nidx[i+2]]); faceOf.push(fi); }
       }
     });
     run=p;
   });
-  return {tris, faceOf};
+  return cornerN? {tris, faceOf, cornerN} : {tris, faceOf};
 }
 // Wire polylines: returns [[pointIndex...]...]
 function wirePolylines(coords, w){
@@ -3844,7 +3956,7 @@ function assemble(hdr, fss, model, opts){
           item.partName=p.name; parts.push(p); return;
         }
         if(tess.kind==='3d'){
-          const {tris,faceOf}=triangulate3d(tess); if(!tris.length) return;
+          const {tris,faceOf,cornerN}=triangulate3d(tess, !!opts.withNormals); if(!tris.length) return;
           let col=resolveColor(fs.globals,rst);
           if(!col){ // fall back to first face line attribute
             for(const f of tess.faces){ if(f.lineAttributes.length){ col=resolveColor(fs.globals,f.lineAttributes[0]-1); if(col) break; } } }
@@ -3852,6 +3964,7 @@ function assemble(hdr, fss, model, opts){
           const p={name:uniq(label), positions:T?null:mkPos(), faces:tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:ri.tessIndex, riType:ri.type, faceIndexPerTriangle:faceOf, numTessFaces:tess.faces.length,
             faceColors: faceColors.some(Boolean)? faceColors : null, matrix:isIdentity(RM)?null:RM};
+          if(cornerN && !tess.mustRecalcNormals && tess.normals && tess.normals.length){ p.cornerNormalIdx=cornerN; p.tessNormals=tess.normals; }
           if(T) typedPart(p,applyFlat(RM,c),packTris(tris,(c.length/3)|0));
           item.partName=p.name; parts.push(p);
         } else if(tess.kind==='wire'){
@@ -4675,7 +4788,7 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.4.1
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -4692,7 +4805,7 @@ void main() { gl_FragColor = uRGBA; }`;
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.4.1';
+  const APP_VERSION = '1.5.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export is hidden from the UI pending an NX compatibility fix (NX reports the
@@ -8849,7 +8962,7 @@ void main() { gl_FragColor = uRGBA; }`;
     activateStream,
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
     buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
-    buildSTEPAP214: (o = {}) => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
+    buildSTEPAP214: (o = {}) => buildSTEPAP214(o.parts || state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
     buildBinarySTL: (o = {}) => buildBinarySTL(state.parts, state.units, o),
     buildASCIISTL: (o = {}) => buildASCIISTL(state.parts, state.units, o),
     buildWavefrontOBJ: (o = {}) => buildWavefrontOBJ(state.parts, state.units, o),
@@ -8862,6 +8975,276 @@ void main() { gl_FragColor = uRGBA; }`;
       loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf');
     }
   });
+})();
+
+</script>
+  <script data-src="recon/step-merge.js">
+/* step-merge.js - concatenate the DATA sections of several ISO-10303-21 (STEP) files into one file.
+ * Entity ids of every file after the first are shifted past the previous maximum; '#n' inside quoted strings
+ * (e.g. PRC labels like 'part/BrepModel#7') is left untouched. Each input keeps its own products/contexts, so the
+ * result holds one independent product per input body. Part of pdf-3d-extractor (MIT). */
+(function (root) {
+  'use strict';
+  // returns {header, data, maxId}; data = text between 'DATA;' and its 'ENDSEC;' with ids shifted by `offset`
+  function scan(text, offset) {
+    const n = text.length; let i = 0, inStr = false, maxId = 0; const out = []; let seg = 0;
+    let header = null, dataStart = -1, dataEnd = -1;
+    // locate DATA; outside strings
+    while (i < n) {
+      const c = text.charCodeAt(i);
+      if (inStr) { if (c === 39) { if (text.charCodeAt(i + 1) === 39) i++; else inStr = false; } i++; continue; }
+      if (c === 39) { inStr = true; i++; continue; }
+      if (c === 68 && text.startsWith('DATA;', i) && (i === 0 || /\s/.test(text[i - 1]))) { header = text.slice(0, i); dataStart = i + 5; break; }
+      i++;
+    }
+    if (dataStart < 0) throw new Error('STEP merge: no DATA section');
+    i = dataStart; seg = dataStart; inStr = false;
+    while (i < n) {
+      const c = text.charCodeAt(i);
+      if (inStr) { if (c === 39) { if (text.charCodeAt(i + 1) === 39) i++; else inStr = false; } i++; continue; }
+      if (c === 39) { inStr = true; i++; continue; }
+      if (c === 69 && text.startsWith('ENDSEC;', i)) { dataEnd = i; break; }
+      if (c === 35) { // '#'
+        let j = i + 1, v = 0; while (j < n) { const d = text.charCodeAt(j) - 48; if (d < 0 || d > 9) break; v = v * 10 + d; j++; }
+        if (j > i + 1) { const id = v + offset; if (id > maxId) maxId = id; if (offset) { out.push(text.slice(seg, i), '#' + id); seg = j; } i = j; continue; }
+      }
+      i++;
+    }
+    if (dataEnd < 0) throw new Error('STEP merge: unterminated DATA section');
+    out.push(text.slice(seg, dataEnd));
+    return { header, data: out.join(''), maxId };
+  }
+  // texts: array of STEP strings. opts.fileName / opts.description replace FILE_NAME / FILE_DESCRIPTION in the first header.
+  function mergeSTEP(texts, opts) {
+    opts = opts || {}; let offset = 0, header = null; const parts = [];
+    for (const t of texts) { if (!t) continue; const s = scan(t, offset); if (header === null) header = s.header; parts.push(s.data.replace(/^\s*\n?/, '').replace(/\s*$/, '\n')); offset = Math.max(offset, s.maxId); }
+    if (header === null) throw new Error('STEP merge: no input');
+    const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${q(opts.description)}),'2;1');`);
+    if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
+    return header.replace(/\s*$/, '\n') + 'DATA;\n' + parts.join('') + 'ENDSEC;\nEND-ISO-10303-21;\n';
+  }
+  // Chunked variant for big inputs (the app's buildSTEPAP214 returns an array of line-aligned string chunks above
+  // ~256 MB, past V8's max string length). inputs: array of (string | string[] | null). Returns an array of string
+  // chunks for new Blob(chunks); no single string larger than the biggest input chunk is ever built.
+  // Entity ids of input k are shifted by the max id of inputs 0..k-1 (put the small fitted file first: its ids stay).
+  function mergeSTEPChunks(inputs, opts) {
+    opts = opts || {}; let offset = 0, header = null; const out = [];
+    for (const inp of inputs) {
+      if (!inp) continue; const chunks = Array.isArray(inp) ? inp : [inp]; if (!chunks.length) continue;
+      // phase: 0 = before DATA;, 1 = inside DATA, 2 = after ENDSEC. carry = incomplete last line of the previous chunk
+      let phase = 0, carry = '', hdr = '', maxId = offset, inStr = false;
+      const feed = (text, last) => {
+        let s = carry + text; carry = '';
+        if (!last) { const k = s.lastIndexOf('\n'); if (k < 0) { carry = s; return; } carry = s.slice(k + 1); s = s.slice(0, k + 1); }
+        if (phase === 0) { const m = /(^|\s)DATA;/.exec(s); if (!m) { hdr += s; return; } const at = m.index + m[1].length; hdr += s.slice(0, at); s = s.slice(at + 5); phase = 1; }
+        if (phase === 1) {
+          const e = s.indexOf('ENDSEC;'); const body = e >= 0 ? s.slice(0, e) : s; if (e >= 0) phase = 2;
+          const r = scanData(body, offset, inStr); inStr = r.inStr; if (r.maxId > maxId) maxId = r.maxId; if (r.text.trim()) out.push(r.text.replace(/^\s*\n?/, ''));
+        }
+      };
+      for (let i = 0; i < chunks.length; i++) { feed(String(chunks[i]), false); chunks[i] = null; }
+      feed('', true);
+      if (phase === 0) throw new Error('STEP merge: no DATA section');
+      if (header === null) header = hdr;
+      if (out.length && !/\n$/.test(out[out.length - 1])) out.push('\n');
+      offset = Math.max(offset, maxId);
+    }
+    if (header === null) throw new Error('STEP merge: no input');
+    return [fixHeader(header, opts).replace(/\s*$/, '\n') + 'DATA;\n', ...out, 'ENDSEC;\nEND-ISO-10303-21;\n'];
+  }
+  // shift '#n' references (outside quoted strings) of a DATA-section fragment made of whole lines
+  function scanData(text, offset, inStr) {
+    const n = text.length; let i = 0;
+    inStr = !!inStr; let maxId = 0, seg = 0; const out = [];
+    while (i < n) {
+      const c = text.charCodeAt(i);
+      if (inStr) { if (c === 39) { if (text.charCodeAt(i + 1) === 39) i++; else inStr = false; } i++; continue; }
+      if (c === 39) { inStr = true; i++; continue; }
+      if (c === 35) { let j = i + 1, v = 0; while (j < n) { const d = text.charCodeAt(j) - 48; if (d < 0 || d > 9) break; v = v * 10 + d; j++; }
+        if (j > i + 1) { const id = v + offset; if (id > maxId) maxId = id; if (offset) { out.push(text.slice(seg, i), '#' + id); seg = j; } i = j; continue; } }
+      i++;
+    }
+    out.push(text.slice(seg)); return { text: out.join(''), maxId, inStr };
+  }
+  function fixHeader(header, opts) {
+    const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${q(opts.description)}),'2;1');`);
+    if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
+    return header;
+  }
+  const api = { mergeSTEP, mergeSTEPChunks, scan };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.PDF3DStepMerge = api;
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+  <script data-src="recon/cad-export.js">
+/* cad-export.js - "Export as CAD surfaces (STEP)" API for pdf-3d-extractor (MIT). Main-thread side; the work runs in
+ * recon/cad-worker.js (lazily started, terminated after each run). See recon/README.md for the contract and policies.
+ *
+ *   PDF3D.canExportCadSurfaces(partIds)  (sync, cheap, never loads the kernel)
+ *     -> { ok, reason: null|'unavailable'|'too_large'|'no_parts', message, estimate: { tris, kernelBytes, kernelCached, mode } }
+ *   PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal })
+ *     -> Promise<{ blob, filename, status: 'solid'|'shell'|'mesh_only'|'skipped'|'cancelled', reason, reasonCode,
+ *                  summary: { faces, byType, closed, valid, unfitFaces, meshFallback, timings, tris, parts, wasmHeapPeak } }>
+ *   partIds: indices into CAD3DExtractor.getState().parts; null/undefined = all visible parts.
+ */
+(function () {
+  'use strict';
+  const NS = (window.PDF3D = window.PDF3D || {});
+  const cs = document.currentScript;
+  // the single-file build inlines this script (no src): no worker/kernel files next to it -> 'unavailable'
+  const SRC = cs && cs.src ? cs.src : null;
+  const VER = SRC ? (new URL(SRC).searchParams.get('v') || '') : '';
+  const WORKER_URL = SRC ? new URL('cad-worker.js' + (VER ? '?v=' + encodeURIComponent(VER) : ''), SRC).href : null;
+
+  const LIMITS = {
+    maxTris: 1000000,    // above: 'too_large' (skipped) - the WASM heap would run out (2-4 GB limit)
+    maxFitTris: 200000,  // above: mesh body only (fitting would take many minutes and >1.5 GB)
+  };
+  const KERNEL_BYTES = 13719175;  // gzip transfer size of opencascade.full.wasm (50.3 MB raw)
+  const LS_KEY = 'pdf3d.cadKernel';
+  const KERNEL_TAG = 'occjs-2.0.0-beta.b5ff984';
+
+  const unavailableWhy = () => {
+    if (!SRC) return 'CAD surface export is not available in the single-file (offline) build — use the online version';
+    if (location.protocol === 'file:') return 'CAD surface export needs the page to be served over http(s), not opened as a local file';
+    if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') return 'This browser does not support Web Workers / WebAssembly';
+    return null;
+  };
+  const appState = () => { try { return window.CAD3DExtractor && window.CAD3DExtractor.getState(); } catch (e) { return null; } };
+  const kernelCached = () => { try { return localStorage.getItem(LS_KEY) === KERNEL_TAG; } catch (e) { return false; } };
+  const trisOf = (p) => (p && (p.triCount || (p.faces && p.faces.length) || (p.idx ? p.idx.length / 3 : 0))) | 0;
+
+  function selection(partIds) {
+    const st = appState(); const all = (st && st.parts) || [];
+    const ids = partIds == null ? all.map((p, i) => i).filter((i) => all[i].visible !== false) : [...new Set([].concat(partIds))].filter((i) => Number.isInteger(i) && all[i]);
+    const parts = ids.map((i) => all[i]); const tris = parts.reduce((s, p) => s + trisOf(p), 0);
+    const stream = st && st.streams && st.streams[st.activeStreamIdx];
+    const parsed = stream && stream.parsed;
+    const fittable = !!(stream && stream.subtype === 'PRC' && stream.rawBytes && parsed && parsed.decodePath !== 'sample');
+    let mode = 'fit', why = null;
+    if (!fittable) { mode = 'mesh_only'; why = stream && stream.subtype === 'U3D' ? 'U3D models carry no CAD face data, so only the mesh body is exported' : 'This model carries no CAD face data, so only the mesh body is exported'; }
+    else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; why = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + '), so only the mesh body is exported'; }
+    return { st, ids, parts, tris, stream, mode, why };
+  }
+  const fmtK = (n) => (n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 2) + ' M' : Math.round(n / 1e3) + ' k') + ' triangles';
+
+  function canExportCadSurfaces(partIds) {
+    const sel = selection(partIds);
+    const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode };
+    const un = unavailableWhy();
+    if (un) return { ok: false, reason: 'unavailable', message: un, estimate };
+    if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible parts first', estimate };
+    if (sel.tris > LIMITS.maxTris) return { ok: false, reason: 'too_large', message: 'Model too large to fit surfaces in the browser (' + fmtK(sel.tris) + ', limit ' + fmtK(LIMITS.maxTris) + ')', estimate };
+    return { ok: true, reason: null, message: sel.why || '', estimate };
+  }
+
+  const zeroTypes = () => ({ plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, bspline: 0 });
+  let running = false;
+
+  async function exportCadSurfaces(partIds, opts) {
+    const o = opts || {}; const fittedOnly = !!o.fittedOnly; const signal = o.signal;
+    const onProgress = typeof o.onProgress === 'function' ? o.onProgress : () => {};
+    const emit = (p) => { try { onProgress(p); } catch (e) { setTimeout(() => { throw e; }); } };
+    const T0 = performance.now(); const timings = {};
+    const pre = canExportCadSurfaces(partIds); const sel = selection(partIds);
+    const stem = ((sel.st && sel.st.fileName) || 'cad-3d-pdf-assembly').replace(/\.(pdf|u3d|prc)$/i, '');
+    const filename = stem + (fittedOnly ? '-surfaces-only.stp' : '-surfaces.stp');
+    const blank = (extra) => ({ faces: 0, byType: zeroTypes(), closed: false, valid: false, unfitFaces: [], meshFallback: false, timings, tris: sel.tris, parts: [], wasmHeapPeak: 0, ...extra });
+    const cancelled = () => ({ blob: null, filename: null, status: 'cancelled', reason: 'Cancelled by user', reasonCode: 'cancelled', summary: null });
+    if (!pre.ok) return { blob: null, filename: null, status: 'skipped', reason: pre.message, reasonCode: pre.reason, summary: blank() };
+    if (signal && signal.aborted) return cancelled();
+    if (running) throw new Error('A CAD surface export is already running');
+    running = true;
+    try {
+      let wres = null, workerErr = null;
+      if (sel.mode === 'fit') {
+        wres = await runWorker(sel, emit, signal);
+        if (wres === 'cancelled') return cancelled();
+        if (wres && wres.error) { workerErr = wres; wres = null; }
+      }
+      if (signal && signal.aborted) return cancelled();
+      // per-part outcome -> overall status
+      const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || p.status === 'shell');
+      let status, reason = null, reasonCode = null;
+      if (workerErr) { status = 'mesh_only'; reasonCode = workerErr.oom ? 'out_of_memory' : 'error'; reason = (workerErr.oom ? 'Ran out of browser memory while fitting surfaces' : 'Surface fitting failed: ' + workerErr.message) + ' — exported the mesh body only'; }
+      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; reason = sel.why; }
+      else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
+      else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
+      else { status = 'shell'; reasonCode = 'open_shell'; reason = parts.filter((p) => p.status !== 'solid').map((p) => p.summary.name + ': ' + (p.reason || p.status)).join('; '); }
+      if (fittedOnly && !bodiesOk.length) {
+        timings.total = Math.round(performance.now() - T0);
+        return { blob: null, filename: null, status: 'skipped', reason: (reason || 'Nothing could be fitted') + ' (fitted-only export: no file written)', reasonCode: reasonCode || 'no_fit', summary: summarize(parts, wres, sel, false, timings) };
+      }
+      // mesh body (app exporter, main thread) + text merge
+      const workerShare = sel.mode === 'fit' ? 92 : 0;
+      let meshText = null;
+      if (!fittedOnly) {
+        emit({ stage: 'write', pct: workerShare, label: 'Writing mesh body…' });
+        await new Promise((r) => setTimeout(r, 30));
+        if (signal && signal.aborted) return cancelled();
+        const t = performance.now();
+        const byIdx = new Map(parts.map((p) => [p.idx, p]));
+        const meshParts = sel.ids.map((i, k) => { const ap = sel.parts[k]; const wp = byIdx.get(i);
+          return wp && (wp.status === 'solid' || wp.status === 'shell') ? { ...ap, name: wp.summary.name + '_mesh', visible: true } : { ...ap, visible: true }; });
+        meshText = window.CAD3DExtractor.buildSTEPAP214({ parts: meshParts, units: 'mm', brepMode: 'merged', detail: 1 });
+        timings.meshWrite = Math.round(performance.now() - t);
+      }
+      if (signal && signal.aborted) return cancelled();
+      emit({ stage: 'write', pct: 99, label: 'Writing STEP…' });
+      const t = performance.now();
+      const fittedText = wres && wres.fittedStep ? new TextDecoder().decode(wres.fittedStep) : null;
+      const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
+      const blob = new Blob(chunks, { type: 'application/step' });
+      timings.write = Math.round(performance.now() - t) + (timings.meshWrite || 0) + ((wres && wres.timings.writeFitted) || 0);
+      timings.total = Math.round(performance.now() - T0);
+      emit({ stage: 'write', pct: 100, label: 'Done', bytes: blob.size, totalBytes: blob.size });
+      if (signal && signal.aborted) return cancelled();
+      return { blob, filename, status, reason, reasonCode, summary: summarize(parts, wres, sel, !fittedOnly, timings) };
+    } finally { running = false; }
+  }
+
+  function summarize(parts, wres, sel, meshFallback, timings) {
+    const byType = zeroTypes(); let faces = 0; const unfit = [];
+    for (const p of parts) { if (p.status === 'mesh_only') { for (const f of p.summary.unfitFaces || []) unfit.push({ part: p.idx, face: f }); continue; }
+      faces += p.summary.faces; for (const k in p.summary.byType) byType[k] = (byType[k] || 0) + p.summary.byType[k];
+      for (const f of p.summary.unfitFaces || []) unfit.push({ part: p.idx, face: f }); }
+    const all = parts.length > 0 && parts.every((p) => p.status === 'solid');
+    if (wres) for (const k of ['kernel', 'kernelDownload', 'decode', 'segment', 'fit', 'build', 'validate']) if (wres.timings[k] != null) timings[k] = wres.timings[k];
+    return { faces, byType, closed: all, valid: all, unfitFaces: unfit, meshFallback, timings, tris: sel.tris,
+      parts: parts.map((p) => ({ index: p.idx, name: p.summary.name, status: p.status, reason: p.reason, faces: p.summary.faces, tris: p.summary.tris, check: p.summary.check })),
+      wasmHeapPeak: (wres && wres.wasmHeapPeak) || 0 };
+  }
+
+  function runWorker(sel, emit, signal) {
+    return new Promise((resolve) => {
+      let w; try { w = new Worker(WORKER_URL); } catch (e) { resolve({ error: true, message: String(e && e.message || e) }); return; }
+      let done = false; let lastPct = 0; let heapPeak = 0;
+      const finish = (v) => { if (done) return; done = true; try { w.terminate(); } catch (e) { /* gone */ } if (signal) signal.removeEventListener('abort', onAbort); resolve(v); };
+      const onAbort = () => finish('cancelled');
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      w.onmessage = (ev) => { const m = ev.data || {};
+        if (m.type === 'progress') { const pct = Math.max(lastPct, Math.round(m.pct * 92 * 10) / 10); lastPct = pct;
+          if (m.stage === 'kernel' && m.pct >= 0.12) { try { localStorage.setItem(LS_KEY, KERNEL_TAG); } catch (e) { /* private mode */ } }
+          emit({ stage: m.stage, pct, done: m.done, total: m.total, bytes: m.bytes, totalBytes: m.totalBytes, label: m.label }); }
+        else if (m.type === 'done') { heapPeak = m.wasmHeapPeak; finish({ fittedStep: m.fittedStep, parts: m.parts, timings: m.timings || {}, wasmHeapPeak: heapPeak }); }
+        else if (m.type === 'cancelled') finish('cancelled');
+        else if (m.type === 'error') finish({ error: true, message: m.message, oom: !!m.oom, wasmHeapPeak: m.wasmHeapPeak }); };
+      w.onerror = (e) => { e.preventDefault && e.preventDefault(); finish({ error: true, message: (e && e.message) || 'worker error', oom: /memory/i.test((e && e.message) || '') }); };
+      const prc = sel.stream.rawBytes.slice().buffer;  // copy: the app keeps its bytes
+      w.postMessage({ cmd: 'run', prc, partIdx: sel.ids, names: sel.parts.map((p) => p.name) }, [prc]);
+      emit({ stage: 'kernel', pct: 0, label: kernelCached() ? 'Starting CAD kernel…' : 'Loading CAD kernel (' + (KERNEL_BYTES / 1048576).toFixed(1) + ' MB)…', bytes: 0, totalBytes: KERNEL_BYTES });
+    });
+  }
+
+  // UI: Designer's cad-export-ui.js (Simple menu item + Advanced button, progress/cancel toast) drives this API.
+
+  if (!NS.exportCadSurfaces || NS.exportCadSurfaces.__cadStub) {
+    NS.canExportCadSurfaces = canExportCadSurfaces;
+    NS.exportCadSurfaces = exportCadSurfaces;
+    NS.cadSurfaceLimits = LIMITS;
+  }
 })();
 
 </script>
@@ -9666,6 +10049,528 @@ void main() { gl_FragColor = uRGBA; }`;
   // Script is loaded after app.js at the end of <body>, so the markup already exists: apply the
   // mode immediately (no flash of the Advanced UI). app.js binds its listeners on DOMContentLoaded,
   // which is fine because Simple controls only ever proxy to the original elements at click time.
+  if (document.readyState === 'loading' && !$('viewportCanvas')) document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+
+</script>
+  <script data-src="cad-export-ui.js">
+/*
+ * cad-export-ui.js — "Export as CAD surfaces (STEP)" UI add-on for pdf-3d-extractor.
+ *
+ * Integration (index.html, after simple-mode.js and after the script that defines PDF3D.exportCadSurfaces):
+ *   <link rel="stylesheet" href="cad-export-ui.css" />     (in <head>)
+ *   <\script src="cad-export-ui.js"><\/script>               (end of <body>)
+ *
+ * Talks ONLY to Dev's public API (see README "CAD export contract"):
+ *   PDF3D.canExportCadSurfaces(partIds) -> { ok, reason, message, estimate: { tris, kernelBytes, kernelCached } }
+ *   PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal }) -> Promise<{ blob, filename, status, reason, summary }>
+ * Feature-detected: if PDF3D.exportCadSurfaces is missing, the add-on renders nothing (page unchanged).
+ *
+ * Simple mode: an item in the Export ▾ menu (found by DOM: #smMenuExport, re-inserted every time
+ * simple-mode.js rebuilds the format list) + a "Fitted solid only" checkbox item.
+ * Advanced mode: a button + checkbox appended to the original .exportbar export group.
+ * Progress / result: a non-modal toast (role=region) with aria-live announcements; the viewer stays usable.
+ * No edits to simple-mode.js or app.js.
+ */
+(function () {
+  'use strict';
+  if (window.PDF3DCadExportUI) return;
+
+  const $ = (id) => document.getElementById(id);
+  const MB = (b) => (b / 1048576).toFixed(1).replace(/\.0$/, '');
+  const DEFAULT_KERNEL = 13.8 * 1048576;
+  const REASON_TEXT = {
+    unavailable: 'Not available in this build',
+    too_large: 'Model too large for surface fitting',
+    no_parts: 'Open a model with parts first',
+    checking: 'Checking…',
+    error: 'Unavailable (check failed)'
+  };
+  const REASON_ALIAS = { 'too-big': 'too_large', too_big: 'too_large', toobig: 'too_large', 'no-parts': 'no_parts', nopart: 'no_parts' };
+  const STATUS_ALIAS = { fitted: 'solid', 'mesh-only': 'mesh_only', meshonly: 'mesh_only', meshOnly: 'mesh_only', canceled: 'cancelled', aborted: 'cancelled' };
+  const STAGE_TEXT = {
+    kernel: 'Starting CAD kernel…', segment: 'Finding faces in the mesh…', fit: 'Fitting faces…',
+    build: 'Building solid…', validate: 'Checking the solid…', write: 'Writing STEP…'
+  };
+  const TYPE_NAMES = {
+    plane: ['plane', 'planes'], cylinder: ['cylinder', 'cylinders'], cone: ['cone', 'cones'], sphere: ['sphere', 'spheres'],
+    torus: ['torus', 'tori'], bspline: ['B-spline', 'B-spline'], nurbs: ['B-spline', 'B-spline'], other: ['other', 'other']
+  };
+
+  // ------------------------------------------------------------------ tiny DOM helper (same shape as simple-mode.js)
+  function h(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    if (props) {
+      for (const k of Object.keys(props)) {
+        const v = props[k];
+        if (v == null || v === false) continue;
+        if (k === 'class') n.className = v;
+        else if (k === 'text') n.textContent = v;
+        else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
+        else n.setAttribute(k, v === true ? '' : v);
+      }
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : String(kid));
+    return n;
+  }
+
+  // ------------------------------------------------------------------ API access + normalisation
+  const api = () => {
+    const ns = window.PDF3D;
+    return ns && typeof ns.exportCadSurfaces === 'function' ? ns : null;
+  };
+  const appState = () => { try { return window.CAD3DExtractor.getState(); } catch (e) { return null; } };
+  // Selected part (the app has a single selection, state.selectedPartIdx) -> [idx]; otherwise null = all parts.
+  function selection() {
+    const s = appState();
+    if (!s || !s.parts) return { ids: null, name: null };
+    const i = s.selectedPartIdx;
+    if (typeof i === 'number' && i >= 0 && i < s.parts.length) return { ids: [i], name: s.parts[i].name || 'part ' + (i + 1) };
+    return { ids: null, name: null };
+  }
+  let asyncPre = null;   // last result of an async preflight (tolerated, not in the contract)
+  function normPre(r) {
+    if (r === true || r === false) r = { ok: r };
+    if (!r || typeof r !== 'object') r = { ok: true };
+    let reason = r.reason == null ? null : String(r.reason);
+    if (reason && REASON_ALIAS[reason]) reason = REASON_ALIAS[reason];
+    const ok = !!r.ok;
+    const est = r.estimate || {};
+    return {
+      ok, reason: ok ? null : (reason || 'unavailable'),
+      message: (r.message && String(r.message)) || (ok ? '' : (REASON_TEXT[reason] || REASON_TEXT.unavailable)),
+      estimate: { tris: est.tris, kernelBytes: est.kernelBytes || DEFAULT_KERNEL, kernelCached: !!est.kernelCached }
+    };
+  }
+  function preflight() {
+    const ns = api();
+    if (!ns) return null;
+    if (typeof ns.canExportCadSurfaces !== 'function') return normPre({ ok: true });
+    let r;
+    try { r = ns.canExportCadSurfaces(selection().ids); } catch (e) {
+      return normPre({ ok: false, reason: 'error', message: 'Check failed: ' + (e && e.message || e) });
+    }
+    if (r && typeof r.then === 'function') {
+      r.then((v) => { asyncPre = normPre(v); refreshAll(true); }, () => { asyncPre = normPre({ ok: false, reason: 'error' }); refreshAll(true); });
+      return asyncPre || normPre({ ok: false, reason: 'checking' });
+    }
+    return normPre(r);
+  }
+  function normProgress(a, b, c) {
+    const p = typeof a === 'string' ? Object.assign({ stage: a, pct: b }, c || {}) : Object.assign({}, a || {});
+    let pct = p.pct != null ? p.pct : (p.percent != null ? p.percent : p.progress);
+    pct = Number(pct);
+    if (!isFinite(pct)) pct = null;
+    else {
+      if (pct > 0 && pct < 1 && Math.round(pct) !== pct) run.fraction = true;
+      if (run.fraction && pct <= 1) pct *= 100;
+      pct = Math.max(0, Math.min(100, pct));
+    }
+    const total = p.total != null ? p.total : p.n, done = p.done != null ? p.done : p.i;
+    let label = p.label && String(p.label);
+    if (!label) {
+      if (p.stage === 'kernel' && p.totalBytes) label = 'Downloading CAD kernel ' + MB(p.bytes || 0) + ' / ' + MB(p.totalBytes) + ' MB';
+      else if (p.stage === 'fit' && total) label = 'Fitting faces ' + (done || 0) + '/' + total;
+      else label = STAGE_TEXT[p.stage] || (p.stage ? String(p.stage) : 'Working…');
+    }
+    return { stage: p.stage || '', pct, label };
+  }
+  function normResult(r) {
+    r = r || {};
+    let status = String(r.status || '');
+    if (STATUS_ALIAS[status]) status = STATUS_ALIAS[status];
+    const s = Object.assign({}, r.summary || r.stats || {});
+    if (s.unfitFaces == null && s.unfittedFaces != null) s.unfitFaces = Array.isArray(s.unfittedFaces) ? s.unfittedFaces.length : s.unfittedFaces;
+    if (s.unfitFaces == null && Array.isArray(r.unfittedFaces)) s.unfitFaces = r.unfittedFaces.length;
+    if (Array.isArray(s.unfitFaces)) s.unfitFaces = s.unfitFaces.length;
+    let blob = r.blob || null;
+    if (!blob && r.data != null) blob = new Blob([r.data], { type: 'application/step' });
+    // Never present an unclosed body as a solid.
+    if (status === 'solid' && s.closed === false) status = 'shell';
+    return { status, reason: r.reason ? String(r.reason) : '', summary: s, blob, filename: r.filename || defaultName() };
+  }
+  function defaultName() {
+    const s = appState();
+    return ((s && s.fileName) || 'model').replace(/\.[^.]+$/, '') + '-surfaces.stp';
+  }
+
+  // ------------------------------------------------------------------ state
+  const ui = {};
+  let fittedOnly = false;
+  let run = null;        // { ctrl, t0, timer, trigger, pct, label, stage, fraction, cancelling }
+  let last = null;       // last finished result (for "Save again")
+  let hideTimer = null;
+
+  // ------------------------------------------------------------------ Simple mode: Export ▾ menu items
+  function buildSimple() {
+    const menu = $('smMenuExport');
+    if (!menu) return;
+    ui.simpleMenu = menu;
+    ui.simpleTrigger = document.querySelector('[aria-controls="smMenuExport"]');
+    ui.miSub = h('span', { class: 'cad-mi-sub', id: 'cadMiSub' });
+    ui.miSub2 = h('span', { class: 'cad-mi-sub2', id: 'cadMiSub2' });
+    ui.mi = h('button', { type: 'button', class: 'sm-mi cad-mi', role: 'menuitem', 'data-cad': 'simple', 'aria-describedby': 'cadMiSub cadMiSub2' },
+      h('span', { class: 'sm-mi-check cad-mi-ico', 'aria-hidden': 'true', text: '◆' }),
+      h('span', { class: 'cad-mi-text' }, h('span', { class: 'sm-mi-label', text: 'CAD surfaces (STEP)' }), ui.miSub, ui.miSub2),
+      h('span', { class: 'sm-mi-ext', text: '.stp' }));
+    ui.miOpt = h('button', { type: 'button', class: 'sm-mi sm-mi--box cad-mi-opt', role: 'menuitemcheckbox', 'aria-checked': 'false', 'data-cad': 'fitted-only' },
+      h('span', { class: 'sm-mi-check', 'aria-hidden': 'true' }), h('span', { class: 'sm-mi-label', text: 'Fitted solid only' }),
+      h('span', { class: 'sm-mi-ext', text: 'no mesh body' }));
+    ui.mi.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (ui.mi.getAttribute('aria-disabled') === 'true') return;          // stays open; reason is on screen
+      closeSimpleMenu();
+      if (run) focusToast(); else start(ui.simpleTrigger || ui.mi);
+    });
+    ui.miOpt.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (ui.miOpt.getAttribute('aria-disabled') === 'true') return;
+      setFittedOnly(!fittedOnly);
+    });
+    const place = () => {
+      const group = menu.querySelector('[role="group"]');
+      if (!group || !group.children.length || !api()) {
+        if (ui.mi.isConnected && !api()) { ui.mi.remove(); ui.miOpt.remove(); }
+        return;
+      }
+      if (group.contains(ui.mi) && ui.mi.nextSibling === ui.miOpt) return;
+      const anchor = group.querySelector('[data-sm-export="btnExportOBJ"]') ||
+        [...group.querySelectorAll('[data-sm-export^="btnExportSTL"]')].pop();
+      if (anchor) anchor.after(ui.mi, ui.miOpt); else group.append(ui.mi, ui.miOpt);
+      refreshSimple();
+      if (!menu.hidden) {               // grew after simple-mode positioned it: keep it on screen
+        const r = menu.getBoundingClientRect();
+        if (r.bottom > window.innerHeight - 8) menu.style.maxHeight = Math.max(160, window.innerHeight - r.top - 8) + 'px';
+      }
+    };
+    new MutationObserver(place).observe(menu, { childList: true, subtree: true });
+    place();
+  }
+  function closeSimpleMenu() {
+    const t = ui.simpleTrigger;
+    if (t && t.getAttribute('aria-expanded') === 'true') t.click();      // simple-mode toggles it closed
+    if (t) t.focus({ preventScroll: true });
+  }
+  function refreshSimple() {
+    if (!ui.mi || !ui.mi.isConnected) return;
+    const pre = preflight();
+    if (!pre) return;
+    const sel = selection();
+    const dis = !run && !pre.ok;
+    ui.mi.setAttribute('aria-disabled', dis ? 'true' : 'false');
+    ui.mi.classList.toggle('is-disabled', dis);
+    ui.mi.dataset.reason = pre.reason || '';
+    ui.miOpt.setAttribute('aria-disabled', dis ? 'true' : 'false');
+    ui.miOpt.setAttribute('aria-checked', fittedOnly ? 'true' : 'false');
+    ui.miOpt.querySelector('.sm-mi-check').textContent = fittedOnly ? '✓' : '';
+    let sub, sub2 = [];
+    if (run) sub = 'Exporting… ' + (run.pct != null ? Math.round(run.pct) + '%' : '') + ' (show progress)';
+    else if (!pre.ok) sub = pre.message;
+    else {
+      sub = fittedOnly ? 'Fitted solid only, no mesh body' : 'Fitted solid + mesh fallback';
+      if (sel.name) sub2.push('Selected part only: ' + sel.name);
+      if (!pre.estimate.kernelCached) sub2.push('First use downloads ' + MB(pre.estimate.kernelBytes) + ' MB');
+    }
+    ui.miSub.textContent = sub;
+    ui.miSub.classList.toggle('cad-why', dis);
+    ui.miSub2.textContent = sub2.join(' · ');
+    ui.miSub2.hidden = !sub2.length;
+    ui.mi.title = dis ? pre.message : 'Fit CAD surfaces (planes, cylinders, B-splines…) and export STEP' + (fittedOnly ? '' : ' with the mesh body as fallback');
+  }
+
+  // ------------------------------------------------------------------ Advanced mode: button in the export bar
+  function buildAdvanced() {
+    const stepBtn = $('btnExportSTEP');
+    const group = stepBtn && stepBtn.closest('.export-group');
+    if (!group) return;
+    ui.advBtn = h('button', { type: 'button', class: 'btn cad-adv-btn', id: 'cadExportBtn', 'data-cad': 'advanced', 'aria-describedby': 'cadAdvNote' },
+      'CAD Surfaces (.stp)');
+    ui.advChk = h('input', { type: 'checkbox', id: 'cadFittedOnly', 'data-cad': 'fitted-only' });
+    ui.advOpt = h('label', { class: 'cad-adv-opt', for: 'cadFittedOnly', title: 'Write only the fitted solid / surfaces, without the mesh body fallback' }, ui.advChk, 'Fitted only');
+    ui.advNote = h('span', { class: 'cad-adv-note', id: 'cadAdvNote' });
+    // own .export-group right after the original one: on a full bar it wraps as a unit next to the status badge
+    ui.adv = h('div', { class: 'export-group cad-adv', role: 'group', 'aria-label': 'CAD surfaces export' }, ui.advBtn, ui.advOpt, ui.advNote);
+    ui.advGroup = group;
+    ui.advBtn.addEventListener('click', () => {
+      if (ui.advBtn.getAttribute('aria-disabled') === 'true') return;
+      if (run) focusToast(); else start(ui.advBtn);
+    });
+    ui.advChk.addEventListener('change', () => setFittedOnly(ui.advChk.checked));
+  }
+  function refreshAdvanced() {
+    if (!ui.adv) return;
+    const pre = preflight();
+    if (!pre) { if (ui.adv.isConnected) ui.adv.remove(); return; }
+    if (!ui.adv.isConnected) ui.advGroup.after(ui.adv);
+    const dis = !run && !pre.ok;
+    ui.advBtn.setAttribute('aria-disabled', dis ? 'true' : 'false');
+    ui.advBtn.dataset.reason = pre.reason || '';
+    ui.advChk.disabled = dis;
+    ui.advChk.checked = fittedOnly;
+    const sel = selection();
+    ui.advNote.textContent = run ? 'Exporting… ' + (run.pct != null ? Math.round(run.pct) + '%' : '') : (dis ? pre.message : (sel.name ? 'Selected part only' : ''));
+    ui.advNote.hidden = !ui.advNote.textContent;
+    ui.advNote.classList.toggle('cad-why', dis);
+    ui.advBtn.title = dis ? pre.message
+      : 'Fit CAD surfaces and export STEP: fitted solid' + (fittedOnly ? ' only' : ' + mesh body fallback') +
+        (pre.estimate.kernelCached ? '' : ' · first use downloads the ' + MB(pre.estimate.kernelBytes) + ' MB CAD kernel');
+  }
+
+  function setFittedOnly(v) { fittedOnly = !!v; refreshAll(); }
+  let refreshQueued = false;
+  function refreshAll(now) {
+    if (now) { refreshQueued = false; refreshSimple(); refreshAdvanced(); return; }
+    if (refreshQueued) return;
+    refreshQueued = true;
+    Promise.resolve().then(() => { if (refreshQueued) refreshAll(true); });
+  }
+
+  // ------------------------------------------------------------------ toast (progress + result)
+  function buildToast() {
+    ui.tTitle = h('h2', { class: 'cad-t-title', id: 'cadToastTitle', text: 'CAD surfaces (STEP)' });
+    ui.tTime = h('span', { class: 'cad-t-time', 'aria-label': 'Elapsed time' });
+    ui.tClose = h('button', { type: 'button', class: 'btn btn-sm cad-t-x', 'aria-label': 'Dismiss', text: '×', hidden: true });
+    ui.tStage = h('p', { class: 'cad-t-stage' });
+    ui.tFill = h('span', { class: 'cad-bar-fill' });
+    ui.tBar = h('div', { class: 'cad-bar', role: 'progressbar', 'aria-label': 'CAD export progress', 'aria-valuemin': '0', 'aria-valuemax': '100' }, ui.tFill);
+    ui.tMsg = h('div', { class: 'cad-t-msg' });
+    ui.tNote = h('p', { class: 'cad-t-note' });
+    ui.tCancel = h('button', { type: 'button', class: 'btn btn-sm cad-t-cancel', text: 'Cancel' });
+    ui.tSave = h('button', { type: 'button', class: 'btn btn-sm cad-t-save', text: 'Save again', hidden: true });
+    ui.tOk = h('button', { type: 'button', class: 'btn btn-sm cad-t-ok', text: 'Close', hidden: true });
+    ui.tLive = h('div', { class: 'cad-sr', 'aria-live': 'polite', 'aria-atomic': 'true' });
+    ui.toast = h('section', { class: 'cad-toast', role: 'region', 'aria-labelledby': 'cadToastTitle', tabindex: '-1', hidden: true },
+      h('div', { class: 'cad-t-h' }, h('span', { class: 'cad-t-ico', 'aria-hidden': 'true' }), ui.tTitle, ui.tTime, ui.tClose),
+      ui.tStage, ui.tBar, ui.tMsg, ui.tNote,
+      h('div', { class: 'cad-t-actions' }, ui.tSave, ui.tCancel, ui.tOk), ui.tLive);
+    document.body.append(ui.toast);
+    ui.tCancel.addEventListener('click', cancel);
+    ui.tClose.addEventListener('click', () => dismiss(true));
+    ui.tOk.addEventListener('click', () => dismiss(true));
+    ui.tSave.addEventListener('click', () => { if (last && last.blob) download(last.blob, last.filename); });
+    ui.toast.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault(); ev.stopPropagation();         // don't let simple-mode close an open sheet as well
+      if (run) returnFocus(); else dismiss(true);
+    });
+    ui.toast.addEventListener('focusin', () => { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } });
+  }
+  const focusInToast = () => ui.toast && ui.toast.contains(document.activeElement);
+  function focusToast() { if (ui.toast && !ui.toast.hidden) ui.toast.focus({ preventScroll: true }); }
+  function returnFocus() {
+    const t = (run && run.trigger) || (last && last.trigger);
+    const tgt = t && t.isConnected && t.getClientRects().length ? t : (ui.simpleTrigger && ui.simpleTrigger.getClientRects().length ? ui.simpleTrigger : ui.advBtn);
+    if (tgt) tgt.focus({ preventScroll: true });
+  }
+  function fmtTime(ms) { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  function announce(t) { ui.tLive.textContent = ''; setTimeout(() => { ui.tLive.textContent = t; }, 30); }
+
+  function showProgress(pre, sel) {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    ui.toast.hidden = false;
+    ui.toast.dataset.state = 'running';
+    ui.toast.dataset.tone = '';
+    ui.tTitle.textContent = 'Exporting CAD surfaces';
+    ui.tStage.hidden = false; ui.tBar.hidden = false;
+    ui.tMsg.textContent = ''; ui.tMsg.hidden = true;
+    const notes = [];
+    if (sel.name) notes.push('Selected part: ' + sel.name);
+    if (fittedOnly) notes.push('Fitted solid only');
+    if (pre && !pre.estimate.kernelCached) notes.push('First run downloads the CAD kernel (' + MB(pre.estimate.kernelBytes) + ' MB)');
+    notes.push('Usually 15–40 s. You can keep using the viewer.');
+    ui.tNote.textContent = notes.join(' · ');
+    ui.tNote.hidden = false;
+    ui.tCancel.hidden = false; ui.tCancel.disabled = false; ui.tCancel.textContent = 'Cancel';
+    ui.tSave.hidden = true; ui.tOk.hidden = true; ui.tClose.hidden = true;
+    setBar(null, 'Starting…');
+    ui.tTime.textContent = '0:00';
+  }
+  function setBar(pct, label) {
+    ui.tStage.textContent = label;
+    if (pct == null) {
+      ui.tBar.classList.add('is-indeterminate');
+      ui.tBar.removeAttribute('aria-valuenow');
+      ui.tFill.style.width = '';
+    } else {
+      ui.tBar.classList.remove('is-indeterminate');
+      ui.tBar.setAttribute('aria-valuenow', String(Math.round(pct)));
+      ui.tFill.style.width = pct.toFixed(1) + '%';
+    }
+    ui.tBar.setAttribute('aria-valuetext', label + (pct != null ? ' (' + Math.round(pct) + '%)' : ''));
+  }
+
+  // ------------------------------------------------------------------ run
+  async function start(trigger) {
+    const ns = api();
+    if (!ns || run) return;
+    const pre = preflight();
+    if (pre && !pre.ok) { refreshAll(true); return; }
+    const sel = selection();
+    last = null;
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    run = { ctrl, t0: performance.now(), trigger, pct: null, label: '', stage: '', fraction: false, cancelling: false, lastAnn: -1 };
+    const me = run;
+    showProgress(pre, sel);
+    ui.toast.focus({ preventScroll: true });
+    announce('CAD export started. ' + (pre && !pre.estimate.kernelCached ? 'Downloading the CAD kernel first.' : ''));
+    run.timer = setInterval(() => { ui.tTime.textContent = fmtTime(performance.now() - me.t0); }, 500);
+    refreshAll(true);
+    document.dispatchEvent(new CustomEvent('pdf3d:cadexport', { detail: { phase: 'start' } }));
+
+    const onProgress = (a, b, c) => {
+      if (run !== me || me.cancelling) return;
+      const p = normProgress(a, b, c);
+      me.pct = p.pct; me.label = p.label;
+      setBar(p.pct, p.label);
+      const q = p.pct == null ? -1 : Math.floor(p.pct / 25);
+      if (p.stage !== me.stage || q > me.lastAnn) {          // announce stage changes and each 25%, not every tick
+        me.stage = p.stage; me.lastAnn = Math.max(me.lastAnn, q);
+        announce(p.label + (p.pct != null ? ', ' + Math.round(p.pct) + '%' : ''));
+      }
+      if (ui.mi && ui.simpleMenu && !ui.simpleMenu.hidden) refreshSimple();
+      if (ui.advNote && ui.adv.isConnected) ui.advNote.textContent = 'Exporting… ' + (p.pct != null ? Math.round(p.pct) + '%' : '');
+    };
+    let res, err = null;
+    try {
+      const opts = { fittedOnly, onProgress, signal: ctrl ? ctrl.signal : undefined };
+      res = normResult(await ns.exportCadSurfaces(sel.ids, opts));
+    } catch (e) {
+      if (e && e.name === 'AbortError') res = normResult({ status: 'cancelled' });
+      else err = e || new Error('Unknown error');
+    }
+    if (run !== me) return;
+    finish(me, res, err);
+  }
+  function cancel() {
+    if (!run || run.cancelling) return;
+    run.cancelling = true;
+    ui.tCancel.disabled = true;
+    ui.tCancel.textContent = 'Cancelling…';
+    setBar(run.pct, 'Cancelling…');
+    if (run.ctrl) run.ctrl.abort();
+  }
+  function finish(me, res, err) {
+    clearInterval(me.timer);
+    const elapsed = performance.now() - me.t0;
+    const hadFocus = focusInToast();
+    run = null;
+    const out = describe(res, err, elapsed);
+    last = { blob: out.download ? res.blob : null, filename: res && res.filename, trigger: me.trigger, status: out.status };
+    ui.toast.dataset.state = 'done';
+    ui.toast.dataset.tone = out.tone;
+    ui.toast.dataset.status = out.status;
+    ui.tTitle.textContent = out.title;
+    ui.tTime.textContent = fmtTime(elapsed);
+    ui.tStage.hidden = true; ui.tBar.hidden = true;
+    ui.tMsg.textContent = '';
+    for (const line of out.lines) ui.tMsg.append(h('p', null, line));
+    if (out.details.length) ui.tMsg.append(h('dl', { class: 'cad-t-dl' }, out.details.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })])));
+    ui.tMsg.hidden = !ui.tMsg.childNodes.length;
+    ui.tNote.textContent = out.note || ''; ui.tNote.hidden = !out.note;
+    ui.tCancel.hidden = true;
+    ui.tSave.hidden = !last.blob;
+    ui.tOk.hidden = out.status === 'cancelled';
+    ui.tClose.hidden = false;
+    announce(out.title + '. ' + out.lines.join(' '));
+    if (hadFocus) (ui.tOk.hidden ? ui.tClose : ui.tOk).focus({ preventScroll: true });
+    if (out.download) download(res.blob, res.filename);
+    if (out.status === 'cancelled') hideTimer = setTimeout(() => { if (!focusInToast()) dismiss(false); }, 4000);
+    refreshAll(true);
+    document.dispatchEvent(new CustomEvent('pdf3d:cadexport', { detail: { phase: 'done', status: out.status } }));
+  }
+  function dismiss(giveFocusBack) {
+    if (!ui.toast || ui.toast.hidden || run) return;
+    const had = focusInToast();
+    ui.toast.hidden = true;
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    if (giveFocusBack || had) returnFocus();
+  }
+
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+  function byTypeText(bt) {
+    if (!bt) return '';
+    return Object.keys(bt).filter((k) => bt[k] > 0).sort((a, b) => bt[b] - bt[a])
+      .map((k) => { const nm = TYPE_NAMES[k] || [k, k]; return bt[k] + ' ' + (bt[k] === 1 ? nm[0] : nm[1]); }).join(', ');
+  }
+  // Plain-language wording per status. Never says "solid" unless the API reported a closed solid.
+  function describe(res, err, elapsed) {
+    if (err) {
+      return { status: 'error', tone: 'err', title: 'CAD export failed', download: false, details: [],
+        lines: [String((err && err.message) || err), 'Nothing was exported. The mesh exports (STEP, STL, OBJ) still work.'] };
+    }
+    const s = res.summary || {};
+    const has = !!(res.blob && (res.blob.size == null || res.blob.size > 0));
+    const unfit = +s.unfitFaces || 0;
+    const types = byTypeText(s.byType);
+    const details = [];
+    if (s.faces != null && res.status !== 'skipped') details.push(['Fitted faces', String(s.faces) + (types ? ' (' + types + ')' : '')]);
+    if (unfit > 0) details.push(['Not fitted', plural(unfit, 'face')]);
+    if (res.status !== 'skipped' && res.status !== 'cancelled') details.push(['Mesh body', s.meshFallback ? 'included' : 'not included']);
+    if (has && res.filename) details.push(['File', res.filename]);
+    const meshLine = s.meshFallback ? 'The mesh body is included as a fallback.' : (fittedOnlyUsed(s) ? 'No mesh body (fitted solid only).' : '');
+    switch (res.status) {
+      case 'solid': {
+        const lines = [plural(+s.faces || 0, 'face') + ' fitted into a closed solid.'];
+        if (s.valid === false) lines.push('The solid did not pass validation; check it in your CAD tool.');
+        if (meshLine) lines.push(meshLine);
+        return { status: 'solid', tone: s.valid === false ? 'warn' : 'ok', title: s.valid === false ? 'Solid exported with warnings' : 'Fitted solid exported',
+          lines, details, download: has };
+      }
+      case 'shell': {
+        const lines = ['The fitted surfaces don\u2019t close up, so this is not a solid. CAD tools will open it as surfaces (a shell).'];
+        if (res.reason) lines.push(res.reason.replace(/\.?$/, '.'));
+        if (meshLine) lines.push(meshLine);
+        return { status: 'shell', tone: 'warn', title: 'Surfaces exported, not a closed solid', lines, details, download: has };
+      }
+      case 'mesh_only':
+        return { status: 'mesh_only', tone: 'warn', title: 'No clean fit: mesh body exported', download: has, details,
+          lines: [(res.reason || 'The surfaces could not be fitted cleanly.').replace(/\.?$/, '.'),
+            has ? 'The STEP contains the mesh body only (triangles), no fitted surfaces.' : 'Nothing was exported.'] };
+      case 'skipped':
+        return { status: 'skipped', tone: 'muted', title: 'Nothing exported', download: false, details: [],
+          lines: [(res.reason || 'The model was skipped.').replace(/\.?$/, '.'), 'Use Export STEP / STL for a mesh export.'] };
+      case 'cancelled':
+        return { status: 'cancelled', tone: 'muted', title: 'Export cancelled', download: false, details: [], lines: [] };
+      default:
+        return { status: res.status || 'unknown', tone: 'warn', title: 'Export finished (status \u201c' + (res.status || 'unknown') + '\u201d)',
+          download: has, details, lines: [res.reason || 'Check the exported file before using it.'] };
+    }
+  }
+  function fittedOnlyUsed(s) { return s.meshFallback === false; }
+
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = h('a', { href: url, download: filename || defaultName(), hidden: true });
+    document.body.append(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 30000);
+  }
+
+  // ------------------------------------------------------------------ init
+  function init() {
+    if (!$('viewportCanvas') || !document.body) return;
+    buildToast();
+    buildSimple();
+    buildAdvanced();
+    refreshAll(true);
+    // part list changes (load / selection), status changes, mode switches, late-loaded API
+    const obs = (el, opts) => { if (el) new MutationObserver(() => refreshAll()).observe(el, opts); };
+    obs($('partList'), { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    obs($('statusBadge'), { childList: true, characterData: true, subtree: true });
+    document.addEventListener('pdf3d:uimode', () => refreshAll());
+    window.addEventListener('load', () => refreshAll());
+    if (ui.advBtn) ui.advBtn.addEventListener('pointerenter', () => refreshAll(true));
+  }
+
+  window.PDF3DCadExportUI = {
+    refresh: () => refreshAll(true),
+    start: () => start(null),
+    cancel,
+    get running() { return !!run; },
+    get fittedOnly() { return fittedOnly; },
+    set fittedOnly(v) { setFittedOnly(v); }
+  };
   if (document.readyState === 'loading' && !$('viewportCanvas')) document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

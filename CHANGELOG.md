@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0 — Unreleased
+## 1.5.0 — 2026-10-25
 
 ### Added
 - **Export as CAD surfaces (STEP)**, in both modes through Designer's export UI (`cad-export-ui.js` / `cad-export-ui.css`):

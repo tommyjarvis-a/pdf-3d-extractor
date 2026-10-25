@@ -36,3 +36,15 @@ Outputs go to `test-out/` (untracked). Push only feature/cad-surfaces (never mai
   safari-focus.test.js (SAFARI=1): pass (test-out/designer/safari-focus.log).
 - 10:25 EDT: step 4 started: 25-file harness, label cad-merged-6c6bc8c (test-out/harness-run.sh, harness.out).
 - 10:40 EDT: step 4 DONE: harness cad-merged-6c6bc8c 25/25 PASS, 0 diffs in status/tris/parts/verts vs v141-b2e9f8c. All steps done; next: Tester QA, then 1.5.0 bump + merge to main.
+
+## 1.5.0 release prep (after Tester's conditional GO, QA report pdf-3d-extractor-qa/v150/REPORT.md)
+Steps (commit each on feature/cad-surfaces): M1 version bump + standalone rebuild; L1 byType from built faces; L2 source-format message;
+L3 fitted-only skip message; L4 friendly offline/blocked errors; L5 real kernel cache check; size label MB. Then verify (e2e+scorer,
+Designer suite, 25-file harness), merge into main locally (--no-ff) + tag v1.5.0 locally. Do NOT push main or the tag.
+Never edit Designer's cad-export-ui.js; strings that live there are listed for Designer.
+- 2026-10-25 12:20 EDT: started at 82f163c, tree clean (test-out/ untracked).
+- 12:30 EDT: M1 DONE: 1.4.1 -> 1.5.0 in app.js (header + APP_VERSION), index.html (brand label + all 16 ?v=, incl. sample-pdf-b64.js and recon/step-merge.js, recon/cad-export.js), README; CHANGELOG `## 1.5.0 — 2026-10-25`.
+  Standalone rebuilt (tools/build-standalone.js, 16 files inlined, no CAD kernel/worker). Chrome check (test-out/rel150/sa-check.cjs, file:// and http):
+  brand v1.5.0, APP_VERSION 1.5.0, canExportCadSurfaces -> unavailable, exportCadSurfaces -> skipped/unavailable, Simple item aria-disabled + Advanced button aria-disabled,
+  both say "CAD surface export is not available in the single-file (offline) build — use the online version"; 0 page errors, 0 kernel/worker requests.
+  (The standalone is rebuilt again after each later step that touches an inlined file.)
