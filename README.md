@@ -2,12 +2,13 @@
 
 Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECMA-363 & `/Subtype /PRC` ISO 14739-1) from 3D PDF files, reconstructs watertight 2-manifold B-Rep faces and analytic hole/boss features, and exports CAD-ready geometry:
 
-- **Parasolid XT (`.x_t`)** — Native Siemens Parasolid ASCII transmit format (`SCH_1200000_120060`, meter-scaled `1e-3 m/mm`, `UIO=1000`) with `BODY`, `REGION`, `SHELL`, `FACE`, `LOOP`, `FIN`, `EDGE`, `VERTEX`, `PLANE`, `CYLINDER`, `LINE`, and `POINT` topological chains for direct import into Siemens NX, SolidWorks, Solid Edge, and Onshape.
-- **STEP AP214 (`.stp`)** — ISO 10303-21 `MANIFOLD_SOLID_BREP` / `CLOSED_SHELL` / `ADVANCED_FACE` with outer and inner `FACE_BOUND` hole loops.
+- **STEP AP214 (`.stp`)** — Recommended for Siemens NX. ISO 10303-21 `MANIFOLD_SOLID_BREP` / `CLOSED_SHELL` / `ADVANCED_FACE` with outer and inner `FACE_BOUND` hole loops.
 - **Binary & ASCII STL (`.stl`)** — Per-solid watertight triangle meshes.
 - **Wavefront OBJ (`.obj`)** — Multi-body named groups (`o` / `g`) with vertex normals.
 - **IGES 5.3 (`.igs`)** — Sharp feature-edge 3D CAD wireframe (`Entity 110`).
 - **Raw `.u3d` / `.prc` stream extraction** — Direct binary payload extraction from `/3D` and `/RichMedia` dictionaries.
+
+> **Parasolid XT (`.x_t`) export is temporarily disabled.** Siemens NX currently reports the generated `.x_t` as corrupt, so the export button and inspector tab are hidden until the NX import issues are fixed. Use **STEP AP214 (`.stp`)** for NX. The exporter code is retained (`buildParasolidXT` in `app.js`, gated by `ENABLE_XT_EXPORT`); append `?xt=1` to the page URL to re-enable it for development testing only.
 
 ## Usage
 
@@ -38,7 +39,7 @@ Large models: parts are stored as typed arrays with one compact welded B-Rep eac
 
 - **U3D `RHAdobeMeshResource`**: encodings 8/9 (U3D arithmetic coder) are not implemented; files using them are reported with a warning.
 - **Exact B-Rep** is tessellated for display and export. Analytic hole/boss features are only derived from meshes, and trimmed NURBS faces that fail tessellation are skipped with a warning.
-- **Very large models**: Parasolid XT/STEP text output is large (r13, 2M tris: XT 3.7 GB, STEP 1.9 GB); the exporter working set stays near 1.1–1.3 GB, but the browser must hold or spill the resulting Blob. STL/OBJ are far smaller.
+- **Very large models**: STEP text output is large (r13, 2M tris: STEP 1.9 GB); the exporter working set stays near 1.1–1.3 GB, but the browser must hold or spill the resulting Blob. STL/OBJ are far smaller.
 - **Encryption:** only files that open without a user password are supported.
 
 ## Tests

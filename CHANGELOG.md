@@ -20,6 +20,7 @@ Large models (1M+ triangles) no longer exhaust memory, and the vendor U3D mesh i
 - Export builders in the `window.CAD3DExtractor` API accept options (`{blob:true, detail}`), and `computeAssemblyBounds` is exposed.
 
 ### Changed
+- Parasolid .x_t export hidden pending NX compatibility fix (code retained, ?xt=1 to re-enable for testing). STEP AP214 is now the primary export and the default inspector tab; unit labels and the viewport HUD no longer mention XT.
 - Exports at full detail are byte-identical to 1.2.0 on the 9-file reference set (STL/OBJ/IGES/STEP/XT hashes).
 - `pdf-3d-extractor-standalone.html` regenerated.
 

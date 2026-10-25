@@ -19,6 +19,17 @@
   const APP_VERSION = '1.3.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
+  // Parasolid XT (.x_t) export is hidden from the UI pending an NX compatibility fix (NX reports the
+  // output as corrupt). The exporter (buildParasolidXT) is retained and stays on the programmatic API.
+  // For dev testing, append ?xt=1 to the page URL to bring back the export button and inspector tab.
+  const ENABLE_XT_EXPORT = false;
+  const XT_UI_ENABLED = ENABLE_XT_EXPORT || (() => {
+    try {
+      const loc = typeof window !== 'undefined' && window.location;
+      return !!(loc && typeof URLSearchParams !== 'undefined' && new URLSearchParams(loc.search || '').get('xt') === '1');
+    } catch (e) { return false; }
+  })();
+
   const PALETTE = [
     [0.22, 0.58, 0.88],
     [0.16, 0.80, 0.65],
@@ -40,7 +51,7 @@
     brepMode: 'merged',   // 'merged' | 'faceted'
     renderMode: 'shaded-edges',
     explodeFactor: 0,
-    activeTab: 'xt',
+    activeTab: 'step',   // 'xt' tab only exists with ?xt=1 (see ENABLE_XT_EXPORT)
     camera: {
       yaw: -0.68,
       pitch: 0.52,
@@ -3571,7 +3582,9 @@
     }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
-      hudScaleInfo.textContent = `Parasolid XT: 1e-3 m/mm (UIO=1000, res_size=1000, res_linear=1e-8) • Units: ${state.units}`;
+      hudScaleInfo.textContent = XT_UI_ENABLED
+        ? `Parasolid XT: 1e-3 m/mm (UIO=1000, res_size=1000, res_linear=1e-8) • Units: ${state.units}`
+        : `Units: ${state.units} • STEP AP214 export`;
     }
 
     updateInspectorDrawer();
@@ -3582,6 +3595,7 @@
     const summaryEl = document.getElementById('drawerSummary');
     const codeEl = document.getElementById('drawerCode');
     if (!summaryEl || !codeEl) return;
+    if (state.activeTab === 'xt' && !XT_UI_ENABLED) state.activeTab = 'step';
 
     // Built lazily, only for the tab that is showing (huge models take seconds per exporter).
     if (state.activeTab === 'xt' || state.activeTab === 'step') {
@@ -3754,6 +3768,31 @@
   // -------------------------------------------------------------------------
   // 11. Event Listeners & Interactive Camera Controls
   // -------------------------------------------------------------------------
+  // Dev-only (?xt=1): re-create the Parasolid XT export button and inspector tab that were removed from index.html.
+  function injectXTControls() {
+    if (!document.getElementById('btnExportXT')) {
+      const stepBtn = document.getElementById('btnExportSTEP');
+      if (stepBtn && stepBtn.parentNode) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.id = 'btnExportXT';
+        b.title = 'DEV ONLY (?xt=1): ASCII Parasolid Transmit (.x_t) - known NX import issues';
+        b.textContent = 'Export Parasolid XT (.x_t) [dev]';
+        stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
+      }
+    }
+    if (!document.querySelector('.tab-btn[data-tab="xt"]')) {
+      const stepTab = document.querySelector('.tab-btn[data-tab="step"]');
+      if (stepTab && stepTab.parentNode) {
+        const t = document.createElement('button');
+        t.className = 'tab-btn';
+        t.setAttribute('data-tab', 'xt');
+        t.textContent = 'Parasolid .x_t Inspector [dev]';
+        stepTab.parentNode.insertBefore(t, stepTab.nextSibling);
+      }
+    }
+  }
+
   function initEvents() {
     const canvas = document.getElementById('viewportCanvas');
     if (canvas) {
@@ -3864,6 +3903,8 @@
       });
     }
 
+    if (XT_UI_ENABLED) injectXTControls();
+
     // Drawer tabs
     document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -3954,7 +3995,7 @@
     }
 
     // Export Buttons
-    const btnExportXT = document.getElementById('btnExportXT');
+    const btnExportXT = XT_UI_ENABLED ? document.getElementById('btnExportXT') : null;
     if (btnExportXT) {
       btnExportXT.addEventListener('click', () => {
         const xt = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, blob: true });

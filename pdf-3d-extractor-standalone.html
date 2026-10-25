@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230ea5e9'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='13' fill='%2304101d'%3E3D%3C/text%3E%3C/svg%3E" />
-<title>3D PDF → CAD Geometry Extractor (Parasolid .x_t • STEP .stp • STL • OBJ)</title>
+<title>3D PDF → CAD Geometry Extractor (STEP .stp • STL • OBJ • IGES)</title>
 <style>
   :root {
     --bg-0: #090d14;
@@ -596,7 +596,7 @@
       <div class="brand-badge">3D</div>
       <div>
         <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.3.0</span></div>
-        <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • Native Parasolid XT (.x_t) • STEP AP214 (.stp) • STL • OBJ</div>
+        <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
       </div>
     </div>
     <div class="top-controls">
@@ -606,12 +606,12 @@
       <button class="btn btn-sm" id="btnOpenFile">Open 3D PDF / U3D / PRC…</button>
       <input type="file" id="fileInput" accept=".pdf,.u3d,.prc" style="display:none" />
       <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Source Units:</label>
-      <select class="select-ctrl" id="unitSelect" title="CAD unit scaling for Parasolid XT (meters) and STEP/STL/OBJ">
-        <option value="mm" selected>mm (NX Default • XT 1e-3 m)</option>
-        <option value="cm">cm (10 mm • XT 1e-2 m)</option>
-        <option value="in">inch (25.4 mm • XT 0.0254 m)</option>
-        <option value="ft">foot (304.8 mm • XT 0.3048 m)</option>
-        <option value="m">meter (1.0 m • XT 1.0 m)</option>
+      <select class="select-ctrl" id="unitSelect" title="CAD unit scaling for STEP/STL/OBJ/IGES export">
+        <option value="mm" selected>mm (NX default)</option>
+        <option value="cm">cm (10 mm)</option>
+        <option value="in">inch (25.4 mm)</option>
+        <option value="ft">foot (304.8 mm)</option>
+        <option value="m">meter (1000 mm)</option>
       </select>
       <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
       <select class="select-ctrl" id="brepModeSelect" title="Choose Solid/Sheet B-Rep mode for Siemens NX import">
@@ -634,10 +634,7 @@
   <section class="exportbar">
     <div class="export-group">
       <span class="export-label">CAD Export (Siemens NX Ready):</span>
-      <button class="btn btn-primary" id="btnExportXT" title="Export ASCII Parasolid Transmit (.x_t) with native meter scaling (1e-3) and BODY/REGION/SHELL/FACE/LOOP/FIN topology">
-        Export Parasolid XT (.x_t)
-      </button>
-      <button class="btn btn-emerald" id="btnExportSTEP" title="Export ISO 10303-21 STEP AP214 (.stp) MANIFOLD_SOLID_BREP assembly">
+      <button class="btn btn-primary" id="btnExportSTEP" title="Export ISO 10303-21 STEP AP214 (.stp) MANIFOLD_SOLID_BREP assembly">
         Export STEP AP214 (.stp)
       </button>
       <button class="btn" id="btnExportSTL" title="Export Binary STL mesh of visible parts">
@@ -762,7 +759,7 @@
         <div class="viewport-hud-tl" id="viewportHud">
           <div><strong style="color:var(--cyan);" id="hudStreamTitle">Stream: /Subtype /U3D (ECMA-363)</strong></div>
           <div id="hudAssemblyStats">Parts: 4 | Merged B-Rep Faces: -- | Tris: 480</div>
-          <div id="hudScaleInfo">Parasolid Scale: 1e-3 m/mm (UIO=1000, res_linear=1e-8)</div>
+          <div id="hudScaleInfo">Units: mm • STEP AP214 export</div>
         </div>
         <div class="viewport-hud-bl">
           Left-drag: Orbit • Shift/Right-drag: Pan • Scroll: Zoom • Click part in tree to highlight
@@ -773,8 +770,7 @@
       <div class="drawer">
         <div class="drawer-tabs">
           <div class="tab-list">
-            <button class="tab-btn active" data-tab="xt">Parasolid `.x_t` Schema / Entity Inspector</button>
-            <button class="tab-btn" data-tab="step">STEP AP214 (`.stp`) B-Rep Inspector</button>
+            <button class="tab-btn active" data-tab="step">STEP AP214 (`.stp`) B-Rep Inspector</button>
             <button class="tab-btn" data-tab="pdf">PDF `/3D` Stream &amp; U3D/PRC Block Telemetry</button>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
@@ -3157,6 +3153,17 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
   const APP_VERSION = '1.3.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
+  // Parasolid XT (.x_t) export is hidden from the UI pending an NX compatibility fix (NX reports the
+  // output as corrupt). The exporter (buildParasolidXT) is retained and stays on the programmatic API.
+  // For dev testing, append ?xt=1 to the page URL to bring back the export button and inspector tab.
+  const ENABLE_XT_EXPORT = false;
+  const XT_UI_ENABLED = ENABLE_XT_EXPORT || (() => {
+    try {
+      const loc = typeof window !== 'undefined' && window.location;
+      return !!(loc && typeof URLSearchParams !== 'undefined' && new URLSearchParams(loc.search || '').get('xt') === '1');
+    } catch (e) { return false; }
+  })();
+
   const PALETTE = [
     [0.22, 0.58, 0.88],
     [0.16, 0.80, 0.65],
@@ -3178,7 +3185,7 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
     brepMode: 'merged',   // 'merged' | 'faceted'
     renderMode: 'shaded-edges',
     explodeFactor: 0,
-    activeTab: 'xt',
+    activeTab: 'step',   // 'xt' tab only exists with ?xt=1 (see ENABLE_XT_EXPORT)
     camera: {
       yaw: -0.68,
       pitch: 0.52,
@@ -6709,7 +6716,9 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
     }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
-      hudScaleInfo.textContent = `Parasolid XT: 1e-3 m/mm (UIO=1000, res_size=1000, res_linear=1e-8) • Units: ${state.units}`;
+      hudScaleInfo.textContent = XT_UI_ENABLED
+        ? `Parasolid XT: 1e-3 m/mm (UIO=1000, res_size=1000, res_linear=1e-8) • Units: ${state.units}`
+        : `Units: ${state.units} • STEP AP214 export`;
     }
 
     updateInspectorDrawer();
@@ -6720,6 +6729,7 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
     const summaryEl = document.getElementById('drawerSummary');
     const codeEl = document.getElementById('drawerCode');
     if (!summaryEl || !codeEl) return;
+    if (state.activeTab === 'xt' && !XT_UI_ENABLED) state.activeTab = 'step';
 
     // Built lazily, only for the tab that is showing (huge models take seconds per exporter).
     if (state.activeTab === 'xt' || state.activeTab === 'step') {
@@ -6892,6 +6902,31 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
   // -------------------------------------------------------------------------
   // 11. Event Listeners & Interactive Camera Controls
   // -------------------------------------------------------------------------
+  // Dev-only (?xt=1): re-create the Parasolid XT export button and inspector tab that were removed from index.html.
+  function injectXTControls() {
+    if (!document.getElementById('btnExportXT')) {
+      const stepBtn = document.getElementById('btnExportSTEP');
+      if (stepBtn && stepBtn.parentNode) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.id = 'btnExportXT';
+        b.title = 'DEV ONLY (?xt=1): ASCII Parasolid Transmit (.x_t) - known NX import issues';
+        b.textContent = 'Export Parasolid XT (.x_t) [dev]';
+        stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
+      }
+    }
+    if (!document.querySelector('.tab-btn[data-tab="xt"]')) {
+      const stepTab = document.querySelector('.tab-btn[data-tab="step"]');
+      if (stepTab && stepTab.parentNode) {
+        const t = document.createElement('button');
+        t.className = 'tab-btn';
+        t.setAttribute('data-tab', 'xt');
+        t.textContent = 'Parasolid .x_t Inspector [dev]';
+        stepTab.parentNode.insertBefore(t, stepTab.nextSibling);
+      }
+    }
+  }
+
   function initEvents() {
     const canvas = document.getElementById('viewportCanvas');
     if (canvas) {
@@ -7002,6 +7037,8 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
       });
     }
 
+    if (XT_UI_ENABLED) injectXTControls();
+
     // Drawer tabs
     document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -7092,7 +7129,7 @@ return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, i
     }
 
     // Export Buttons
-    const btnExportXT = document.getElementById('btnExportXT');
+    const btnExportXT = XT_UI_ENABLED ? document.getElementById('btnExportXT') : null;
     if (btnExportXT) {
       btnExportXT.addEventListener('click', () => {
         const xt = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, blob: true });
