@@ -108,7 +108,7 @@ const openMenu = async (p) => { if (!(await p.isVisible(MENU))) await p.click(TR
     await p.click(MI);
     await waitDone(p, 120000);
     const t = await toast(p);
-    ok('dice: No clean fit: mesh body exported', t.status === 'mesh_only' && /U3D models carry no CAD face data/.test(t.text), t.title);
+    ok('dice: No clean fit: mesh body exported', t.status === 'mesh_only' && /U3D stream stores triangles only/.test(t.text), t.title);
     await settle(p, 800);
     ok('dice: mesh-only STEP downloaded', p.downloads.length === 1 && /-surfaces\.stp$/.test(p.downloads[0].suggestedFilename()), p.downloads.map((d) => d.suggestedFilename()).join(','));
     await ctx.close();
