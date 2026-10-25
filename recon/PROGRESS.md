@@ -8,7 +8,7 @@ Outputs go to `test-out/` (untracked). Push only feature/cad-surfaces (never mai
 - [x] 1. DONE Browser e2e (Playwright, Chrome) head_test + sample2, fittedOnly true/false
 - [x] 2. DONE Score fitted outputs vs Parasolid refs (test-out/score-*.md)
 - [x] 3. DONE Fallbacks: r17/dice mesh_only, r05/r13 too_large, cancel, standalone unavailable
-- [ ] 4. 25-file corpus harness (flock /tmp/pdf3d-bigrun.lock, capped heap, --jobs=1) vs v1.4.1
+- [x] 4. DONE 25-file corpus harness (flock /tmp/pdf3d-bigrun.lock, capped heap, --jobs=1) vs v1.4.1
 - [x] 5. DONE Designer suite (/workspace/pdf3d-simple-mode/test)
 
 ## Log
@@ -35,3 +35,4 @@ Outputs go to `test-out/` (untracked). Push only feature/cad-surfaces (never mai
   The earlier [chromium +macOS focus] Export/Display failures are gone (they were from the old #btnExportCAD panel or CPU contention).
   safari-focus.test.js (SAFARI=1): pass (test-out/designer/safari-focus.log).
 - 10:25 EDT: step 4 started: 25-file harness, label cad-merged-6c6bc8c (test-out/harness-run.sh, harness.out).
+- 10:40 EDT: step 4 DONE: harness cad-merged-6c6bc8c 25/25 PASS, 0 diffs in status/tris/parts/verts vs v141-b2e9f8c. All steps done; next: Tester QA, then 1.5.0 bump + merge to main.
