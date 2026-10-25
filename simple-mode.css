@@ -365,9 +365,12 @@ body.sm-simple .sm-empty {
   body.sm-simple .sm-doc { flex-basis: 0; }
   body.sm-simple .sm-brand-ver { display: none; }
 }
-@media (max-width: 900px) {
-  /* Advanced mode on narrow screens: keep the floating switch out of the wrapped top bar */
-  .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
+/* The pinned switch sits at the same fixed point in both modes; Simple reserves its width at the end of the top bar. */
+.sm-switch-slot { display: none; }
+body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
+@media (max-width: 720px) {
+  body.sm-simple .sm-switch-slot { width: auto !important; height: auto; }
+  body:not(.sm-simple) .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
 }
 @media (max-width: 720px) {
   body.sm-simple .sm-topbar { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
