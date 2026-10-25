@@ -14,7 +14,7 @@ Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECM
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.5.0 decodes
+## What 1.5.1 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|

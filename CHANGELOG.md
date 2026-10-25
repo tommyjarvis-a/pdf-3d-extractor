@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.1 — 2026-10-25
+
+### Fixed
+- CAD surfaces (STEP) export wording, all by Designer (`cad-export-ui.js`):
+  - The kernel download size now reads **13.7 MB** (decimal MB, same as the app's own label). 1.5.0 showed 13.1 MB in the menu and toast.
+  - The face breakdown names every surface type in the right number, e.g. "34 (24 B-spline surfaces, 8 cylinders, 2 planes)".
+    Surfaces of revolution now have a name too, e.g. "48 surfaces of revolution" on head_test. 1.5.0 showed the internal key `revolution`.
+  - When **Fitted solid only** finds nothing to fit, the result now tells you to turn off **Fitted solid only** to get the mesh body in a STEP file.
+    1.5.0 told you to use Export STEP / STL instead.
+  - A CAD kernel that can't be downloaded (offline, firewall, proxy or extension), a surface-fitting worker the browser blocks, and running
+    out of memory now each get a plain title and a next step. Without **Fitted solid only**, the mesh body is still exported.
+
 ## 1.5.0 — 2026-10-25
 
 ### Added
