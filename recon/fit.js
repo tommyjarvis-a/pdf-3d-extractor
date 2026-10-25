@@ -258,7 +258,14 @@
     for (let it = 0; it < 4; it++) { project(makeSurf(nu, nv, C), X, UVa, 3); const r2 = solveTP(nu, nv, UVa, X, W, s2); if (!r2.C) break; C = r2.C; if (opt && opt.shouldStop && opt.shouldStop()) break; }
     const S = makeSurf(nu, nv, C); const UVv = UVa.slice(0, 2 * nV); project(S, Pv, UVv, 8);
     const dv = deviation(S, Pv, UVv, VNf);
-    return { nu, nv, C, S, maxdev: dv.maxdev, rms: dv.rms, angmax: dv.angmax, flip: dv.flip, verts, UVv, Pv, VNf, method: 'harmonic_lsq' };
+    // between-sample check: S at each triangle's mean vertex (u,v), *not* re-projected, vs its PN-triangle centroid.
+    // Sparse/elongated grids can pass every sample yet bulge between them (head_test face 69: 48x4 grid, 0.05 mm at
+    // the vertices but 2.9 mm off the mesh in between); projection would hide that, so the raw (u,v) is used.
+    const o9 = new Float64Array(9); let sdev = 0;
+    for (let q = 0; q < tidx.length; q++) { const t = tidx[q]; let u = 0, v = 0;
+      for (let k = 0; k < 3; k++) { const i = gi.get(ctx.T[3 * t + k]); u += UVv[2 * i]; v += UVv[2 * i + 1]; }
+      S.ev(u / 3, v / 3, o9); const x = ps.X, b = 12 * q; const d = Math.hypot(x[b] - o9[0], x[b + 1] - o9[1], x[b + 2] - o9[2]); if (d > sdev) sdev = d; }
+    return { nu, nv, C, S, maxdev: dv.maxdev, rms: dv.rms, angmax: dv.angmax, sdev, flip: dv.flip, verts, UVv, Pv, VNf, method: 'harmonic_lsq' };
   }
   function polesOf(nu, nv, C) { const out = []; for (let i = 0; i < nu; i++) { const r = []; for (let j = 0; j < nv; j++) { const k = 3 * (i * nv + j); r.push([C[k], C[k + 1], C[k + 2]]); } out.push(r); } return out; }
 
@@ -405,21 +412,25 @@
     const fittedState = new Map();
     const stats = { symmetryCopies: 0, symmetryRejected: 0, helical: 0, bsplineRetries: 0, fragments: nFrag, merged: nMerged };
     let fdone = 0; const fTot = ffaces.length;
+    const dbg = (f, b) => { if (opt && opt.debug) opt.debug({ face: f, nverts: (Rby.get(f) || {}).nverts, method: b.method, nu: b.nu, nv: b.nv, maxdev: b.maxdev, rms: b.rms, angmax: b.angmax, sdev: b.sdev, error: b.error }); };
     const fitOne = (f) => {
       const ts = regs.get(f); const d = dataOf.get(f) || regionData(ctx, ts);
-      let best = fitBspline(ctx, ts, d, corner, null, null, { shouldStop: stop });
+      let best = fitBspline(ctx, ts, d, corner, null, null, { shouldStop: stop }); dbg(f, best);
+      // a denser grid can chase the vertices while folding between them (few vertices, wild normals): a candidate must
+      // also keep its worst normal deviation near the base fit's (head_test small blends: 64x5 fits at 88 deg vs 18 deg).
+      const angCap = best.error ? 45 : Math.max(45, Math.min(75, best.angmax + 25));
       if (!best.error && best.maxdev > 0.01) {
         // grid retries for long thin strips (head_test thread faces) - keep the best
-        for (const [gu, gv] of [[64, 5], [5, 64], [96, 6], [6, 96], [48, 4]]) { if (stop()) break; const b = fitBspline(ctx, ts, d, corner, gu, gv, {}); stats.bsplineRetries++; if (!b.error && b.maxdev < best.maxdev) best = b; if (best.maxdev < 0.01) break; }
+        for (const [gu, gv] of [[64, 5], [5, 64], [96, 6], [6, 96], [48, 4]]) { if (stop()) break; const b = fitBspline(ctx, ts, d, corner, gu, gv, {}); dbg(f, b); stats.bsplineRetries++; if (!b.error && b.maxdev < best.maxdev && b.angmax <= angCap && !(b.sdev > Math.max(1.5 * best.sdev, best.sdev + 0.02))) best = b; if (best.maxdev < 0.01) break; }
       }
       if (best.error || best.maxdev > 0.002) { // helical sweep candidate (surface is invariant under a screw motion)
         const ok = d.N.map(n => isFinite(n[0])); const kin = kinematic(d.P.filter((_, i) => ok[i]), d.N.filter((_, i) => ok[i]));
-        if (kin && kin.eig[0] < 1e-4 * kin.eig[1]) { const h = helicalFit(ctx, ts, d, { kin, edge, shouldStop: stop }); if (!h.error && (best.error || h.maxdev < best.maxdev)) { best = h; stats.helical++; } }
+        if (kin && kin.eig[0] < 1e-4 * kin.eig[1]) { const h = helicalFit(ctx, ts, d, { kin, edge, shouldStop: stop }); dbg(f, h); if (!h.error && h.angmax <= 30 && (best.error || h.maxdev < best.maxdev)) { best = h; stats.helical++; } } // true screw surfaces fit normals within ~2 deg
       }
       return best;
     };
     const accept = (f, b, extra) => {
-      const ok = !b.error && b.maxdev <= ffTol && b.angmax < 89;
+      const ok = !b.error && b.maxdev <= ffTol; // as fit.py: position tolerance only; trimming + solid validation are the real gates
       fitInfo[f] = { method: b.method || null, maxdev: b.maxdev, rms: b.rms, angmax: b.angmax, nu: b.nu, nv: b.nv, error: b.error || null, ...extra };
       if (!ok) { unfit.push(f); return; }
       ff[f] = { poles: polesOf(b.nu, b.nv, b.C), tu: knots(b.nu), tv: knots(b.nv), nu: b.nu, nv: b.nv, deg: 3, maxdev: b.maxdev, rms: b.rms, angmax: b.angmax, flip: b.flip, method: b.method, ...extra };

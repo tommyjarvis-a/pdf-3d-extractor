@@ -70,19 +70,18 @@
     post({ stage: 'validate', part: base }); t = nowMs();
     let chk; try { chk = Occ.check(oc, res.fitted); } catch (e) { chk = { valid: false, closed: false, solids: 0, error: String(e && e.message || e) }; }
     tm.validateMs = nowMs() - t;
-    const bad = res.finfo.filter(f => f.how !== 'trimmed'); const good = res.finfo.filter(f => f.how === 'trimmed');
+    const solidOk = res.complete && chk.valid && chk.closed && chk.solids === 1;
+    // in a valid solid every built face counts; otherwise 'loose' faces (trim area >25 % off) are dropped from the shell
+    const isGood = f => f.how === 'trimmed' || f.how === 'approx' || (solidOk && f.how === 'loose');
+    const bad = res.finfo.filter(f => !isGood(f) && f.how !== 'EMPTY'); const good = res.finfo.filter(isGood);
     const unfitFaces = [...new Set(bad.map(f => (f.split_of != null ? f.split_of : f.face)))].sort((a, b) => a - b);
     let status, shape = res.fitted, reason = null;
-    if (res.complete && chk.valid && chk.closed && chk.solids === 1) status = 'solid';
+    if (solidOk) status = 'solid';
     else {
-      status = good.length ? 'shell' : 'mesh_only';
-      if (res.complete) { // never export a broken solid: re-pack its faces as an open shell
-        const B = new oc.BRep_Builder(); const sh = new oc.TopoDS_Shell(); B.MakeShell(sh);
-        const ex = new oc.TopExp_Explorer_2(res.fitted, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
-        for (; ex.More(); ex.Next()) B.Add(sh, ex.Current()); ex.delete(); shape = sh;
-        reason = 'the fitted faces did not close into a valid solid (' + (chk.valid ? 'valid' : 'invalid') + ', free edges ' + chk.freeEdges + ')';
-      } else reason = bad.length + ' of ' + res.finfo.length + ' faces could not be fitted or trimmed';
-      if (!good.length) shape = null;
+      status = good.length ? 'shell' : 'mesh_only'; // never export a broken solid: open shell of the good faces
+      shape = good.length ? res.openShell(true) : null;
+      reason = res.complete ? 'the fitted faces did not close into a valid solid (' + (chk.valid ? 'valid' : 'invalid') + ', ' + chk.freeEdges + ' free edges' + (bad.length ? ', ' + bad.length + ' poorly trimmed faces' : '') + ')'
+        : bad.length + ' of ' + res.finfo.length + ' faces could not be fitted or trimmed';
     }
     const byType = zeroTypes();
     for (const f of good) { const k = f.type === 'FREEFORM' ? 'bspline' : String(f.type).toLowerCase(); if (k in byType) byType[k]++; }

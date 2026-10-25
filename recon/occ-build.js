@@ -310,7 +310,7 @@
       } catch (err) { failE.add(key); for (const f of fs) if (!skip.has(f)) skip.set(f, 'edge construction failed: ' + (err && err.message || err)); }
     }
     const tEdges = Date.now();
-    const faces = [], finfo = [];
+    const faces = [], faceHow = [], finfo = [];
     let fi = 0;
     for (const r of R) {
       if ((++fi & 7) === 0) progress({ stage: 'faces', done: fi, total: R.length });
@@ -342,15 +342,21 @@
       let how = 'trimmed';
       const ana = new oc.BRepCheck_Analyzer(face, true, false); const valid = ana.IsValid_2(); ana.delete();
       const g = new oc.GProp_GProps_1(); oc.BRepGProp.SurfaceProperties_1(face, g, false, false); const fa = g.Mass(); g.delete();
-      if (!valid || Math.abs(fa - marea) > 0.02 * marea + 0.05) how = 'FAILED';
-      if (how !== 'FAILED') faces.push(face);
-      finfo.push({ face: f, type: r.type, split_of: r.split_of, reversed: rev, how, mesh_area: marea, area: fa, why: how === 'FAILED' ? (valid ? 'trimmed area differs from mesh' : 'invalid trimmed face') : undefined });
+      // area off by > 2 %: kept as 'approx' (as the spike/Python pipeline did - ShapeFix and the final solid check decide);
+      // off by > 25 % or invalid: the trim went wrong, leave the face out (-> open shell + mesh fallback)
+      const dA = Math.abs(fa - marea);
+      if (!valid) how = 'FAILED'; else if (dA > 0.25 * marea + 0.5) how = 'loose'; else if (dA > 0.02 * marea + 0.05) how = 'approx';
+      if (how !== 'FAILED') { faces.push(face); faceHow.push(how); }
+      finfo.push({ face: f, type: r.type, split_of: r.split_of, reversed: rev, how, mesh_area: marea, area: fa, why: how === 'FAILED' ? (valid ? 'trimmed area differs from mesh' : 'invalid trimmed face') : how === 'approx' || how === 'loose' ? 'trimmed area differs from mesh by ' + (100 * dA / marea).toFixed(1) + '%' : undefined });
       } catch (err) { finfo.push({ face: f, type: r.type, split_of: r.split_of, how: 'FAILED', why: 'face construction failed: ' + (err && err.message || err) }); }
     }
     const tFaces = Date.now();
     progress({ stage: 'sew' });
-    const shell = new oc.TopoDS_Shell(); B.MakeShell(shell); for (const fc of faces) B.Add(shell, fc);
-    const complete = finfo.every(x => x.how === 'trimmed' || x.how === 'EMPTY');
+    // all built faces go into the solid attempt ('loose' = trimmed area >25 % off, as the Python pipeline kept them;
+    // ShapeFix + the caller's validity check decide). openShell(strict) re-packs faces for the shell fallback.
+    const openShell = (strict) => { const sh = new oc.TopoDS_Shell(); B.MakeShell(sh); faces.forEach((fc, i) => { if (!strict || faceHow[i] !== 'loose') B.Add(sh, fc); }); return sh; };
+    const shell = openShell(false);
+    const complete = finfo.every(x => x.how === 'trimmed' || x.how === 'approx' || x.how === 'loose' || x.how === 'EMPTY');
     let fitted;
     if (complete) {
       const solid = new oc.TopoDS_Solid(); B.MakeSolid(solid); B.Add(solid, shell);
@@ -358,7 +364,7 @@
       fitted = sfs.Shape(); sfs.delete();
     } else fitted = shell; // open shell of the good faces only (never a broken solid)
     const tFix = Date.now();
-    return { fitted, complete, nGood: faces.length, finfo, ckind, timing: { edges: tEdges - t0, faces: tFaces - tEdges, fix: tFix - tFaces } };
+    return { fitted, complete, openShell, nGood: faces.length, finfo, ckind, timing: { edges: tEdges - t0, faces: tFaces - tEdges, fix: tFix - tFaces } };
   }
 
   function check(oc, shape) {
