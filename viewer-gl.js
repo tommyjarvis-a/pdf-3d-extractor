@@ -17,14 +17,56 @@
   'use strict';
   if (typeof window === 'undefined') return;
 
-  const OPTIONS = { wires: false, hiddenLines: false, meshWire: false, flat: false, creaseDeg: 30 };
+  const OPTIONS = { wires: false, hiddenLines: false, meshWire: false, flat: false, creaseDeg: 30, edgeDeg: 30 };
   const MAX_TRIS = 2000000;          // preview cap in WebGL mode (GPU does the work; protects memory)
   const MAX_EDGES = 4000000;
   const GPU_BUDGET = 900 * 1024 * 1024; // free LRU-unused buffers beyond this
   const LINE_DEPTH_BIAS = 3e-4;          // NDC z bias for edges/wires (depth range spans ~2.1 x radius)
+  // B-Rep edge density fade (CSS px^2 of projected part surface per drawn edge): none below MIN, full above FULL
+  const EDGE_PX2_MIN = 4, EDGE_PX2_FULL = 16;
   const THICK_LINE_MAX_SEGS = 400000;   // above this a line set is drawn as 1px GL_LINES
 
   // ------------------------------------------------------------------ geometry preparation (CPU)
+  // Display subset of the B-Rep feature edges (g.fev, which the exporters keep at the 16 deg merge threshold):
+  // boundary / non-manifold edges plus edges whose dihedral angle exceeds edgeDeg (30 deg). On dense tessellated
+  // curved parts the 16-30 deg facet edges put a dark line on nearly every facet (QA V6). Opposite normals
+  // (inconsistent winding) count as smooth, like the fill shading. Cached on g.
+  function displayEdges(g, edgeDeg) {
+    const fev = g.fev;
+    if (!fev || !fev.length || !g.tv || !g.vx) return fev || null;
+    const deg = edgeDeg || 30;
+    if (g._dispFev && g._dispFev.deg === deg) return g._dispFev.fev;
+    const vx = g.vx, tv = g.tv, nt = g.nt, nv = (vx.length / 3) | 0, ne = fev.length >> 1;
+    const cosT = Math.cos(deg * Math.PI / 180);
+    const slot = new Map();                       // undirected edge key -> fev index
+    for (let i = 0; i < ne; i++) { const u = fev[2 * i], v = fev[2 * i + 1]; slot.set(u < v ? u * nv + v : v * nv + u, i); }
+    const cnt = new Uint8Array(ne), t0 = new Int32Array(ne), t1 = new Int32Array(ne);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const u = tv[3 * t + k], v = tv[3 * t + (k + 1) % 3];
+      const i = slot.get(u < v ? u * nv + v : v * nv + u);
+      if (i === undefined) continue;
+      if (cnt[i] === 0) t0[i] = t; else if (cnt[i] === 1) t1[i] = t;
+      if (cnt[i] < 255) cnt[i]++;
+    }
+    const nrm = (t, o) => {
+      const a = 3 * tv[3 * t], b = 3 * tv[3 * t + 1], c = 3 * tv[3 * t + 2];
+      const ux = vx[b] - vx[a], uy = vx[b + 1] - vx[a + 1], uz = vx[b + 2] - vx[a + 2];
+      const wx = vx[c] - vx[a], wy = vx[c + 1] - vx[a + 1], wz = vx[c + 2] - vx[a + 2];
+      const x = uy * wz - uz * wy, y = uz * wx - ux * wz, z = ux * wy - uy * wx, l = Math.hypot(x, y, z);
+      if (!l) return false; o[0] = x / l; o[1] = y / l; o[2] = z / l; return true;
+    };
+    const n0 = [0, 0, 0], n1 = [0, 0, 0], keep = new Uint32Array(fev.length);
+    let k = 0;
+    for (let i = 0; i < ne; i++) {
+      let on = cnt[i] !== 2;                    // boundary (1) / non-manifold (3+) / unmatched (0): always drawn
+      if (!on) on = !(nrm(t0[i], n0) && nrm(t1[i], n1)) || Math.abs(n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) < cosT;
+      if (on) { keep[k++] = fev[2 * i]; keep[k++] = fev[2 * i + 1]; }
+    }
+    const out = keep.slice(0, k);
+    try { Object.defineProperty(g, '_dispFev', { value: { deg, fev: out }, configurable: true, writable: true, enumerable: false }); } catch (e) { /* frozen */ }
+    return out;
+  }
+
   // Split welded vertices by crease angle (and B-Rep face group) -> per-vertex smooth normals.
   // Inconsistent winding is handled: neighbours whose normals are opposite (|dot| >= cos) are smoothed
   // sign-aligned and get their own vertex carrying the normal in *their* winding, so gl_FrontFacing works.
@@ -371,8 +413,9 @@ void main() { gl_FragColor = uRGBA; }`;
   };
   VP._edges = function (e) {
     if (e.edges === undefined) {
-      const fev = e.g.fev;
+      const fev = displayEdges(e.g, OPTIONS.edgeDeg);
       e.edges = fev && fev.length ? this._track(e, this._lineSet(this._basePos(e), fev, fev.length / 2, true)) : null;
+      if (e.edges) e.edges.nEdges = fev.length / 2;
     }
     return e.edges;
   };
@@ -495,7 +538,7 @@ void main() { gl_FragColor = uRGBA; }`;
 
     // 3. lines: edges, wires, mesh wire. Depth-tested (LEQUAL) against the offset fills; optional dimmed hidden pass.
     const lineJobs = [];
-    const nEdge = items.reduce((a, it) => a + (it.g.fev ? it.g.fev.length / 2 : 0), 0);
+    const nEdge = () => items.reduce((a, it) => { const f = it.g.fev ? displayEdges(it.g, OPTIONS.edgeDeg) : null; return a + (f ? f.length / 2 : 0); }, 0);
     if (mode === 'wireframe') {
       for (const it of items) { const e = this._entry(it.g);
         const c = sel === it.pIdx ? [0.133, 0.827, 0.933, 1] : [it.color[0], it.color[1], it.color[2], 0.78];
@@ -503,11 +546,25 @@ void main() { gl_FragColor = uRGBA; }`;
     } else {
       if (OPTIONS.meshWire) for (const it of items) { const e = this._entry(it.g);
         lineJobs.push({ obj: this._meshLines(e), off: offOf(e.origin, it.offset), rgba: [0.05, 0.08, 0.13, 0.35], w: 1 }); }
-      if ((mode === 'shaded-edges' || mode === 'brep-faces' || mode === 'xray') && nEdge <= MAX_EDGES) {
+      if ((mode === 'shaded-edges' || mode === 'brep-faces' || mode === 'xray') && nEdge() <= MAX_EDGES) {
+        const edgeStat = { faded: 0, hidden: 0, minFade: 1 };
         for (const it of items) { const e = this._entry(it.g), ed = this._edges(e); if (!ed) continue;
           const selected = sel === it.pIdx;
+          // screen-space density: when a part's edges would be only a few px apart (dense part, zoomed out) they
+          // cover nearly every facet and turn it dark (QA V6), so fade them out; they return as you zoom in.
+          let fade = 1;
+          if (!selected && e.bbox) {
+            const ex = (e.bbox[3] - e.bbox[0]) * scale, ey = (e.bbox[4] - e.bbox[1]) * scale, ez = (e.bbox[5] - e.bbox[2]) * scale;
+            const px2PerEdge = (ex * ey + ey * ez + ex * ez) / Math.max(1, ed.nEdges || 1);
+            fade = Math.max(0, Math.min(1, (px2PerEdge - EDGE_PX2_MIN) / (EDGE_PX2_FULL - EDGE_PX2_MIN)));
+            if (fade < 1) edgeStat.faded++;
+            if (fade < edgeStat.minFade) edgeStat.minFade = fade;
+            if (fade <= 0.02) { edgeStat.hidden++; continue; }
+          }
+          const base = selected ? [0.133, 0.827, 0.933, 1] : mode === 'xray' ? [0.58, 0.82, 1, 0.68] : [0.035, 0.055, 0.09, 0.82];
           lineJobs.push({ obj: ed, off: offOf(e.origin, it.offset), w: selected ? 1.65 : 1.05,
-            rgba: selected ? [0.133, 0.827, 0.933, 1] : mode === 'xray' ? [0.58, 0.82, 1, 0.68] : [0.035, 0.055, 0.09, 0.82] }); }
+            rgba: [base[0], base[1], base[2], base[3] * fade] }); }
+        this.stats.edgeParts = { total: items.length, faded: edgeStat.faded, hidden: edgeStat.hidden, minFade: Math.round(edgeStat.minFade * 100) / 100 };
       }
     }
     for (const [wr, we] of wireEntries) {
@@ -682,7 +739,7 @@ void main() { gl_FragColor = uRGBA; }`;
   // ------------------------------------------------------------------ toolbar options (Lines: wires / hidden / mesh / flat)
   const api = {
     attach, options: OPTIONS, MAX_TRIS, MAX_EDGES, onOptionsChange: null, onStats: null,
-    _buildFillMesh: buildFillMesh,
+    _buildFillMesh: buildFillMesh, displayEdges,
     setOption(k, v) {
       OPTIONS[k] = v;
       if (typeof api.onOptionsChange === 'function') api.onOptionsChange(k, v);
