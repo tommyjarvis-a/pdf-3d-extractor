@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>CAD surfaces spike</title><pre id="log"></pre>
+<script type="module">
+// Feasibility spike: run the OCC stage of the CAD-surface export on pre-fitted inputs (?mesh=&inputs=&name=&fittedOnly=1)
+const q = new URLSearchParams(location.search), log = s => (document.getElementById('log').textContent += s + '\n');
+const t0 = performance.now();
+const [mesh, inp] = await Promise.all([fetch(q.get('mesh')).then(r => r.json()), fetch(q.get('inputs')).then(r => r.json())]);
+const tData = performance.now() - t0;
+const flat = (a, C) => C.from(Array.isArray(a[0]) ? a.flat() : a);
+const M = { V: flat(mesh.positions, Float64Array), T: flat(mesh.tris, Int32Array), normals: flat(mesh.normals, Float64Array), cornerN: flat(mesh.cornerN, Int32Array) };
+const w = new Worker(new URL('./cad-worker.js', import.meta.url), { type: 'module' });
+const t1 = performance.now(); const stages = [];
+w.onmessage = ev => {
+  const m = ev.data;
+  if (m.type === 'progress') { if (m.stage && !m.done) stages.push([m.stage, Math.round(performance.now() - t1)]); return; }
+  const res = { dataMs: tData, endToEndMs: performance.now() - t1, stages, ...(m.type === 'done' ? { summary: m.summary } : { error: m.message }) };
+  if (m.type === 'done') { window.__step = new Uint8Array(m.step); }
+  window.__result = res; log(JSON.stringify(res, null, 1));
+};
+w.postMessage({ cmd: 'run', id: 1, mesh: M, F: Int32Array.from(inp.F), regions: inp.R, ff: inp.ff, name: q.get('name') || 'part', fittedOnly: q.get('fittedOnly') === '1' });
+</script>

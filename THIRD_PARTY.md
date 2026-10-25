@@ -15,6 +15,15 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+## opencascade.js 2.0.0-beta.b5ff984 (LGPL-2.1-only) — CAD-surfaces export only (feature/cad-surfaces, not yet released)
+
+`recon/vendor/opencascade/opencascade.full.{js,wasm}` are the unmodified npm build of opencascade.js
+(https://github.com/donalffons/opencascade.js, Open CASCADE Technology compiled with Emscripten), with its
+`LICENSE` (GNU LGPL v2.1) and `package.json` alongside. They are loaded lazily, in a Web Worker, only when
+"Export as CAD surfaces (STEP)" is chosen, and are kept as separate, replaceable files (LGPL §6: users may
+swap in their own build of the library). The single-file standalone build does not include them.
+Corresponding source: https://github.com/donalffons/opencascade.js and https://github.com/Open-Cascade-SAS/OCCT.
+
 ## Reference-only material (no code copied)
 
 - ISO 14739-1 (PRC), ECMA-363 (U3D), ISO 32000 (PDF) specifications.
