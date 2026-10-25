@@ -140,7 +140,7 @@
     if (!blob && r.data != null) blob = new Blob([r.data], { type: 'application/step' });
     // Never present an unclosed body as a solid.
     if (status === 'solid' && s.closed === false) status = 'shell';
-    return { status, reason: r.reason ? String(r.reason) : '', summary: s, blob, filename: r.filename || defaultName() };
+    return { status, reason: r.reason ? String(r.reason) : '', reasonCode: r.reasonCode ? String(r.reasonCode) : null, summary: s, blob, filename: r.filename || defaultName() };
   }
   function defaultName() {
     const s = appState();
@@ -485,12 +485,18 @@
           lines: [(res.reason || 'The surfaces could not be fitted cleanly.').replace(/\.?$/, '.'),
             has ? 'The STEP contains the mesh body only (triangles), no fitted surfaces.' : 'Nothing was exported.'] };
       }
-      case 'skipped':
+      case 'skipped': {
+        const why = ENGINE_FAIL[res.reasonCode];
+        if (why) {   // e.g. Fitted solid only + the engine could not run: nothing to fall back to
+          return { status: 'skipped', tone: 'warn', title: why.title, download: false, details: [],
+            lines: [why.line, 'Nothing was exported. The mesh exports (STEP, STL, OBJ) still work.'] };
+        }
         return { status: 'skipped', tone: 'muted', title: 'Nothing exported', download: false, details: [],
           lines: [(res.reason || 'The model was skipped.').replace(/\.?$/, '.'),
             res.reasonCode === 'no_fit' || res.reasonCode === 'fit_limit' || res.reasonCode === 'no_face_data'
               ? 'Turn off \u201cFitted solid only\u201d to get the mesh body in a STEP file instead.'
               : 'The mesh exports (STEP, STL, OBJ) still work.'] };
+      }
       case 'cancelled':
         return { status: 'cancelled', tone: 'muted', title: 'Export cancelled', download: false, details: [], lines: [] };
       default:

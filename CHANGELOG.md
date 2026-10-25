@@ -7,11 +7,12 @@
   - The kernel download size now reads **13.7 MB** (decimal MB, same as the app's own label). 1.5.0 showed 13.1 MB in the menu and toast.
   - The face breakdown names every surface type in the right number, e.g. "34 (24 B-spline surfaces, 8 cylinders, 2 planes)".
     Surfaces of revolution now have a name too, e.g. "48 surfaces of revolution" on head_test. 1.5.0 showed the internal key `revolution`.
-
-### Known issues
-- The new wording for a **Fitted solid only** export with nothing to fit, and the plain titles for a CAD kernel that can't be
-  downloaded, a blocked surface-fitting worker, or running out of memory, are in `cad-export-ui.js` but don't show yet:
-  the UI drops the engine's `reasonCode` before choosing the text. Until Designer fixes this, these cases show the general "No clean fit" or "Nothing exported" text.
+  - When **Fitted solid only** finds nothing to fit (U3D models, the bundled legacy sample, selections above the fitting limit,
+    or no face could be fitted), the result now tells you to turn off **Fitted solid only** to get the mesh body in a STEP file.
+  - A CAD kernel that can't be downloaded (offline, firewall, proxy or browser extension), a surface-fitting worker the browser
+    blocks, and running out of memory each get a plain title and a next step, e.g. "CAD kernel didn’t download: mesh body exported".
+    With **Fitted solid only** on, the title names the cause and the message says nothing was exported.
+  - The UI now reads the engine's `reasonCode` to choose this wording.
 
 ## 1.5.0 — 2026-10-25
 
