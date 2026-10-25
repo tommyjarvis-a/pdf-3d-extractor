@@ -14,3 +14,5 @@ Outputs go to `test-out/` (untracked). Don't push, don't bump version, don't mer
 ## Log
 - 2026-10-25 09:55 EDT: started; no prior PROGRESS.md existed. HEAD f178afc, tree clean.
 - 09:58 EDT: merged b2e9f8c (conflicts CHANGELOG.md, index.html resolved; recon scripts at ?v=1.4.1). Commit: a187470
+- 10:25 EDT: added recon/tools/browser-e2e.cjs (Playwright/Chrome driver). Step 1 running via test-out/run-e2e.sh (untracked).
+  head_test full: solid, 421 faces, 47.9 s wall, WASM heap 105 MB, vol 3611401.9 (+0.145%).
