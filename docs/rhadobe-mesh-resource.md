@@ -49,7 +49,7 @@ When the standard U3D parse yields 0 triangles, `parseU3DStream` calls `RHAdobeM
 | | Value |
 |---|---|
 | Bodies | 2: PartBody_2 (70,958 tris / 49,549 verts) and PartBody_5 (71,146 tris / 49,662 verts) |
-| Total | 142,104 tris (the app drops 62 degenerate triangles, leaving 142,042) |
+| Total | 142,104 tris as decoded (= `test/expect.json`). The B-Rep/HUD/STL count is 142,042: the weld drops 62 zero-area triangles that have two distinct indices with bit-identical positions |
 | Bounding box | [0, -170.46, -97] .. [100, 92.0, 160] |
 | Time | about 1.6 s |
 | Peak RSS (headless) | about 300 MB |

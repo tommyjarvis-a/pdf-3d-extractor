@@ -137,13 +137,6 @@
     background: var(--bg-3);
     border-color: var(--border-hi);
   }
-  .btn:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-  .btn:focus-visible {
-    outline: 2px solid var(--cyan);
-    outline-offset: 1px;
-  }
   .btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
@@ -465,10 +458,13 @@
     gap: 5px;
     flex-wrap: wrap;
   }
-  /* Viewer controls: everything clickable looks like a button/toggle; labels are plain text */
-  #viewerControls .toolbar-group + .toolbar-group {
-    padding-left: 8px;
-    border-left: 1px solid var(--border);
+  /* Viewer controls (#viewerControls). Base button look, hover, focus ring and segmented tracks for
+     [data-render]/[data-view] come from affordance.css (loaded after this block). The rules here only add
+     what affordance.css does not cover: group captions, the Orbit segmented pair, Lines toggle buttons and
+     the Explode slider control. Selectors are scoped to #viewerControls so they win over affordance.css
+     without !important. */
+  #viewerControls {
+    column-gap: 16px;   /* room for the 4px segmented-track halo affordance.css draws around groups */
   }
   .toolbar-label {
     font-size: 10px;
@@ -480,22 +476,34 @@
     user-select: none;
     margin-right: 2px;
   }
-  #viewerControls .btn-sm:not(.btn-active) {
-    background: var(--bg-2);
-    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  /* Orbit: Free / Turntable is a radio pair -> same segmented look as Display */
+  #viewerControls .toolbar-group:has(> [data-orbit]) {
+    border-radius: 9px;
+    box-shadow: 0 0 0 3px rgba(9, 13, 20, 0.85), 0 0 0 4px var(--border);
+    background: rgba(9, 13, 20, 0.85);
   }
-  #viewerControls .btn-sm:hover:not(:disabled):not(.btn-active) {
+  #viewerControls [data-orbit].btn {
+    background: transparent;
+    border-color: rgba(59, 85, 128, 0.55);
+    color: var(--text-1);
+  }
+  #viewerControls [data-orbit].btn:hover:not(.btn-active) {
     background: var(--bg-3);
-    border-color: var(--border-hi);
+    border-color: #5b7db0;
     color: var(--text-0);
   }
-  #viewerControls .btn-active:hover {
-    filter: brightness(1.15);
+  #viewerControls [data-orbit].btn.btn-active {
+    background: var(--cyan);
+    border-color: var(--cyan);
+    color: #03101d;
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
   }
-  .btn-toggle {
+  /* Lines: independent on/off toggles -> buttons with a check indicator (the checkbox stays in the DOM,
+     visually hidden, so app/viewer-gl/simple-mode bindings keep working) */
+  #viewerControls .btn-toggle {
     position: relative;
   }
-  .btn-toggle input {
+  #viewerControls .btn-toggle input {
     position: absolute;
     opacity: 0;
     width: 1px;
@@ -503,7 +511,7 @@
     margin: 0;
     pointer-events: none;
   }
-  .btn-toggle::before {
+  #viewerControls .btn-toggle::before {
     content: '';
     width: 9px;
     height: 9px;
@@ -512,46 +520,50 @@
     background: transparent;
     flex-shrink: 0;
   }
-  .btn-toggle.is-on,
-  .btn-toggle:has(input:checked) {
-    background: var(--cyan-dim) !important;
+  #viewerControls .btn-toggle.is-on,
+  #viewerControls .btn-toggle:has(input:checked) {
+    background: var(--cyan-dim);
     border-color: var(--cyan);
     color: var(--cyan);
   }
-  .btn-toggle.is-on::before,
-  .btn-toggle:has(input:checked)::before {
+  #viewerControls .btn-toggle.is-on::before,
+  #viewerControls .btn-toggle:has(input:checked)::before {
     background: var(--cyan);
     border-color: var(--cyan);
   }
-  .btn-toggle:has(input:focus-visible) {
+  #viewerControls .btn-toggle:has(input:focus-visible) {
     outline: 2px solid var(--cyan);
-    outline-offset: 1px;
+    outline-offset: 2px;
   }
-  .slider-ctrl {
+  /* Explode: one bordered control; focus ring on the wrapper, not twice */
+  #viewerControls .slider-ctrl {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 2px 8px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-hi);
     border-radius: 6px;
-    background: var(--bg-2);
+    background: rgba(15, 22, 35, 0.35);
     font-size: 11px;
     font-weight: 600;
     color: var(--text-0);
     cursor: pointer;
   }
-  .slider-ctrl:hover {
-    border-color: var(--border-hi);
+  #viewerControls .slider-ctrl:hover {
+    border-color: #5b7db0;
     background: var(--bg-3);
   }
-  .slider-ctrl:focus-within {
-    outline: 2px solid var(--cyan);
-    outline-offset: 1px;
-  }
-  .slider-ctrl input[type="range"] {
+  #viewerControls .slider-ctrl input[type="range"] {
     width: 75px;
     accent-color: var(--cyan);
     cursor: pointer;
+  }
+  #viewerControls .slider-ctrl input[type="range"]:focus-visible {
+    outline: none;
+  }
+  #viewerControls .slider-ctrl:has(input:focus-visible) {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
   }
   .viewport-wrap {
     position: relative;
@@ -685,6 +697,653 @@
   .entity-row span:first-child {
     color: var(--cyan);
   }
+</style>
+<!-- affordance first (both modes), then Simple-mode layout -->
+<style data-href="affordance.css">
+/*
+ * affordance.css — "what can I click?" pass for pdf-3d-extractor. Applies in BOTH Simple and Advanced mode.
+ *
+ * Goal: interactive things look like controls, information looks like information.
+ * Layout-neutral by construction: no width/height/padding/margin/border-width/gap changes on existing
+ * elements (only colours, border colours, backgrounds, cursors, outlines, inset box-shadows), so every
+ * Advanced control stays exactly where it is. The single deliberate exception is the status badge,
+ * which gains a leading dot (it is right-aligned on its own, so only it moves).
+ *
+ * Integration: <link rel="stylesheet" href="affordance.css" /> in <head>, BEFORE simple-mode.css.
+ *
+ * Which list rows are really clickable (checked in app.js):
+ *   .part-item   -> click selects/highlights the part; .part-chk toggles visibility      => INTERACTIVE
+ *   .stream-item -> click calls activateStream(idx)                                    => INTERACTIVE
+ *   #dropZone    -> click opens the file picker, accepts drops                         => INTERACTIVE
+ *   #attachList button[data-att] ("Save")                                              => INTERACTIVE (button only)
+ *   .tree-row (#treeList), .feature-item (#featureList / #attachList rows), .kv-box,
+ *   .entity-row, HUD, badges                                                           => INFORMATION ONLY
+ */
+
+/* ===================================================================== INTERACTIVE */
+
+/* ---- buttons: primary = filled (unchanged gradients), secondary = outlined */
+.btn {
+  background: rgba(15, 22, 35, 0.35);
+  border-color: var(--border-hi);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: #5b7db0;
+}
+.btn:active:not(:disabled) { transform: translateY(1px); filter: brightness(0.92); }
+.btn:focus-visible,
+.tab-btn:focus-visible,
+.select-ctrl:focus-visible,
+.dropzone:focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="range"]:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.btn-primary, .btn-emerald { cursor: pointer; }
+.btn-primary { background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%); border-color: #38bdf8; }
+.btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%); border-color: #7dd3fc; }
+.btn-emerald { background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-color: #34d399; }
+.btn:disabled { cursor: not-allowed; }
+
+/* "Load Sample" carried a static .btn-active in the markup, which made a plain action button look
+   like a selected toggle. It is an action: render it as a normal outlined button. */
+#btnLoadSample.btn-active { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); color: var(--text-0); }
+#btnLoadSample.btn-active:hover { background: var(--bg-3); border-color: #5b7db0; }
+
+/* ---- toggle groups -> segmented controls with an obvious active segment */
+.toolbar-group:has(> [data-render]),
+.toolbar-group:has(> [data-view]) {
+  border-radius: 9px;
+  box-shadow: 0 0 0 3px rgba(9, 13, 20, 0.85), 0 0 0 4px var(--border);   /* track, no layout impact */
+  background: rgba(9, 13, 20, 0.85);
+}
+[data-render].btn, [data-view].btn, #btnFitView {
+  background: transparent;
+  border-color: rgba(59, 85, 128, 0.55);
+  color: var(--text-1);
+}
+[data-render].btn:hover:not(.btn-active), [data-view].btn:hover, #btnFitView:hover {
+  background: var(--bg-3);
+  border-color: #5b7db0;
+  color: var(--text-0);
+}
+[data-render].btn.btn-active {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #03101d;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+}
+/* drawer tabs */
+.tab-btn { cursor: pointer; }
+.tab-btn:hover:not(.active) { background: rgba(255, 255, 255, 0.04); color: var(--text-0); }
+.tab-btn.active {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+  background: rgba(34, 211, 238, 0.12);
+}
+
+/* ---- inputs: selects keep their native chevron; all get input chrome + hover + pointer */
+.select-ctrl {
+  cursor: pointer;
+  background-color: var(--bg-0);
+  border-color: var(--border-hi);
+}
+.select-ctrl:hover:not(:disabled) { border-color: #5b7db0; background-color: var(--bg-2); }
+.select-ctrl:focus { border-color: var(--cyan); }
+input[type="checkbox"], input[type="range"] { accent-color: var(--cyan); cursor: pointer; }
+#viewerOptions label, label:has(> input[type="checkbox"]) { cursor: pointer; }
+#viewerOptions label:hover { color: var(--text-0); }
+
+/* ---- file drop zone (click = open) */
+.dropzone { cursor: pointer; }
+
+/* ---- selectable rows: hover background, pointer, selected = left accent bar + tint
+        (simple-mode.js also gives them tabindex=0 / role=option / aria-selected + Enter/Space) */
+.part-item, .stream-item { cursor: pointer; }
+.part-item:hover, .stream-item:hover {
+  background: var(--bg-2);
+  border-color: var(--border-hi);
+}
+.part-item.selected, .stream-item.active {
+  background: rgba(34, 211, 238, 0.10);
+  border-color: rgba(34, 211, 238, 0.65);
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+.part-item.selected .part-name, .stream-item.active .stream-name { color: var(--cyan); }
+.part-chk { cursor: pointer; }
+.part-item:focus-visible, .stream-item:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+
+/* ===================================================================== INFORMATION (quiet) */
+
+/* ---- badges / counts: low-contrast chips, never button-like (border kept at 1px but transparent) */
+.badge {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+  color: var(--text-2);
+  cursor: default;
+  font-weight: 500;
+}
+.badge-cyan { background: rgba(34, 211, 238, 0.06); color: rgba(34, 211, 238, 0.85); border-color: transparent; }
+.badge-emerald { background: rgba(16, 185, 129, 0.07); color: rgba(52, 211, 153, 0.9); border-color: transparent; }
+.badge-amber { background: rgba(245, 158, 11, 0.07); color: rgba(251, 191, 36, 0.9); border-color: transparent; }
+
+/* ---- status: a dot + text, not a pill */
+#statusBadge {
+  background: transparent;
+  border-color: transparent;
+  gap: 6px;
+  letter-spacing: 0.2px;
+}
+#statusBadge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+/* ---- panel headers: labels, not toolbars */
+.panel-header {
+  background: transparent;
+  color: var(--text-2);
+  border-bottom-color: rgba(39, 55, 84, 0.6);
+  cursor: default;
+}
+.panel-card { background: rgba(9, 13, 20, 0.6); }
+
+/* ---- key/value telemetry: plain readouts */
+.kv-box {
+  background: transparent;
+  border-color: transparent;
+  border-left-color: rgba(59, 85, 128, 0.45);
+  border-radius: 0;
+  cursor: default;
+}
+.kv-label { color: var(--text-2); }
+
+/* ---- feature list + attachment rows + product tree rows: plain lines */
+.feature-item {
+  background: transparent;
+  border-color: transparent;
+  border-bottom-color: rgba(39, 55, 84, 0.55);
+  border-radius: 0;
+  cursor: default;
+}
+.feature-item code { color: var(--text-2); }
+.tree-row { cursor: default; color: var(--text-1); }
+.tree-row code { color: var(--text-2); }
+
+/* ---- HUD / hints: read-only overlays */
+.viewport-hud-tl, .viewport-hud-bl { border-color: rgba(39, 55, 84, 0.5); cursor: default; }
+.viewport-hud-bl { color: rgba(124, 145, 177, 0.85); }
+
+/* ---- drawer summary rows */
+.entity-row { cursor: default; }
+
+</style>
+<style data-href="simple-mode.css">
+/*
+ * simple-mode.css — "Simple mode" add-on for pdf-3d-extractor.
+ *
+ * Every rule that affects existing markup is scoped under body.sm-simple, so when the
+ * body lacks that class (Advanced mode) nothing in the original UI changes. The only
+ * unscoped rules target elements this add-on creates (class prefix "sm-"), which are
+ * either display:none or position:fixed in Advanced mode and therefore never move layout.
+ * Integration: <link rel="stylesheet" href="simple-mode.css" /> in <head>.
+ */
+
+/* ---------------------------------------------------------------- shared add-on tokens */
+.sm-root, .sm-topbar, .sm-pill, .sm-pop, .sm-sheet, .sm-modeswitch, .sm-dialog, .sm-dropveil {
+  --sm-radius: 10px;
+  --sm-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --sm-glass: rgba(15, 22, 35, 0.92);
+}
+[hidden].sm-pop, [hidden].sm-sheet, [hidden].sm-dialog, [hidden].sm-dropveil, [hidden].sm-empty { display: none !important; }
+
+/* ---------------------------------------------------------------- Simple | Advanced switch */
+.sm-modeswitch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  font-family: var(--sans);
+  flex-shrink: 0;
+}
+.sm-modeswitch button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 600 11px/1 var(--sans);
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sm-modeswitch button:hover { color: var(--text-0); }
+.sm-modeswitch button[aria-pressed="true"] {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45);
+}
+.sm-modeswitch button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+/* Advanced mode: the switch floats over empty top-bar space (fixed => zero layout impact). */
+.sm-modeswitch.sm-modeswitch--float {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 60;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+/* ...or bottom-right when the top bar has no free space (single-row bar / narrow screens). */
+.sm-modeswitch.sm-modeswitch--float.sm-modeswitch--corner { top: auto; bottom: 12px; right: 12px; }
+
+/* ---------------------------------------------------------------- add-on chrome hidden in Advanced */
+.sm-topbar, .sm-pill, .sm-empty { display: none; }
+
+/* ================================================================ SIMPLE MODE ================ */
+body.sm-simple .topbar,
+body.sm-simple .exportbar,
+body.sm-simple .inspector-pane,
+body.sm-simple #viewerControls,
+body.sm-simple .viewport-toolbar,            /* 1.3.0 has no #viewerControls id */
+body.sm-simple .drawer { display: none !important; }
+body.sm-simple .workbench { grid-template-columns: minmax(0, 1fr); }
+
+/* ---------------------------------------------------------------- top bar */
+body.sm-simple .sm-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  min-height: 52px;
+  background: linear-gradient(180deg, #131c2e 0%, #0d1422 100%);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+}
+.sm-brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.sm-brand .brand-badge { width: 28px; height: 28px; font-size: 11px; border-radius: 6px; box-shadow: 0 0 12px rgba(34, 211, 238, 0.3); }
+.sm-brand-title { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; color: var(--text-0); white-space: nowrap; }
+.sm-brand-ver { font: 600 10.5px var(--mono); color: var(--text-2); margin-left: 6px; }
+.sm-doc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.sm-doc-name {
+  font: 600 12px var(--mono);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.sm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; flex-shrink: 0; cursor: default; }
+.sm-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); flex-shrink: 0; }
+.sm-status[data-tone="ok"] .sm-dot { background: var(--emerald); box-shadow: 0 0 0 3px var(--emerald-dim); }
+.sm-status[data-tone="warn"] .sm-dot { background: var(--amber); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }
+.sm-status[data-tone="ok"] { color: #34d399; }
+.sm-status[data-tone="warn"] { color: #fbbf24; }
+.sm-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+
+.sm-btn-open {
+  background: var(--cyan-dim);
+  border-color: rgba(34, 211, 238, 0.55);
+  color: var(--cyan);
+  font-weight: 700;
+}
+.sm-btn-open:hover:not(:disabled) { background: rgba(34, 211, 238, 0.22) !important; border-color: var(--cyan) !important; }
+.sm-iconbtn { padding: 6px 9px; min-width: 32px; justify-content: center; font-size: 14px; line-height: 1; }
+.sm-root .btn:focus-visible, .sm-topbar .btn:focus-visible, .sm-pill .btn:focus-visible, .sm-pop .btn:focus-visible, .sm-sheet .btn:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 1px;
+}
+
+/* split button */
+.sm-split { display: inline-flex; align-items: stretch; }
+.sm-split > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.sm-split > .btn + .btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(3, 16, 29, 0.35);
+  padding: 6px 8px;
+}
+.sm-caret { font-size: 9px; opacity: 0.85; }
+
+/* ---------------------------------------------------------------- popovers / menus */
+.sm-pop {
+  position: fixed;
+  z-index: 80;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  background: var(--sm-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--sm-radius);
+  box-shadow: var(--sm-shadow);
+  padding: 6px;
+  color: var(--text-0);
+  font-family: var(--sans);
+  font-size: 12.5px;
+}
+.sm-mi {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-0);
+  font: 500 12.5px var(--sans);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sm-mi:hover { background: var(--bg-3); }
+.sm-mi:focus { outline: none; }
+/* keyboard focus: a real ring, distinct from the hover tint */
+.sm-mi:focus-visible { background: var(--bg-2); outline: 2px solid var(--cyan); outline-offset: -2px; box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.18); }
+.sm-mi:disabled { opacity: 0.45; cursor: not-allowed; }
+.sm-mi-ext { margin-left: auto; padding-left: 16px; font: 500 10.5px var(--mono); color: var(--text-2); }
+.sm-mi-check { width: 14px; flex-shrink: 0; color: var(--cyan); font-size: 12px; text-align: center; }
+.sm-mi[aria-checked="true"] { color: var(--cyan); }
+/* checkbox-style menu items (line toggles) */
+.sm-mi--box .sm-mi-check { width: 14px; height: 14px; line-height: 12px; font-size: 10px; border: 1px solid var(--border-hi); border-radius: 3px; background: var(--bg-0); }
+.sm-mi--box[aria-checked="true"] .sm-mi-check { background: var(--cyan); border-color: var(--cyan); color: #03101d; font-weight: 700; }
+.sm-mi--box[aria-checked="true"] { color: var(--text-0); }
+.sm-mi--dev { color: #fbbf24; }
+.sm-sep { height: 1px; margin: 6px 4px; background: var(--border); border: 0; }
+.sm-pop-h {
+  padding: 6px 10px 4px;
+  font: 700 10.5px var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-2);
+}
+.sm-field { display: grid; gap: 4px; padding: 5px 10px 7px; }
+.sm-field > span { font-size: 11.5px; color: var(--text-1); font-weight: 600; }
+.sm-field .select-ctrl { width: 100%; max-width: 300px; font-size: 11.5px; }
+.sm-field .sm-hint { font-size: 10.5px; color: var(--text-2); font-weight: 400; }
+.sm-check { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
+.sm-check:hover, .sm-check:focus-within { background: var(--bg-3); }
+.sm-check input { accent-color: var(--cyan); width: 14px; height: 14px; }
+.sm-check small { margin-left: auto; color: var(--text-2); font-size: 10.5px; padding-left: 10px; }
+.sm-range { display: flex; align-items: center; gap: 10px; padding: 6px 10px 8px; }
+.sm-range input { flex: 1; accent-color: var(--cyan); }
+.sm-range output { font: 600 11px var(--mono); color: var(--text-1); min-width: 34px; text-align: right; }
+
+/* ---------------------------------------------------------------- floating viewport pill */
+body.sm-simple .sm-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  z-index: 15;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(15, 22, 35, 0.86);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+.sm-pill .btn { border-radius: 999px; background: transparent; border-color: transparent; padding: 5px 11px; font-size: 11.5px; }
+.sm-pill .btn:hover:not(:disabled) { background: var(--bg-3); border-color: var(--border); }
+.sm-pill .btn[aria-expanded="true"], .sm-pill .btn[aria-pressed="true"] { background: var(--cyan-dim); border-color: rgba(34, 211, 238, 0.45); color: var(--cyan); }
+.sm-pill-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+.sm-pill-k { color: var(--text-2); font-weight: 500; }
+.sm-count { font: 600 10px var(--mono); color: var(--text-2); background: var(--bg-0); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+
+/* HUD: compact and parked bottom-left in Simple mode so the pill owns the top edge */
+body.sm-simple .viewport-hud-tl { top: auto; bottom: 42px; padding: 5px 9px; font-size: 10.5px; gap: 2px; }
+body.sm-simple .viewport-hud-bl { font-size: 10px; }
+/* renderer stats (ms/frame, GPU MB; 1.4.0+) stay read-only, muted info - never a control */
+body.sm-simple .viewport-hud-tl .hud-render { color: var(--text-2); opacity: 0.75; font-size: 10px; }
+
+/* ---------------------------------------------------------------- side sheets */
+.sm-sheet {
+  position: fixed;
+  z-index: 40;
+  top: calc(var(--sm-top, 60px) + 10px);
+  bottom: 12px;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--sm-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--sm-radius);
+  box-shadow: var(--sm-shadow);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+.sm-sheet--left { left: 12px; }
+.sm-sheet--right { right: 12px; width: 380px; }
+.sm-sheet-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sm-sheet-h h2 { font-size: 13px; font-weight: 700; color: var(--text-0); margin-right: auto; }
+.sm-sheet-b { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sm-close { padding: 3px 8px; font-size: 14px; line-height: 1; }
+
+/* moved original panel cards inside sheets */
+.sm-sheet .panel-card { border-radius: 8px; }
+.sm-sheet--parts .panel-card { border: 0; background: transparent; }
+.sm-sheet--parts .panel-header { background: transparent; padding: 0 0 8px; border-bottom: 0; }
+.sm-sheet--parts .panel-header > span { display: none; }   /* sheet title already says "Parts" */
+.sm-sheet--parts .panel-header > div { width: 100%; }
+.sm-sheet--parts .panel-header .btn { flex: 1; justify-content: center; }
+.sm-sheet--parts .panel-body { padding: 0; }
+.sm-sheet--info .panel-card { border: 0; background: transparent; }
+.sm-sheet--info .panel-header { display: none; }           /* title + badge mirrored into <summary> */
+.sm-sheet--info .panel-body { padding: 4px 2px 6px; }
+
+.sm-sec { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0); flex-shrink: 0; }
+.sm-sec > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1);
+  border-radius: 8px;
+  user-select: none;
+}
+.sm-sec > summary::-webkit-details-marker { display: none; }
+.sm-sec > summary::before { content: "▸"; color: var(--text-2); font-size: 10px; transition: transform 0.12s ease; }
+.sm-sec[open] > summary::before { transform: rotate(90deg); }
+.sm-sec > summary:hover { color: var(--text-0); background: var(--bg-2); }
+.sm-sec > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.sm-sec > summary .badge { margin-left: auto; }
+.sm-sec[open] > summary { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; }
+.sm-sec > .sm-sec-b { padding: 6px 8px; }
+
+/* ---------------------------------------------------------------- drop overlay + empty hint */
+.sm-dropveil {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--cyan);
+  border-radius: 12px;
+  background: rgba(34, 211, 238, 0.10);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+  font: 700 15px var(--sans);
+  color: var(--cyan);
+  text-align: center;
+}
+.sm-dropveil small { display: block; font: 500 11px var(--mono); color: var(--text-1); margin-top: 4px; }
+body.sm-simple .sm-empty {
+  display: grid;
+  position: absolute;
+  inset: 0;
+  place-items: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.sm-empty > div {
+  pointer-events: auto;
+  padding: 18px 26px;
+  border: 1.5px dashed var(--border-hi);
+  border-radius: 12px;
+  background: rgba(15, 22, 35, 0.7);
+  color: var(--text-1);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- About dialog */
+.sm-dialog {
+  position: fixed;
+  z-index: 90;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--sm-radius);
+  box-shadow: var(--sm-shadow);
+  font-family: var(--sans);
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+.sm-dialog h2 { font-size: 14px; color: var(--text-0); }
+.sm-dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; padding: 12px 16px 16px; }
+.sm-dialog dt { color: var(--text-2); font-weight: 600; }
+.sm-dialog dd { color: var(--text-1); }
+.sm-dialog code { font-family: var(--mono); color: var(--cyan); font-size: 11.5px; }
+
+/* ---------------------------------------------------------------- responsive */
+@media (max-width: 1100px) {
+  body.sm-simple .sm-doc { flex-basis: 0; }
+  body.sm-simple .sm-brand-ver { display: none; }
+}
+@media (max-width: 900px) {
+  /* Advanced mode on narrow screens: keep the floating switch out of the wrapped top bar */
+  .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
+}
+@media (max-width: 720px) {
+  body.sm-simple .sm-topbar { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
+  body.sm-simple .sm-brand-title { font-size: 13px; }
+  body.sm-simple .sm-doc { order: 3; flex: 1 1 100%; border-left: 0; padding-left: 0; }
+  body.sm-simple .sm-actions { gap: 6px; }
+  /* phone: row 1 = brand + mode switch, row 2 = Open / overflow / Export, row 3 = file + status */
+  body.sm-simple .sm-topbar { row-gap: 0; }
+  body.sm-simple .sm-actions { display: contents; }
+  body.sm-simple .sm-brand { order: 0; }
+  body.sm-simple .sm-actions > .sm-switch-slot { order: 1; margin-left: auto; }
+  body.sm-simple .sm-topbar::after { content: ""; order: 2; flex-basis: 100%; height: 8px; }
+  body.sm-simple .sm-actions > :not(.sm-switch-slot) { order: 3; }
+  body.sm-simple .sm-actions .sm-btn-open { flex: 1 1 auto; }
+  body.sm-simple .sm-doc { order: 4; margin-top: 8px; }
+  body.sm-simple .sm-topbar .sm-btn-open .sm-long { display: none; }
+  body.sm-simple .sm-pill { top: 8px; border-radius: 14px; width: calc(100% - 16px); max-width: none; }
+  body.sm-simple .sm-pill .btn { padding: 5px 9px; }
+  body.sm-simple .viewport-hud-tl { display: none; }
+  body.sm-simple .viewport-hud-bl { right: 12px; font-size: 9.5px; }
+  .sm-sheet, .sm-sheet--left, .sm-sheet--right {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    max-height: 62vh;
+    border-radius: 14px 14px 0 0;
+    border-bottom: 0;
+  }
+  .sm-sheet-h::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 5px;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background: var(--border-hi);
+  }
+  .sm-sheet-h { position: relative; padding-top: 14px; }
+
+  /* ---- touch targets: everything tappable in Simple is >= 40px (desktop stays compact) */
+  body.sm-simple .sm-topbar .btn,
+  body.sm-simple .sm-pill .btn,
+  .sm-close,
+  .sm-sheet .btn { min-height: 40px; min-width: 40px; justify-content: center; }
+  body.sm-simple .sm-modeswitch button { min-height: 40px; min-width: 40px; padding: 0 14px; }
+  body.sm-simple .sm-split > .btn + .btn { min-width: 40px; }
+  .sm-close { font-size: 18px; }
+  body.sm-simple .sm-pill { gap: 2px; padding: 3px; }
+  body.sm-simple .sm-pill .btn { padding: 0 11px; }
+  body.sm-simple .sm-pill .sm-pill-v { display: none; }   /* current display mode lives in the menu */
+  .sm-mi { min-height: 40px; }
+  .sm-field .select-ctrl { min-height: 40px; }
+  .sm-range input { height: 40px; }
+  .sm-sec > summary { min-height: 40px; }
+  .sm-sheet .part-item, .sm-sheet .stream-item { min-height: 44px; }
+  /* part visibility checkbox: 40x40 hit area, 18px drawn box; negative margins keep the row height */
+  .sm-sheet .part-chk {
+    appearance: none;
+    -webkit-appearance: none;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    margin: -12px -10px -12px -12px;
+    position: relative;
+    z-index: 1;               /* the box overhangs the row edge; keep it above the neighbouring row */
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    background: center / 18px 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%230b111c' stroke='%235b7db0' stroke-width='1.5'/%3E%3C/svg%3E");
+  }
+  .sm-sheet .part-chk:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%2322d3ee' stroke='%2322d3ee' stroke-width='1.5'/%3E%3Cpath d='M5 9.5l2.6 2.6L13 6.5' fill='none' stroke='%2303101d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  .sm-sheet .part-chk:focus-visible { outline: 2px solid var(--cyan); outline-offset: -6px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sm-pop:not([hidden]) { animation: sm-pop-in 0.12s ease-out; }
+  .sm-sheet:not([hidden]) { animation: sm-fade-in 0.14s ease-out; }
+}
+@keyframes sm-pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes sm-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
 </style>
 </head>
 <body>
@@ -6959,18 +7618,27 @@ void main() { gl_FragColor = uRGBA; }`;
     }
     return { pos, idx: Uint32Array.from(idx), nt: idx.length / 3 };
   }
-  // Decimate one compact part to ~ratio of its triangles (binary search on the grid resolution).
+  // Decimate one compact part to ~ratio of its triangles: binary search on the grid resolution
+  // (cluster count grows roughly monotonically with the grid), keeping the evaluated result whose
+  // triangle count is closest to the target. The search runs to convergence (~11 steps over 2..2048);
+  // it used to stop after 9 steps and fall back to the coarsest grid, which on low-poly parts
+  // (e.g. a 224-tri die: 50% -> 18 tris) kept only ~8%. Returns null when no grid reduces the part.
   function decimateCompact(b, ratio) {
     const target = Math.max(4, Math.floor(b.nt * ratio));
     if (b.nt <= target) return null;
-    let lo = 2, hi = 2048, best = null;
-    for (let it = 0; it < 9 && lo <= hi; it++) {
-      const g = Math.floor((lo + hi) / 2);
+    let lo = 2, hi = 2048, best = null, bestErr = Infinity;
+    while (lo <= hi) {
+      const g = (lo + hi) >> 1;
       const d = clusterDecimate(b.vx, b.tv, b.nt, g);
+      if (d.nt < b.nt && d.nt > 0) {
+        const err = Math.abs(d.nt - target);
+        if (err < bestErr || (err === bestErr && d.nt < best.nt)) { best = d; bestErr = err; }
+      }
       if (d.nt > target) hi = g - 1;
-      else { best = d; lo = g + 1; }
+      else if (d.nt < target) lo = g + 1;
+      else break;
     }
-    return best || clusterDecimate(b.vx, b.tv, b.nt, 2);
+    return best;
   }
   // Reduced-detail export copy of a part (cached per ratio on the part's brep).
   function decimatedPart(part, ratio) {
@@ -6995,7 +7663,7 @@ void main() { gl_FragColor = uRGBA; }`;
   function computeAssemblyBounds(parts) {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    let totalVerts = 0, totalTris = 0, totalMergedFaces = 0, totalEdges = 0, totalHoles = 0;
+    let totalVerts = 0, totalTris = 0, totalParsedTris = 0, totalMergedFaces = 0, totalEdges = 0, totalHoles = 0;
     let allWatertight = true;
 
     const visibleParts = parts.filter((p) => p.visible);
@@ -7011,6 +7679,7 @@ void main() { gl_FragColor = uRGBA; }`;
       if (b.bbox.max[2] > maxZ) maxZ = b.bbox.max[2];
       totalVerts += b.weldedVerts.length;
       totalTris += b.tris.length;
+      totalParsedTris += p.triCount != null ? p.triCount : b.tris.length;
       totalMergedFaces += b.mergedFaces.length;
       totalEdges += b.featureEdges.length;
       totalHoles += b.holeCount;
@@ -7034,6 +7703,7 @@ void main() { gl_FragColor = uRGBA; }`;
       radius,
       totalVerts,
       totalTris,
+      totalParsedTris, // as decoded, before the B-Rep drops degenerate triangles
       totalMergedFaces,
       totalEdges,
       totalHoles,
@@ -7438,10 +8108,11 @@ void main() { gl_FragColor = uRGBA; }`;
     const bounds = computeAssemblyBounds(state.parts);
     const banner = document.getElementById('bigModelBanner');
     if (banner) {
-      const big = bounds.totalTris > BIG_MODEL_TRIS;
+      // Count the triangles as parsed from the file (the STL/B-Rep count excludes degenerate ones).
+      const big = bounds.totalParsedTris > BIG_MODEL_TRIS;
       banner.style.display = big ? '' : 'none';
       if (big) {
-        banner.textContent = `Large model: ${bounds.totalTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
+        banner.textContent = `Large model: ${bounds.totalParsedTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
           'exports stream part-by-part at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
       }
     }
@@ -8131,6 +8802,795 @@ void main() { gl_FragColor = uRGBA; }`;
       loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf');
     }
   });
+})();
+
+</script>
+  <script data-src="simple-mode.js">
+/*
+ * simple-mode.js — "Simple mode" add-on for pdf-3d-extractor (3D PDF -> CAD).
+ *
+ * Integration (index.html only, no other edits):
+ *   <link rel="stylesheet" href="affordance.css" />       (in <head>, optional, both modes)
+ *   <link rel="stylesheet" href="simple-mode.css" />      (in <head>)
+ *   <\script src="simple-mode.js"><\/script>                (after app.js)
+ *
+ * Works against 1.3.0 (toolbar is a plain .viewport-toolbar) and 1.4.0 (#viewerControls with Reset view,
+ * Orbit mode and line toggles): every original control is looked up at build time and only the ones that
+ * exist get a Simple equivalent.
+ *
+ * Design rules:
+ *  - Advanced mode == the original UI, untouched. Simple mode is just body.sm-simple + add-on chrome.
+ *  - Every Simple control PROXIES to the original control (button.click(), select.value + 'change',
+ *    checkbox.checked + 'change', range.value + 'input'/'change'). app.js stays the single source of truth.
+ *  - Original panel nodes shown in Simple sheets are MOVED (listeners intact) and restored to their exact
+ *    original positions via placeholder comments when switching back to Advanced.
+ *  - Add-on elements never carry data-render / data-view / data-viewopt / data-tab, so app.js and
+ *    viewer-gl.js selector bindings never pick them up.
+ */
+(function () {
+  'use strict';
+  if (window.PDF3DSimpleMode) return;
+
+  const STORE_KEY = 'pdf3d-extractor.uiMode';
+  const MODES = ['simple', 'advanced'];
+  const $ = (id) => document.getElementById(id);
+
+  const RENDER_LABELS = {
+    'shaded-edges': 'Shaded with edges', 'brep-faces': 'Face groups', shaded: 'Smooth', wireframe: 'Wireframe', xray: 'X-ray'
+  };
+  const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
+  const ORBIT_LABELS = { free: ['Free', 'tumble any axis'], turntable: ['Turntable', 'Z stays up'] };
+  const HINT_RE = /Click (?:a )?part in (?:the )?tree to highlight/;
+  const HINT_TEXT = { simple: 'Click a part in Parts to highlight', advanced: 'Click a part in the part list to highlight' };
+  const VIEWOPT_LABELS = {
+    wires: ['Wires', 'PRC curves'], hiddenLines: ['Hidden', 'dimmed hidden edges'],
+    meshWire: ['Mesh', 'triangle overlay'], flat: ['Flat', 'faceted shading']
+  };
+  const EXPORTS = [
+    ['btnExportSTL', 'STL (binary)', '.stl'],
+    ['btnExportSTLText', 'STL (ASCII)', '.stl'],
+    ['btnExportOBJ', 'OBJ', '.obj'],
+    ['btnExportIGES', 'IGES wireframe', '.igs'],
+    ['btnExportRaw', 'Raw stream', '.u3d / .prc']
+  ];
+  const SETTINGS = [
+    ['unitSelect', 'Units', 'Unit scale of the source model'],
+    ['brepModeSelect', 'Body type', 'How bodies are written to STEP'],
+    ['detailSelect', 'Reduce detail', 'Applies to exported files only']
+  ];
+
+  // ------------------------------------------------------------------ tiny DOM helper
+  function h(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    if (props) {
+      for (const k of Object.keys(props)) {
+        const v = props[k];
+        if (v == null || v === false) continue;
+        if (k === 'class') n.className = v;
+        else if (k === 'text') n.textContent = v;
+        else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
+        else if (k in n && typeof v !== 'string') n[k] = v;
+        else n.setAttribute(k, v === true ? '' : v);
+      }
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : String(kid));
+    return n;
+  }
+  const fire = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
+  const isOwnShown = (el) => {
+    if (!el || el.hidden) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden';
+  };
+  // Original viewer toolbar: #viewerControls (1.4.0+) or the plain .viewport-toolbar (1.3.0).
+  const viewerRoot = () => $('viewerControls') || document.querySelector('.viewport-toolbar');
+  const ADDON = '.sm-pop, .sm-pill, .sm-sheet, .sm-topbar, .sm-dialog';
+  const viewerAll = (sel) => [...(viewerRoot() || document).querySelectorAll(sel)].filter((el) => !el.closest(ADDON));
+  const visible = (el) => !el.disabled && el.getClientRects().length > 0;
+  const observe = (el, fn, opts) => {
+    if (!el) return;
+    new MutationObserver(fn).observe(el, opts || { attributes: true, childList: true, characterData: true, subtree: true });
+  };
+
+  // ------------------------------------------------------------------ mode resolution
+  function readStored() { try { return localStorage.getItem(STORE_KEY); } catch (e) { return null; } }
+  function store(m) { try { localStorage.setItem(STORE_KEY, m); } catch (e) { /* private mode */ } }
+  function initialMode() {
+    let q = null;
+    try { q = new URLSearchParams(location.search).get('ui'); } catch (e) { /* ignore */ }
+    if (MODES.includes(q)) return q;
+    const s = readStored();
+    return MODES.includes(s) ? s : 'simple';   // first-time visitors get Simple
+  }
+
+  // ------------------------------------------------------------------ state
+  let mode = null;
+  let built = false;
+  const ui = {};
+  const moved = [];          // [{ node, ph }]
+  let openPop = null;        // { trigger, pop, onOpen, align }
+  let openDialog = null;
+
+  // ------------------------------------------------------------------ node relocation (exact restore)
+  function moveInto(node, target) {
+    if (!node || !target || node.parentNode === target) return;
+    const ph = document.createComment('sm-placeholder');
+    node.parentNode.insertBefore(ph, node);
+    target.appendChild(node);
+    moved.push({ node, ph });
+  }
+  function restoreAll() {
+    while (moved.length) {
+      const { node, ph } = moved.pop();
+      if (ph.parentNode) { ph.parentNode.insertBefore(node, ph); ph.remove(); }
+    }
+  }
+
+  // ------------------------------------------------------------------ popovers (menus / small dialogs)
+  // Tab order inside a popover / sheet (focus trap)
+  function tabbables(root) {
+    return [...root.querySelectorAll('button, select, input, summary, a[href], [tabindex]:not([tabindex="-1"])')]
+      .filter((el) => visible(el) && !el.closest('[hidden]') && el.tabIndex >= 0);
+  }
+  // Arrow-key roving set: menu items only (never selects / inputs, so arrows can't change a setting)
+  function rovers(root) { return [...root.querySelectorAll('.sm-mi')].filter(visible); }
+  function trapTab(ev, root) {
+    const f = tabbables(root);
+    if (!f.length) { ev.preventDefault(); return; }
+    const a = document.activeElement, outside = !root.contains(a) || a === root;
+    if (ev.shiftKey && (outside || a === f[0])) { ev.preventDefault(); f[f.length - 1].focus(); }
+    else if (!ev.shiftKey && (outside || a === f[f.length - 1])) { ev.preventDefault(); f[0].focus(); }
+  }
+  function bindPopover(trigger, pop, opts) {
+    const entry = Object.assign({ trigger, pop, align: 'left', onOpen: null }, opts || {});
+    trigger.setAttribute('aria-haspopup', pop.getAttribute('role') === 'menu' ? 'menu' : 'dialog');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', pop.id);
+    trigger.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (openPop && openPop.pop === pop) closePop(false); else openPopover(entry);
+    });
+    trigger.addEventListener('keydown', (ev) => {
+      if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && !(openPop && openPop.pop === pop)) {
+        ev.preventDefault();
+        openPopover(entry, ev.key === 'ArrowUp' ? 'last' : 'first');
+      }
+    });
+    pop.addEventListener('keydown', (ev) => popKeys(ev, pop));
+    pop.addEventListener('focusout', () => {
+      setTimeout(() => {
+        if (openPop && openPop.pop === pop && !pop.contains(document.activeElement) &&
+            document.activeElement !== trigger && document.hasFocus()) closePop(false);
+      }, 0);
+    });
+    return entry;
+  }
+  function openPopover(entry, focusWhich) {
+    closePop(false);
+    if (entry.onOpen) entry.onOpen();
+    entry.pop.hidden = false;
+    entry.trigger.setAttribute('aria-expanded', 'true');
+    openPop = entry;
+    positionPop(entry);
+    const f = rovers(entry.pop).length ? rovers(entry.pop) : tabbables(entry.pop);
+    const target = focusWhich === 'last' ? f[f.length - 1] : ((entry.pop.getAttribute('role') === 'menu' && entry.pop.querySelector('.sm-mi[role="menuitemradio"][aria-checked="true"]')) || f[0]);
+    if (target) target.focus({ preventScroll: true });
+  }
+  function positionPop(entry) {
+    const { trigger, pop, align } = entry;
+    pop.style.maxHeight = '';
+    pop.style.left = '0px'; pop.style.top = '0px';
+    const r = trigger.getBoundingClientRect();
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = align === 'right' ? r.right - pw : (align === 'center' ? r.left + r.width / 2 - pw / 2 : r.left);
+    left = Math.max(8, Math.min(left, vw - pw - 8));
+    let top = r.bottom + 6;
+    if (top + ph > vh - 8) {
+      if (r.top - ph - 6 >= 8) top = r.top - ph - 6;
+      else pop.style.maxHeight = Math.max(160, vh - top - 8) + 'px';
+    }
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(top) + 'px';
+  }
+  function closePop(returnFocus) {
+    if (!openPop) return;
+    const { trigger, pop } = openPop;
+    openPop = null;
+    pop.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (returnFocus) trigger.focus({ preventScroll: true });
+  }
+  function popKeys(ev, root) {
+    const t = ev.target, k = ev.key;
+    if (k === 'Tab') { trapTab(ev, root); return; }
+    const isSelect = t.tagName === 'SELECT';
+    const isRange = t.tagName === 'INPUT' && t.type === 'range';
+    if (isSelect) {
+      // A closed select must never change from the keyboard by accident. Explicit open only:
+      // Space / Alt+Down (native) or Enter (showPicker). Arrows rove to menu items instead.
+      if (ev.altKey && (k === 'ArrowDown' || k === 'ArrowUp')) return;
+      if (k === 'Enter') { ev.preventDefault(); try { t.showPicker(); } catch (e) { /* older browsers */ } return; }
+      if (k === 'PageUp' || k === 'PageDown' || k === 'ArrowLeft' || k === 'ArrowRight' ||
+          (k.length === 1 && k !== ' ' && !ev.ctrlKey && !ev.metaKey)) { ev.preventDefault(); return; }
+    }
+    if (isRange && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'Home' || k === 'End' || k === 'PageUp' || k === 'PageDown')) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(k)) return;
+    ev.preventDefault();             // swallow on every element: arrows only ever move focus here
+    const items = rovers(root);
+    if (!items.length) return;
+    const i = items.indexOf(t);
+    let next;
+    if (k === 'Home') next = items[0];
+    else if (k === 'End') next = items[items.length - 1];
+    else if (i >= 0) next = items[(i + (k === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+    else if (k === 'ArrowDown') next = items.find((it) => t.compareDocumentPosition(it) & Node.DOCUMENT_POSITION_FOLLOWING) || items[0];
+    else next = items.slice().reverse().find((it) => t.compareDocumentPosition(it) & Node.DOCUMENT_POSITION_PRECEDING) || items[items.length - 1];
+    next.focus();
+  }
+  // menu item that proxies to an original control and closes the menu
+  function menuItem(label, opts) {
+    const o = opts || {};
+    const b = h('button', { type: 'button', class: 'sm-mi' + (o.cls ? ' ' + o.cls : ''), role: o.role || 'menuitem', title: o.title || null },
+      o.check != null ? h('span', { class: 'sm-mi-check', 'aria-hidden': 'true' }) : null,
+      h('span', { class: 'sm-mi-label', text: label }),
+      o.ext ? h('span', { class: 'sm-mi-ext', text: o.ext }) : null);
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (b.disabled) return;
+      if (!o.keepOpen) closePop(true);
+      if (o.action) o.action();
+    });
+    return b;
+  }
+  function setChecked(item, on) {
+    item.setAttribute('aria-checked', on ? 'true' : 'false');
+    const c = item.querySelector('.sm-mi-check');
+    if (c) c.textContent = on ? '✓' : '';
+  }
+
+  // ------------------------------------------------------------------ side sheets
+  function makeSheet(id, title, side, extraCls) {
+    const titleId = id + 'Title';
+    const close = h('button', { type: 'button', class: 'btn btn-sm sm-close', 'aria-label': 'Close ' + title, text: '×' });
+    const body = h('div', { class: 'sm-sheet-b' });
+    const sheet = h('section', {
+      id, class: `sm-sheet sm-sheet--${side} ${extraCls || ''}`, role: 'dialog', 'aria-modal': 'false',
+      'aria-labelledby': titleId, tabindex: '-1', hidden: true
+    }, h('div', { class: 'sm-sheet-h' }, h('h2', { id: titleId, text: title }), close), body);
+    close.addEventListener('click', () => toggleSheet(sheet, false, true));
+    sheet.addEventListener('keydown', (ev) => { if (ev.key === 'Tab') trapTab(ev, sheet); });
+    return { sheet, body };
+  }
+  function toggleSheet(sheet, show, returnFocus) {
+    const on = show == null ? sheet.hidden : !!show;
+    if (on && window.matchMedia('(max-width: 720px)').matches) {
+      // phone: bottom sheets stack, so only one at a time
+      for (const s of [ui.partsSheet, ui.infoSheet]) if (s !== sheet && !s.hidden) toggleSheet(s, false, false);
+    }
+    sheet.hidden = !on;
+    const btn = sheet === ui.partsSheet ? ui.btnParts : ui.btnInfo;
+    if (btn) { btn.setAttribute('aria-expanded', on ? 'true' : 'false'); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    if (on) { syncSheetTop(); sheet.focus({ preventScroll: true }); }
+    else if (returnFocus && btn) btn.focus({ preventScroll: true });
+  }
+  function syncSheetTop() {
+    if (!ui.topbar) return;
+    const top = Math.round(ui.topbar.getBoundingClientRect().bottom);
+    for (const s of [ui.partsSheet, ui.infoSheet]) if (s) s.style.setProperty('--sm-top', top + 'px');
+  }
+
+  // ------------------------------------------------------------------ build all add-on chrome (once)
+  function build() {
+    if (built) return;
+    built = true;
+
+    // ---------- mode switch (lives in Simple top bar, or floats in Advanced)
+    ui.btnSimple = h('button', { type: 'button', 'aria-pressed': 'false', text: 'Simple', title: 'Simple mode: essentials only' });
+    ui.btnAdvanced = h('button', { type: 'button', 'aria-pressed': 'false', text: 'Advanced', title: 'Advanced mode: full workbench' });
+    ui.btnSimple.addEventListener('click', () => setMode('simple', true));
+    ui.btnAdvanced.addEventListener('click', () => setMode('advanced', true));
+    ui.modeSwitch = h('div', { class: 'sm-modeswitch', role: 'group', 'aria-label': 'Interface mode' }, ui.btnSimple, ui.btnAdvanced);
+    ui.modeSwitch.addEventListener('keydown', (ev) => {
+      if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+        ev.preventDefault();
+        (document.activeElement === ui.btnSimple ? ui.btnAdvanced : ui.btnSimple).focus();
+      }
+    });
+
+    // ---------- top bar
+    const titleEl = document.querySelector('.brand-title');
+    const verMatch = titleEl && (titleEl.textContent.match(/v\d+(?:\.\d+)+/) || [])[0];
+    const version = verMatch || (window.CAD3DExtractorVersion ? 'v' + window.CAD3DExtractorVersion : '');
+    ui.docName = h('span', { class: 'sm-doc-name', text: ($('docFileName') || {}).textContent || '' });
+    ui.status = h('span', { class: 'sm-status', role: 'status', 'aria-live': 'polite' }, h('span', { class: 'sm-dot', 'aria-hidden': 'true' }), h('span', { class: 'sm-status-t' }));
+
+    ui.btnOpen = h('button', { type: 'button', class: 'btn sm-btn-open', title: 'Open a 3D PDF, .u3d or .prc file' },
+      h('span', null, 'Open', h('span', { class: 'sm-long', text: ' 3D PDF' }), '…'));
+    ui.btnOpen.addEventListener('click', () => { const o = $('btnOpenFile'); if (o) o.click(); });
+
+    ui.btnMore = h('button', { type: 'button', class: 'btn sm-iconbtn', 'aria-label': 'More actions', title: 'More actions', text: '⋯' });
+    ui.menuMore = h('div', { id: 'smMenuMore', class: 'sm-pop', role: 'menu', 'aria-label': 'More actions', hidden: true },
+      menuItem('Load sample', { ext: 'NX-ASM-402', action: () => { const o = $('btnLoadSample'); if (o) o.click(); } }),
+      menuItem('About formats', { action: () => showAbout() }));
+
+    ui.btnExportMain = h('button', { type: 'button', class: 'btn btn-primary', title: 'Export STEP AP214 (.stp) — Siemens NX ready' }, 'Export STEP');
+    ui.btnExportMain.addEventListener('click', () => { const o = $('btnExportSTEP'); if (o) o.click(); });
+    ui.btnExportCaret = h('button', { type: 'button', class: 'btn btn-primary', 'aria-label': 'More export formats and export settings', title: 'Other formats & export settings' },
+      h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
+    ui.menuExport = h('div', { id: 'smMenuExport', class: 'sm-pop', role: 'dialog', 'aria-label': 'Export', hidden: true });
+    ui.exportItems = h('div', { role: 'group', 'aria-label': 'Export formats' });
+    ui.settingsBox = h('div', { role: 'group', 'aria-label': 'Export settings' });
+    ui.settingSelects = SETTINGS.map(([origId, label, hint]) => {
+      const sel = h('select', { class: 'select-ctrl', id: 'sm_' + origId, 'aria-describedby': 'sm_' + origId + '_hint' });
+      sel.addEventListener('change', () => {
+        const o = $(origId);
+        if (!o || o.value === sel.value) return;
+        o.value = sel.value;
+        fire(o, 'input');
+        fire(o, 'change');
+      });
+      ui.settingsBox.append(h('label', { class: 'sm-field' }, h('span', { text: label }), sel,
+        h('span', { class: 'sm-hint', id: 'sm_' + origId + '_hint', text: hint })));
+      return [origId, sel];
+    });
+    ui.menuExport.append(h('div', { class: 'sm-pop-h', text: 'Export as' }), ui.exportItems, h('hr', { class: 'sm-sep' }),
+      h('div', { class: 'sm-pop-h', text: 'Export settings' }), ui.settingsBox);
+
+    ui.topbar = h('header', { class: 'sm-topbar', 'aria-label': 'Simple mode toolbar' },
+      h('div', { class: 'sm-brand' },
+        h('div', { class: 'brand-badge', 'aria-hidden': 'true', text: '3D' }),
+        h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
+      h('div', { class: 'sm-doc' }, ui.docName, ui.status),
+      h('div', { class: 'sm-actions' },
+        h('span', { class: 'sm-switch-slot' }),
+        ui.btnOpen, ui.btnMore,
+        h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret)));
+    ui.switchSlot = ui.topbar.querySelector('.sm-switch-slot');
+    document.body.insertBefore(ui.topbar, document.body.firstChild);
+
+    // ---------- floating viewport pill
+    const wrap = document.querySelector('.viewport-wrap');
+    ui.btnParts = h('button', { type: 'button', class: 'btn btn-sm', 'aria-expanded': 'false', 'aria-pressed': 'false', 'aria-controls': 'smSheetParts', title: 'Show / hide parts' },
+      'Parts', ui.partCount = h('span', { class: 'sm-count', text: '0' }));
+    ui.btnInfo = h('button', { type: 'button', class: 'btn btn-sm', 'aria-expanded': 'false', 'aria-pressed': 'false', 'aria-controls': 'smSheetInfo', title: 'Streams, size, features, product tree', text: 'Info' });
+    ui.btnDisplay = h('button', { type: 'button', class: 'btn btn-sm' }, h('span', { class: 'sm-pill-k', text: 'Display' }), ui.displayLabel = h('span', { class: 'sm-pill-v' }), h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
+    ui.btnView = h('button', { type: 'button', class: 'btn btn-sm' }, 'View', h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
+    ui.btnFit = h('button', { type: 'button', class: 'btn btn-sm', text: 'Fit', title: 'Reset zoom & pan' });
+    ui.btnFit.addEventListener('click', () => { const o = $('btnFitView'); if (o) o.click(); });
+    const resetOrig = viewerAll('[data-view="reset"]')[0];          // 1.4.0+
+    ui.btnReset = resetOrig ? h('button', { type: 'button', class: 'btn btn-sm', text: 'Reset', title: resetOrig.title || 'Reset view' }) : null;
+    if (ui.btnReset) ui.btnReset.addEventListener('click', () => { const o = viewerAll('[data-view="reset"]')[0]; if (o) o.click(); });
+    ui.btnViewMore = h('button', { type: 'button', class: 'btn btn-sm' }, 'More', h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
+    ui.pill = h('div', { class: 'sm-pill', role: 'toolbar', 'aria-label': 'Viewer' },
+      ui.btnParts, ui.btnInfo, h('span', { class: 'sm-pill-sep', 'aria-hidden': 'true' }),
+      ui.btnDisplay, ui.btnView, ui.btnFit, ui.btnReset, ui.btnViewMore);
+    ui.btnParts.addEventListener('click', () => toggleSheet(ui.partsSheet));
+    ui.btnInfo.addEventListener('click', () => toggleSheet(ui.infoSheet));
+
+    ui.menuDisplay = h('div', { id: 'smMenuDisplay', class: 'sm-pop', role: 'menu', 'aria-label': 'Display mode', hidden: true });
+    ui.displayItems = viewerAll('[data-render]').map((orig) => {
+      const key = orig.getAttribute('data-render');
+      const it = menuItem(RENDER_LABELS[key] || orig.textContent.trim(), { role: 'menuitemradio', check: true, title: orig.textContent.trim(), action: () => orig.click() });
+      it.dataset.smRender = key;
+      ui.menuDisplay.append(it);
+      observe(orig, syncDisplay, { attributes: true, attributeFilter: ['class'] });
+      return { it, orig, key };
+    });
+    ui.menuView = h('div', { id: 'smMenuView', class: 'sm-pop', role: 'menu', 'aria-label': 'Camera view', hidden: true },
+      viewerAll('[data-view]').filter((o) => o.getAttribute('data-view') !== 'reset').map((orig) => {
+        const key = orig.getAttribute('data-view');
+        return menuItem(VIEW_LABELS[key] || orig.textContent.trim(), { title: orig.textContent.trim(), action: () => orig.click() });
+      }));
+
+    // "More": explode + line options
+    const explode = $('explodeSlider');
+    ui.explode = h('input', { type: 'range', min: explode ? explode.min : '0', max: explode ? explode.max : '100', value: explode ? explode.value : '0', 'aria-label': 'Explode parts' });
+    ui.explodeOut = h('output', { text: '0%' });
+    ui.explode.addEventListener('input', () => {
+      const o = $('explodeSlider');
+      ui.explodeOut.textContent = ui.explode.value + '%';
+      if (!o) return;
+      o.value = ui.explode.value;
+      fire(o, 'input');
+      fire(o, 'change');
+    });
+    // Orbit mode (1.4.0+): radio items proxied to the original [data-orbit] buttons
+    ui.orbitItems = viewerAll('[data-orbit]').map((orig) => {
+      const key = orig.getAttribute('data-orbit');
+      const [name, hint] = ORBIT_LABELS[key] || [orig.textContent.trim(), ''];
+      const it = menuItem(name, { role: 'menuitemradio', check: true, ext: hint, keepOpen: true, title: orig.title || null,
+        action: () => { orig.click(); syncViewMore(); } });
+      observe(orig, syncViewMore, { attributes: true, attributeFilter: ['class', 'aria-pressed'] });
+      return { it, orig };
+    });
+    // Line toggles (1.4.0+): checkbox items proxied to the original input[data-viewopt] (toggle + 'change')
+    ui.viewOpts = viewerAll('input[data-viewopt]').map((orig) => {
+      const key = orig.getAttribute('data-viewopt');
+      const lab = orig.closest('label');
+      const [name, hint] = VIEWOPT_LABELS[key] || [(lab ? lab.textContent : key).trim(), ''];
+      const it = menuItem(name, { role: 'menuitemcheckbox', check: true, ext: hint, keepOpen: true, title: lab ? lab.title : null,
+        action: () => {
+          const o = viewerAll('input[data-viewopt="' + key + '"]')[0] || orig;
+          o.checked = !o.checked;
+          fire(o, 'change');
+          syncViewMore();
+        } });
+      it.classList.add('sm-mi--box');
+      if (lab) observe(lab, syncViewMore, { attributes: true, attributeFilter: ['class'] });
+      return { it, orig, key };
+    });
+    ui.menuViewMore = h('div', { id: 'smMenuViewMore', class: 'sm-pop', role: 'dialog', 'aria-label': 'More view options', hidden: true },
+      h('div', { class: 'sm-pop-h', text: 'Explode' }), h('div', { class: 'sm-range' }, ui.explode, ui.explodeOut),
+      ui.orbitItems.length ? [h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', text: 'Orbit' }),
+        h('div', { role: 'group', 'aria-label': 'Orbit mode' }, ui.orbitItems.map((o) => o.it))] : null,
+      ui.viewOpts.length ? [h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', text: 'Lines' }),
+        h('div', { role: 'group', 'aria-label': 'Line options' }, ui.viewOpts.map((v) => v.it))] : null);
+
+    // drop veil + empty hint
+    ui.dropVeil = h('div', { class: 'sm-dropveil', hidden: true, 'aria-hidden': 'true' },
+      h('div', null, 'Drop to open', h('small', { text: '3D PDF (.pdf), .u3d or .prc' })));
+    ui.emptyText = h('span', { text: 'Drop a 3D PDF here or click Open' });
+    ui.empty = h('div', { class: 'sm-empty', hidden: true }, h('div', null, ui.emptyText));
+    if (wrap) wrap.append(ui.pill, ui.empty, ui.dropVeil);
+
+    // ---------- sheets
+    const parts = makeSheet('smSheetParts', 'Parts', 'left', 'sm-sheet--parts');
+    ui.partsSheet = parts.sheet; ui.partsBody = parts.body;
+    const info = makeSheet('smSheetInfo', 'Info', 'right', 'sm-sheet--info');
+    ui.infoSheet = info.sheet; ui.infoBody = info.body;
+    ui.infoSections = [
+      ['streamList', 'Streams', 'streamCountBadge', false],
+      ['bboxGrid', 'Bounding box & topology', 'unitBadge', true],
+      ['featureList', 'Detected features', 'featureCountBadge', false],
+      ['treeList', 'Product tree & attachments', 'treeCountBadge', false]
+    ].map(([anchorId, title, badgeId, open]) => {
+      const badge = $(badgeId);
+      const mirror = h('span', { class: badge ? badge.className : 'badge' });
+      const syncBadge = () => { if (badge) { mirror.className = badge.className; mirror.textContent = badge.textContent; } };
+      syncBadge();
+      observe(badge, syncBadge);
+      const body = h('div', { class: 'sm-sec-b' });
+      const det = h('details', { class: 'sm-sec', open: !!open }, h('summary', null, h('span', { text: title }), mirror), body);
+      ui.infoBody.append(det);
+      const anchor = $(anchorId);
+      return { card: anchor ? anchor.closest('.panel-card') : null, body };
+    });
+
+    // ---------- About dialog
+    const sub = document.querySelector('.brand-sub');
+    ui.about = h('div', { id: 'smAbout', class: 'sm-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'smAboutTitle', tabindex: '-1', hidden: true },
+      h('div', { class: 'sm-sheet-h' }, h('h2', { id: 'smAboutTitle', text: 'Supported formats' }),
+        h('button', { type: 'button', class: 'btn btn-sm sm-close', 'aria-label': 'Close', text: '×', onclick: () => hideAbout() })),
+      h('dl', null,
+        h('dt', { text: 'Opens' }), h('dd', null, '3D PDF (', h('code', { text: '.pdf' }), ') with embedded U3D (ECMA-363) or PRC (ISO 14739-1) streams, plus raw ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' files.'),
+        h('dt', { text: 'STEP' }), h('dd', null, h('code', { text: '.stp' }), ' AP214 B-Rep, ready for Siemens NX and most CAD tools.'),
+        h('dt', { text: 'STL' }), h('dd', null, h('code', { text: '.stl' }), ' triangle mesh, binary or ASCII.'),
+        h('dt', { text: 'OBJ' }), h('dd', null, h('code', { text: '.obj' }), ' mesh with part groups and normals.'),
+        h('dt', { text: 'IGES' }), h('dd', null, h('code', { text: '.igs' }), ' 5.3 feature-edge wireframe curves.'),
+        h('dt', { text: 'Raw' }), h('dd', null, 'The extracted ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' stream bytes.'),
+        h('dt', { text: 'Settings' }), h('dd', { text: 'Units, body type and reduce detail live under Export ▼ → Export settings. The STEP / stream inspector is in Advanced mode.' }),
+        sub ? h('dt', { text: 'Specs' }) : null, sub ? h('dd', { text: sub.textContent.trim() }) : null));
+
+    document.body.append(ui.menuMore, ui.menuExport, ui.menuDisplay, ui.menuView, ui.menuViewMore, ui.partsSheet, ui.infoSheet, ui.about);
+
+    // ---------- popover wiring
+    bindPopover(ui.btnMore, ui.menuMore, { align: 'right' });
+    bindPopover(ui.btnExportCaret, ui.menuExport, { align: 'right', onOpen: syncExportMenu });
+    bindPopover(ui.btnDisplay, ui.menuDisplay, { onOpen: syncDisplay });
+    bindPopover(ui.btnView, ui.menuView);
+    bindPopover(ui.btnViewMore, ui.menuViewMore, { align: 'right', onOpen: syncViewMore });
+
+    // ---------- live mirrors of original state
+    observe($('docFileName'), () => { ui.docName.textContent = $('docFileName').textContent; ui.docName.title = ui.docName.textContent; syncEmpty(); });
+    observe($('statusBadge'), syncStatus);
+    observe($('partList'), syncPartCount, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
+    ($('partList') || document).addEventListener('change', () => setTimeout(syncPartCount, 0));
+    observe($('btnExportSTEP'), () => { ui.btnExportMain.disabled = !!$('btnExportSTEP').disabled; }, { attributes: true, attributeFilter: ['disabled'] });
+
+    // ---------- global keyboard / pointer handling
+    document.addEventListener('pointerdown', (ev) => {
+      if (openPop && !openPop.pop.contains(ev.target) && !openPop.trigger.contains(ev.target)) closePop(false);
+      if (openDialog && !openDialog.contains(ev.target) && !ui.menuMore.contains(ev.target)) hideAbout();
+    }, true);
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      if (openDialog) { ev.preventDefault(); hideAbout(); return; }
+      if (openPop) { ev.preventDefault(); closePop(true); return; }
+      if (mode === 'simple') {
+        const s = [ui.infoSheet, ui.partsSheet].find((x) => !x.hidden && x.contains(document.activeElement)) ||
+                  [ui.infoSheet, ui.partsSheet].find((x) => !x.hidden);
+        if (s) { ev.preventDefault(); toggleSheet(s, false, true); }
+      }
+    });
+    window.addEventListener('resize', () => {
+      if (openPop) positionPop(openPop);
+      syncSheetTop();
+      placeFloatingSwitch();
+    });
+
+    // ---------- whole-viewport drag & drop (Simple mode only)
+    let depth = 0;
+    const hasFiles = (ev) => ev.dataTransfer && [...(ev.dataTransfer.types || [])].includes('Files');
+    const veil = (on) => { ui.dropVeil.hidden = !on; };
+    window.addEventListener('dragenter', (ev) => {
+      if (mode !== 'simple' || !hasFiles(ev)) return;
+      depth++; veil(true);
+    });
+    window.addEventListener('dragover', (ev) => {
+      if (mode !== 'simple' || !hasFiles(ev)) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'copy';
+      veil(true);
+    });
+    window.addEventListener('dragleave', () => {
+      if (mode !== 'simple') return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) veil(false);
+    });
+    window.addEventListener('drop', (ev) => {
+      if (mode !== 'simple') return;
+      depth = 0; veil(false);
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      forwardFiles(ev.dataTransfer.files);
+    });
+
+    // ---------- keyboard-reachable selectable rows (both modes; app.js untouched)
+    enhanceRows($('partList'), '.part-item', 'selected', 'Parts');
+    enhanceRows($('streamList'), '.stream-item', 'active', 'Embedded 3D streams');
+
+    syncStatus(); syncDisplay(); syncPartCount(); syncEmpty();
+  }
+
+  // app.js rebuilds these lists with innerHTML and binds 'click' on each row div. Give the rows
+  // tabindex/role/aria-selected and turn Enter/Space into that same click; arrows move between rows.
+  function enhanceRows(list, rowSel, onCls, label) {
+    if (!list) return;
+    const rows = () => [...list.children].filter((r) => r.matches(rowSel));
+    let pending = null;               // { idx, until }: refocus the activated row after app.js rebuilds the list
+    const refocus = () => {
+      if (!pending || Date.now() > pending.until) { pending = null; return; }
+      const a = document.activeElement;
+      if (list.contains(a)) return;
+      if (a && a !== document.body) { pending = null; return; }   // user moved focus elsewhere: leave it
+      const r2 = rows()[pending.idx];
+      if (r2) r2.focus({ preventScroll: true });
+    };
+    const apply = () => {
+      if (list.getAttribute('role') !== 'listbox') { list.setAttribute('role', 'listbox'); list.setAttribute('aria-label', label); }
+      for (const r of rows()) {
+        if (r.getAttribute('tabindex') !== '0') r.setAttribute('tabindex', '0');
+        if (r.getAttribute('role') !== 'option') r.setAttribute('role', 'option');
+        const on = r.classList.contains(onCls) ? 'true' : 'false';
+        if (r.getAttribute('aria-selected') !== on) r.setAttribute('aria-selected', on);
+      }
+      refocus();
+    };
+    apply();
+    new MutationObserver(apply).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    list.addEventListener('keydown', (ev) => {
+      const row = ev.target;
+      if (!row.matches || !row.matches(rowSel) || row.parentNode !== list) return;
+      const all = rows(), idx = all.indexOf(row);
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        pending = { idx, until: Date.now() + 3000 };
+        row.click();                                   // app.js rebuilds the list (sync or after an async stream load)
+        apply(); requestAnimationFrame(refocus);
+      } else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        const n = all[idx + (ev.key === 'ArrowDown' ? 1 : -1)];
+        if (n) { ev.preventDefault(); n.focus(); }
+      }
+    });
+  }
+
+  // HUD hint wording ("tree" there means the part list). No-op once the original text no longer says "tree".
+  function syncHint() {
+    const el = document.querySelector('.viewport-hud-bl');
+    if (!el) return;
+    if (!ui.hint) {
+      const tn = [...el.childNodes].find((n) => n.nodeType === 3 && HINT_RE.test(n.nodeValue));
+      ui.hint = tn ? { tn, orig: tn.nodeValue, last: tn.nodeValue } : { tn: null };
+    }
+    const hnt = ui.hint;
+    if (!hnt.tn || !hnt.tn.isConnected) return;
+    if (hnt.tn.nodeValue !== hnt.last) return;        // someone else (app.js) rewrote it: leave it alone
+    hnt.tn.nodeValue = hnt.last = hnt.orig.replace(HINT_RE, HINT_TEXT[mode] || '$&');
+  }
+
+  // Hand dropped files to app.js through its own #fileInput 'change' handler (reads ev.target.files[0]).
+  // Fallback: re-dispatch a synthetic drop on #dropZone (its handler reads ev.dataTransfer.files[0]).
+  function forwardFiles(files) {
+    if (!files || !files.length) return;
+    const input = $('fileInput');
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(files[0]);
+      input.files = dt.files;
+      fire(input, 'change');
+    } catch (e) {
+      const dz = $('dropZone');
+      if (!dz) return;
+      const dt = new DataTransfer();
+      dt.items.add(files[0]);
+      dz.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }
+  }
+
+  // ------------------------------------------------------------------ sync helpers (read originals)
+  function syncStatus() {
+    const b = $('statusBadge');
+    if (!b) return;
+    const t = (b.textContent || '').trim();
+    const tone = /badge-emerald/.test(b.className) ? 'ok' : /badge-amber/.test(b.className) ? 'warn' : '';
+    let m, short;
+    if (/NO 3D STREAM/.test(t)) short = 'Attachment only';
+    else if (/NO MESH/.test(t)) short = 'No mesh found';
+    else if ((m = t.match(/WATER-TIGHT[^(]*\((\d+) SOLIDS?\)/))) short = `${m[1]} watertight solid${m[1] === '1' ? '' : 's'}`;
+    else if ((m = t.match(/(\d+) BODIES EXTRACTED/))) short = `${m[1]} bod${m[1] === '1' ? 'y' : 'ies'} extracted`;
+    else if (/^READY/.test(t)) short = 'Ready';
+    else short = t.length > 30 ? t.slice(0, 30) + '…' : t;
+    if (tone === 'warn' && b.title && !/No mesh|Attachment/.test(short)) short += ' · warnings';
+    ui.status.dataset.tone = tone;
+    ui.status.querySelector('.sm-status-t').textContent = short;
+    ui.status.title = t + (b.title ? '\n' + b.title : '');
+    syncEmpty();
+  }
+  function syncDisplay() {
+    if (!ui.displayItems) return;
+    let cur = null;
+    for (const d of ui.displayItems) {
+      const on = d.orig.classList.contains('btn-active');
+      setChecked(d.it, on);
+      if (on) cur = d;
+    }
+    ui.displayLabel.textContent = cur ? (RENDER_LABELS[cur.key] || cur.orig.textContent.trim()) : '';
+  }
+  function syncViewMore() {
+    const o = $('explodeSlider');
+    if (o) { ui.explode.min = o.min; ui.explode.max = o.max; ui.explode.value = o.value; }
+    ui.explodeOut.textContent = ui.explode.value + '%';
+    for (const v of ui.viewOpts || []) {
+      const orig = viewerAll('input[data-viewopt="' + v.key + '"]')[0] || v.orig;
+      setChecked(v.it, !!orig.checked);
+      v.it.disabled = !!orig.disabled;
+    }
+    for (const o of ui.orbitItems || []) {
+      setChecked(o.it, o.orig.classList.contains('btn-active') || o.orig.getAttribute('aria-pressed') === 'true');
+    }
+  }
+  function syncExportMenu() {
+    ui.exportItems.textContent = '';
+    const list = EXPORTS.slice();
+    const xt = $('btnExportXT');   // dev-only (?xt=1); include only when the original is itself shown
+    if (xt && isOwnShown(xt)) list.push(['btnExportXT', 'Parasolid XT [dev]', '.x_t', 'sm-mi--dev']);
+    for (const [id, label, ext, cls] of list) {
+      const orig = $(id);
+      if (!orig || !isOwnShown(orig)) continue;
+      const it = menuItem(label, { ext, cls, title: orig.title || null, action: () => { const o = $(id); if (o) o.click(); } });
+      it.disabled = !!orig.disabled;
+      it.dataset.smExport = id;
+      ui.exportItems.append(it);
+    }
+    for (const [origId, sel] of ui.settingSelects) {
+      const o = $(origId);
+      if (!o) continue;
+      const sig = [...o.options].map((op) => op.value + '\u0001' + op.text).join('\u0002');
+      if (sel.dataset.sig !== sig) {
+        sel.textContent = '';
+        for (const op of o.options) sel.append(h('option', { value: op.value, text: op.text }));
+        sel.dataset.sig = sig;
+      }
+      sel.value = o.value;
+      sel.disabled = !!o.disabled;
+      sel.title = o.title || '';
+    }
+  }
+  function syncPartCount() {
+    const list = $('partList');
+    if (!list || !ui.partCount) return;
+    const chks = list.querySelectorAll('.part-chk');
+    const vis = [...chks].filter((c) => c.checked).length;
+    ui.partCount.textContent = chks.length ? (vis === chks.length ? String(chks.length) : `${vis}/${chks.length}`) : '0';
+    ui.btnParts.title = chks.length ? `${vis} of ${chks.length} parts visible` : 'No parts';
+    syncEmpty();
+  }
+  function syncEmpty() {
+    if (!ui.empty) return;
+    let nParts = 0;
+    try { nParts = window.CAD3DExtractor ? window.CAD3DExtractor.getState().parts.length : $('partList').children.length; } catch (e) { /* ignore */ }
+    const t = (($('statusBadge') || {}).textContent || '');
+    const loaded = /NO MESH|NO 3D STREAM/.test(t);
+    ui.empty.hidden = nParts > 0;
+    ui.emptyText.textContent = loaded
+      ? `No 3D geometry found in ${(($('docFileName') || {}).textContent || 'this file').trim()}. Drop another 3D PDF here or click Open.`
+      : 'Drop a 3D PDF here or click Open';
+  }
+
+  // ------------------------------------------------------------------ About dialog
+  function showAbout() {
+    closePop(false);
+    ui.about.hidden = false;
+    openDialog = ui.about;
+    const c = ui.about.querySelector('.sm-close');
+    if (c) c.focus();
+  }
+  function hideAbout() {
+    if (!openDialog) return;
+    ui.about.hidden = true;
+    openDialog = null;
+    if (mode === 'simple') ui.btnMore.focus({ preventScroll: true });
+  }
+
+  // ------------------------------------------------------------------ Advanced: float the switch over free top-bar space
+  function placeFloatingSwitch() {
+    if (mode !== 'advanced' || !ui.modeSwitch) return;
+    const sw = ui.modeSwitch;
+    sw.classList.remove('sm-modeswitch--corner');
+    const r = sw.getBoundingClientRect();
+    const hits = [...document.querySelectorAll('.topbar .brand, .topbar .top-controls, .exportbar')].some((el) => {
+      const b = el.getBoundingClientRect();
+      return b.width && !(r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom);
+    });
+    if (hits) sw.classList.add('sm-modeswitch--corner');
+  }
+
+  // ------------------------------------------------------------------ mode switching
+  function setMode(next, persist) {
+    if (!MODES.includes(next)) return;
+    if (persist) store(next);
+    build();
+    const hadFocus = ui.modeSwitch.contains(document.activeElement);
+    if (next === mode) return;
+    mode = next;
+    closePop(false);
+    hideAbout();
+    ui.btnSimple.setAttribute('aria-pressed', String(next === 'simple'));
+    ui.btnAdvanced.setAttribute('aria-pressed', String(next === 'advanced'));
+
+    if (next === 'simple') {
+      document.body.classList.add('sm-simple');
+      ui.modeSwitch.classList.remove('sm-modeswitch--float', 'sm-modeswitch--corner');
+      ui.switchSlot.appendChild(ui.modeSwitch);
+      const partsCard = ($('partList') || {}).closest ? $('partList').closest('.panel-card') : null;
+      moveInto(partsCard, ui.partsBody);
+      for (const s of ui.infoSections) moveInto(s.card, s.body);
+      syncStatus(); syncDisplay(); syncPartCount(); syncSheetTop();
+    } else {
+      for (const s of [ui.partsSheet, ui.infoSheet]) toggleSheet(s, false, false);
+      ui.dropVeil.hidden = true;
+      restoreAll();
+      document.body.classList.remove('sm-simple');
+      ui.modeSwitch.classList.add('sm-modeswitch--float');
+      document.body.appendChild(ui.modeSwitch);
+      placeFloatingSwitch();
+    }
+    syncHint();
+    if (hadFocus) (next === 'simple' ? ui.btnSimple : ui.btnAdvanced).focus({ preventScroll: true });
+    // canvas container changed size: let app.js / viewer-gl re-render at the new size
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    document.dispatchEvent(new CustomEvent('pdf3d:uimode', { detail: { mode: next } }));
+  }
+
+  function init() {
+    if (!$('viewportCanvas') || !document.body) return;   // not the extractor page
+    setMode(initialMode(), false);
+  }
+
+  window.PDF3DSimpleMode = {
+    get mode() { return mode; },
+    hintText: HINT_TEXT,
+    setMode: (m) => setMode(m, true),
+    toggle: () => setMode(mode === 'simple' ? 'advanced' : 'simple', true),
+    storageKey: STORE_KEY
+  };
+
+  // Script is loaded after app.js at the end of <body>, so the markup already exists: apply the
+  // mode immediately (no flash of the Advanced UI). app.js binds its listeners on DOMContentLoaded,
+  // which is fine because Simple controls only ever proxy to the original elements at click time.
+  if (document.readyState === 'loading' && !$('viewportCanvas')) document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
 
 </script>

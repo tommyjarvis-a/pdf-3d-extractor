@@ -3002,18 +3002,27 @@
     }
     return { pos, idx: Uint32Array.from(idx), nt: idx.length / 3 };
   }
-  // Decimate one compact part to ~ratio of its triangles (binary search on the grid resolution).
+  // Decimate one compact part to ~ratio of its triangles: binary search on the grid resolution
+  // (cluster count grows roughly monotonically with the grid), keeping the evaluated result whose
+  // triangle count is closest to the target. The search runs to convergence (~11 steps over 2..2048);
+  // it used to stop after 9 steps and fall back to the coarsest grid, which on low-poly parts
+  // (e.g. a 224-tri die: 50% -> 18 tris) kept only ~8%. Returns null when no grid reduces the part.
   function decimateCompact(b, ratio) {
     const target = Math.max(4, Math.floor(b.nt * ratio));
     if (b.nt <= target) return null;
-    let lo = 2, hi = 2048, best = null;
-    for (let it = 0; it < 9 && lo <= hi; it++) {
-      const g = Math.floor((lo + hi) / 2);
+    let lo = 2, hi = 2048, best = null, bestErr = Infinity;
+    while (lo <= hi) {
+      const g = (lo + hi) >> 1;
       const d = clusterDecimate(b.vx, b.tv, b.nt, g);
+      if (d.nt < b.nt && d.nt > 0) {
+        const err = Math.abs(d.nt - target);
+        if (err < bestErr || (err === bestErr && d.nt < best.nt)) { best = d; bestErr = err; }
+      }
       if (d.nt > target) hi = g - 1;
-      else { best = d; lo = g + 1; }
+      else if (d.nt < target) lo = g + 1;
+      else break;
     }
-    return best || clusterDecimate(b.vx, b.tv, b.nt, 2);
+    return best;
   }
   // Reduced-detail export copy of a part (cached per ratio on the part's brep).
   function decimatedPart(part, ratio) {
@@ -3038,7 +3047,7 @@
   function computeAssemblyBounds(parts) {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    let totalVerts = 0, totalTris = 0, totalMergedFaces = 0, totalEdges = 0, totalHoles = 0;
+    let totalVerts = 0, totalTris = 0, totalParsedTris = 0, totalMergedFaces = 0, totalEdges = 0, totalHoles = 0;
     let allWatertight = true;
 
     const visibleParts = parts.filter((p) => p.visible);
@@ -3054,6 +3063,7 @@
       if (b.bbox.max[2] > maxZ) maxZ = b.bbox.max[2];
       totalVerts += b.weldedVerts.length;
       totalTris += b.tris.length;
+      totalParsedTris += p.triCount != null ? p.triCount : b.tris.length;
       totalMergedFaces += b.mergedFaces.length;
       totalEdges += b.featureEdges.length;
       totalHoles += b.holeCount;
@@ -3077,6 +3087,7 @@
       radius,
       totalVerts,
       totalTris,
+      totalParsedTris, // as decoded, before the B-Rep drops degenerate triangles
       totalMergedFaces,
       totalEdges,
       totalHoles,
@@ -3481,10 +3492,11 @@
     const bounds = computeAssemblyBounds(state.parts);
     const banner = document.getElementById('bigModelBanner');
     if (banner) {
-      const big = bounds.totalTris > BIG_MODEL_TRIS;
+      // Count the triangles as parsed from the file (the STL/B-Rep count excludes degenerate ones).
+      const big = bounds.totalParsedTris > BIG_MODEL_TRIS;
       banner.style.display = big ? '' : 'none';
       if (big) {
-        banner.textContent = `Large model: ${bounds.totalTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
+        banner.textContent = `Large model: ${bounds.totalParsedTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
           'exports stream part-by-part at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
       }
     }

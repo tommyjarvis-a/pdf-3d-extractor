@@ -1,0 +1,456 @@
+/*
+ * simple-mode.css — "Simple mode" add-on for pdf-3d-extractor.
+ *
+ * Every rule that affects existing markup is scoped under body.sm-simple, so when the
+ * body lacks that class (Advanced mode) nothing in the original UI changes. The only
+ * unscoped rules target elements this add-on creates (class prefix "sm-"), which are
+ * either display:none or position:fixed in Advanced mode and therefore never move layout.
+ * Integration: <link rel="stylesheet" href="simple-mode.css" /> in <head>.
+ */
+
+/* ---------------------------------------------------------------- shared add-on tokens */
+.sm-root, .sm-topbar, .sm-pill, .sm-pop, .sm-sheet, .sm-modeswitch, .sm-dialog, .sm-dropveil {
+  --sm-radius: 10px;
+  --sm-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --sm-glass: rgba(15, 22, 35, 0.92);
+}
+[hidden].sm-pop, [hidden].sm-sheet, [hidden].sm-dialog, [hidden].sm-dropveil, [hidden].sm-empty { display: none !important; }
+
+/* ---------------------------------------------------------------- Simple | Advanced switch */
+.sm-modeswitch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  font-family: var(--sans);
+  flex-shrink: 0;
+}
+.sm-modeswitch button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 600 11px/1 var(--sans);
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sm-modeswitch button:hover { color: var(--text-0); }
+.sm-modeswitch button[aria-pressed="true"] {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45);
+}
+.sm-modeswitch button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+/* Advanced mode: the switch floats over empty top-bar space (fixed => zero layout impact). */
+.sm-modeswitch.sm-modeswitch--float {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 60;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+/* ...or bottom-right when the top bar has no free space (single-row bar / narrow screens). */
+.sm-modeswitch.sm-modeswitch--float.sm-modeswitch--corner { top: auto; bottom: 12px; right: 12px; }
+
+/* ---------------------------------------------------------------- add-on chrome hidden in Advanced */
+.sm-topbar, .sm-pill, .sm-empty { display: none; }
+
+/* ================================================================ SIMPLE MODE ================ */
+body.sm-simple .topbar,
+body.sm-simple .exportbar,
+body.sm-simple .inspector-pane,
+body.sm-simple #viewerControls,
+body.sm-simple .viewport-toolbar,            /* 1.3.0 has no #viewerControls id */
+body.sm-simple .drawer { display: none !important; }
+body.sm-simple .workbench { grid-template-columns: minmax(0, 1fr); }
+
+/* ---------------------------------------------------------------- top bar */
+body.sm-simple .sm-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  min-height: 52px;
+  background: linear-gradient(180deg, #131c2e 0%, #0d1422 100%);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+}
+.sm-brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.sm-brand .brand-badge { width: 28px; height: 28px; font-size: 11px; border-radius: 6px; box-shadow: 0 0 12px rgba(34, 211, 238, 0.3); }
+.sm-brand-title { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; color: var(--text-0); white-space: nowrap; }
+.sm-brand-ver { font: 600 10.5px var(--mono); color: var(--text-2); margin-left: 6px; }
+.sm-doc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.sm-doc-name {
+  font: 600 12px var(--mono);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.sm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; flex-shrink: 0; cursor: default; }
+.sm-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); flex-shrink: 0; }
+.sm-status[data-tone="ok"] .sm-dot { background: var(--emerald); box-shadow: 0 0 0 3px var(--emerald-dim); }
+.sm-status[data-tone="warn"] .sm-dot { background: var(--amber); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }
+.sm-status[data-tone="ok"] { color: #34d399; }
+.sm-status[data-tone="warn"] { color: #fbbf24; }
+.sm-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+
+.sm-btn-open {
+  background: var(--cyan-dim);
+  border-color: rgba(34, 211, 238, 0.55);
+  color: var(--cyan);
+  font-weight: 700;
+}
+.sm-btn-open:hover:not(:disabled) { background: rgba(34, 211, 238, 0.22) !important; border-color: var(--cyan) !important; }
+.sm-iconbtn { padding: 6px 9px; min-width: 32px; justify-content: center; font-size: 14px; line-height: 1; }
+.sm-root .btn:focus-visible, .sm-topbar .btn:focus-visible, .sm-pill .btn:focus-visible, .sm-pop .btn:focus-visible, .sm-sheet .btn:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 1px;
+}
+
+/* split button */
+.sm-split { display: inline-flex; align-items: stretch; }
+.sm-split > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.sm-split > .btn + .btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(3, 16, 29, 0.35);
+  padding: 6px 8px;
+}
+.sm-caret { font-size: 9px; opacity: 0.85; }
+
+/* ---------------------------------------------------------------- popovers / menus */
+.sm-pop {
+  position: fixed;
+  z-index: 80;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  background: var(--sm-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--sm-radius);
+  box-shadow: var(--sm-shadow);
+  padding: 6px;
+  color: var(--text-0);
+  font-family: var(--sans);
+  font-size: 12.5px;
+}
+.sm-mi {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-0);
+  font: 500 12.5px var(--sans);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sm-mi:hover { background: var(--bg-3); }
+.sm-mi:focus { outline: none; }
+/* keyboard focus: a real ring, distinct from the hover tint */
+.sm-mi:focus-visible { background: var(--bg-2); outline: 2px solid var(--cyan); outline-offset: -2px; box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.18); }
+.sm-mi:disabled { opacity: 0.45; cursor: not-allowed; }
+.sm-mi-ext { margin-left: auto; padding-left: 16px; font: 500 10.5px var(--mono); color: var(--text-2); }
+.sm-mi-check { width: 14px; flex-shrink: 0; color: var(--cyan); font-size: 12px; text-align: center; }
+.sm-mi[aria-checked="true"] { color: var(--cyan); }
+/* checkbox-style menu items (line toggles) */
+.sm-mi--box .sm-mi-check { width: 14px; height: 14px; line-height: 12px; font-size: 10px; border: 1px solid var(--border-hi); border-radius: 3px; background: var(--bg-0); }
+.sm-mi--box[aria-checked="true"] .sm-mi-check { background: var(--cyan); border-color: var(--cyan); color: #03101d; font-weight: 700; }
+.sm-mi--box[aria-checked="true"] { color: var(--text-0); }
+.sm-mi--dev { color: #fbbf24; }
+.sm-sep { height: 1px; margin: 6px 4px; background: var(--border); border: 0; }
+.sm-pop-h {
+  padding: 6px 10px 4px;
+  font: 700 10.5px var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-2);
+}
+.sm-field { display: grid; gap: 4px; padding: 5px 10px 7px; }
+.sm-field > span { font-size: 11.5px; color: var(--text-1); font-weight: 600; }
+.sm-field .select-ctrl { width: 100%; max-width: 300px; font-size: 11.5px; }
+.sm-field .sm-hint { font-size: 10.5px; color: var(--text-2); font-weight: 400; }
+.sm-check { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
+.sm-check:hover, .sm-check:focus-within { background: var(--bg-3); }
+.sm-check input { accent-color: var(--cyan); width: 14px; height: 14px; }
+.sm-check small { margin-left: auto; color: var(--text-2); font-size: 10.5px; padding-left: 10px; }
+.sm-range { display: flex; align-items: center; gap: 10px; padding: 6px 10px 8px; }
+.sm-range input { flex: 1; accent-color: var(--cyan); }
+.sm-range output { font: 600 11px var(--mono); color: var(--text-1); min-width: 34px; text-align: right; }
+
+/* ---------------------------------------------------------------- floating viewport pill */
+body.sm-simple .sm-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  z-index: 15;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(15, 22, 35, 0.86);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+.sm-pill .btn { border-radius: 999px; background: transparent; border-color: transparent; padding: 5px 11px; font-size: 11.5px; }
+.sm-pill .btn:hover:not(:disabled) { background: var(--bg-3); border-color: var(--border); }
+.sm-pill .btn[aria-expanded="true"], .sm-pill .btn[aria-pressed="true"] { background: var(--cyan-dim); border-color: rgba(34, 211, 238, 0.45); color: var(--cyan); }
+.sm-pill-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+.sm-pill-k { color: var(--text-2); font-weight: 500; }
+.sm-count { font: 600 10px var(--mono); color: var(--text-2); background: var(--bg-0); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+
+/* HUD: compact and parked bottom-left in Simple mode so the pill owns the top edge */
+body.sm-simple .viewport-hud-tl { top: auto; bottom: 42px; padding: 5px 9px; font-size: 10.5px; gap: 2px; }
+body.sm-simple .viewport-hud-bl { font-size: 10px; }
+/* renderer stats (ms/frame, GPU MB; 1.4.0+) stay read-only, muted info - never a control */
+body.sm-simple .viewport-hud-tl .hud-render { color: var(--text-2); opacity: 0.75; font-size: 10px; }
+
+/* ---------------------------------------------------------------- side sheets */
+.sm-sheet {
+  position: fixed;
+  z-index: 40;
+  top: calc(var(--sm-top, 60px) + 10px);
+  bottom: 12px;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--sm-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--sm-radius);
+  box-shadow: var(--sm-shadow);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+.sm-sheet--left { left: 12px; }
+.sm-sheet--right { right: 12px; width: 380px; }
+.sm-sheet-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sm-sheet-h h2 { font-size: 13px; font-weight: 700; color: var(--text-0); margin-right: auto; }
+.sm-sheet-b { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sm-close { padding: 3px 8px; font-size: 14px; line-height: 1; }
+
+/* moved original panel cards inside sheets */
+.sm-sheet .panel-card { border-radius: 8px; }
+.sm-sheet--parts .panel-card { border: 0; background: transparent; }
+.sm-sheet--parts .panel-header { background: transparent; padding: 0 0 8px; border-bottom: 0; }
+.sm-sheet--parts .panel-header > span { display: none; }   /* sheet title already says "Parts" */
+.sm-sheet--parts .panel-header > div { width: 100%; }
+.sm-sheet--parts .panel-header .btn { flex: 1; justify-content: center; }
+.sm-sheet--parts .panel-body { padding: 0; }
+.sm-sheet--info .panel-card { border: 0; background: transparent; }
+.sm-sheet--info .panel-header { display: none; }           /* title + badge mirrored into <summary> */
+.sm-sheet--info .panel-body { padding: 4px 2px 6px; }
+
+.sm-sec { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0); flex-shrink: 0; }
+.sm-sec > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1);
+  border-radius: 8px;
+  user-select: none;
+}
+.sm-sec > summary::-webkit-details-marker { display: none; }
+.sm-sec > summary::before { content: "▸"; color: var(--text-2); font-size: 10px; transition: transform 0.12s ease; }
+.sm-sec[open] > summary::before { transform: rotate(90deg); }
+.sm-sec > summary:hover { color: var(--text-0); background: var(--bg-2); }
+.sm-sec > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.sm-sec > summary .badge { margin-left: auto; }
+.sm-sec[open] > summary { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; }
+.sm-sec > .sm-sec-b { padding: 6px 8px; }
+
+/* ---------------------------------------------------------------- drop overlay + empty hint */
+.sm-dropveil {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--cyan);
+  border-radius: 12px;
+  background: rgba(34, 211, 238, 0.10);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+  font: 700 15px var(--sans);
+  color: var(--cyan);
+  text-align: center;
+}
+.sm-dropveil small { display: block; font: 500 11px var(--mono); color: var(--text-1); margin-top: 4px; }
+body.sm-simple .sm-empty {
+  display: grid;
+  position: absolute;
+  inset: 0;
+  place-items: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.sm-empty > div {
+  pointer-events: auto;
+  padding: 18px 26px;
+  border: 1.5px dashed var(--border-hi);
+  border-radius: 12px;
+  background: rgba(15, 22, 35, 0.7);
+  color: var(--text-1);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- About dialog */
+.sm-dialog {
+  position: fixed;
+  z-index: 90;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--sm-radius);
+  box-shadow: var(--sm-shadow);
+  font-family: var(--sans);
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+.sm-dialog h2 { font-size: 14px; color: var(--text-0); }
+.sm-dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; padding: 12px 16px 16px; }
+.sm-dialog dt { color: var(--text-2); font-weight: 600; }
+.sm-dialog dd { color: var(--text-1); }
+.sm-dialog code { font-family: var(--mono); color: var(--cyan); font-size: 11.5px; }
+
+/* ---------------------------------------------------------------- responsive */
+@media (max-width: 1100px) {
+  body.sm-simple .sm-doc { flex-basis: 0; }
+  body.sm-simple .sm-brand-ver { display: none; }
+}
+@media (max-width: 900px) {
+  /* Advanced mode on narrow screens: keep the floating switch out of the wrapped top bar */
+  .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
+}
+@media (max-width: 720px) {
+  body.sm-simple .sm-topbar { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
+  body.sm-simple .sm-brand-title { font-size: 13px; }
+  body.sm-simple .sm-doc { order: 3; flex: 1 1 100%; border-left: 0; padding-left: 0; }
+  body.sm-simple .sm-actions { gap: 6px; }
+  /* phone: row 1 = brand + mode switch, row 2 = Open / overflow / Export, row 3 = file + status */
+  body.sm-simple .sm-topbar { row-gap: 0; }
+  body.sm-simple .sm-actions { display: contents; }
+  body.sm-simple .sm-brand { order: 0; }
+  body.sm-simple .sm-actions > .sm-switch-slot { order: 1; margin-left: auto; }
+  body.sm-simple .sm-topbar::after { content: ""; order: 2; flex-basis: 100%; height: 8px; }
+  body.sm-simple .sm-actions > :not(.sm-switch-slot) { order: 3; }
+  body.sm-simple .sm-actions .sm-btn-open { flex: 1 1 auto; }
+  body.sm-simple .sm-doc { order: 4; margin-top: 8px; }
+  body.sm-simple .sm-topbar .sm-btn-open .sm-long { display: none; }
+  body.sm-simple .sm-pill { top: 8px; border-radius: 14px; width: calc(100% - 16px); max-width: none; }
+  body.sm-simple .sm-pill .btn { padding: 5px 9px; }
+  body.sm-simple .viewport-hud-tl { display: none; }
+  body.sm-simple .viewport-hud-bl { right: 12px; font-size: 9.5px; }
+  .sm-sheet, .sm-sheet--left, .sm-sheet--right {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    max-height: 62vh;
+    border-radius: 14px 14px 0 0;
+    border-bottom: 0;
+  }
+  .sm-sheet-h::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 5px;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background: var(--border-hi);
+  }
+  .sm-sheet-h { position: relative; padding-top: 14px; }
+
+  /* ---- touch targets: everything tappable in Simple is >= 40px (desktop stays compact) */
+  body.sm-simple .sm-topbar .btn,
+  body.sm-simple .sm-pill .btn,
+  .sm-close,
+  .sm-sheet .btn { min-height: 40px; min-width: 40px; justify-content: center; }
+  body.sm-simple .sm-modeswitch button { min-height: 40px; min-width: 40px; padding: 0 14px; }
+  body.sm-simple .sm-split > .btn + .btn { min-width: 40px; }
+  .sm-close { font-size: 18px; }
+  body.sm-simple .sm-pill { gap: 2px; padding: 3px; }
+  body.sm-simple .sm-pill .btn { padding: 0 11px; }
+  body.sm-simple .sm-pill .sm-pill-v { display: none; }   /* current display mode lives in the menu */
+  .sm-mi { min-height: 40px; }
+  .sm-field .select-ctrl { min-height: 40px; }
+  .sm-range input { height: 40px; }
+  .sm-sec > summary { min-height: 40px; }
+  .sm-sheet .part-item, .sm-sheet .stream-item { min-height: 44px; }
+  /* part visibility checkbox: 40x40 hit area, 18px drawn box; negative margins keep the row height */
+  .sm-sheet .part-chk {
+    appearance: none;
+    -webkit-appearance: none;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    margin: -12px -10px -12px -12px;
+    position: relative;
+    z-index: 1;               /* the box overhangs the row edge; keep it above the neighbouring row */
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    background: center / 18px 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%230b111c' stroke='%235b7db0' stroke-width='1.5'/%3E%3C/svg%3E");
+  }
+  .sm-sheet .part-chk:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%2322d3ee' stroke='%2322d3ee' stroke-width='1.5'/%3E%3Cpath d='M5 9.5l2.6 2.6L13 6.5' fill='none' stroke='%2303101d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  .sm-sheet .part-chk:focus-visible { outline: 2px solid var(--cyan); outline-offset: -6px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sm-pop:not([hidden]) { animation: sm-pop-in 0.12s ease-out; }
+  .sm-sheet:not([hidden]) { animation: sm-fade-in 0.14s ease-out; }
+}
+@keyframes sm-pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes sm-fade-in { from { opacity: 0; } to { opacity: 1; } }

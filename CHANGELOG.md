@@ -19,6 +19,16 @@
 - Clearer viewer UI. Every interactive control is a button or toggle with hover, keyboard focus ring and pointer cursor. The Lines options are now toggle buttons with an on/off indicator instead of bare checkboxes, and Explode is a bordered slider control. Group captions (Display / View / Orbit / Lines) are plain uppercase labels. Read-only info in the viewport (stream, solids/faces/tris, bounds, units, renderer + tris drawn + ms/frame + GPU MB) is muted plain text with no panel or button styling, kept apart from the toolbar.
 - Canvas 2D fallback: every filled triangle also gets a same-colour hairline stroke, which closes the antialiasing seams between adjacent triangles. It also respects the Wires toggle.
 
+### Added (Simple mode)
+- Designer's **Simple mode** (`simple-mode.js`, `simple-mode.css`) is now the default UI. It offers a floating viewer toolbar, a More menu, and Parts/Export sheets that proxy the original controls, so nothing is duplicated or lost. Switch to **Advanced** from the header. The choice is saved in `localStorage` (`pdf3d-extractor.uiMode`), and `?ui=advanced` (or `?ui=simple`) forces a mode without saving it.
+- `affordance.css` (Designer) applies in both modes: clearer buttons, segmented tracks for Display/View, and focus rings. The 1.4.0 `#viewerControls` styles (Orbit track, Lines toggles, Explode slider) are scoped so they don't fight it.
+- Viewport hint: "Click part in tree to highlight" now reads "Click a part in Parts to highlight" in Simple mode and "Click a part in the part list to highlight" in Advanced (rewritten by `simple-mode.js`; the markup keeps the old phrase it keys on).
+- `tools/build-standalone.js` now inlines stylesheets as well as scripts, and fails if any external script or stylesheet is left over.
+
+### Fixed (QA)
+- "Reduce detail" on low-poly parts: at 50%, the 22-part dice (g01–g05, g10, r15) kept only 8.3% of its triangles. `decimateCompact` stopped its grid search after 9 steps and fell back to the coarsest grid. The search now runs to convergence and keeps the grid whose triangle count is closest to the target. Measured at 50%: g01 0.44 (was 0.08), r12 0.52, r11 0.50, r14 0.50. A part that no grid can reduce is kept as is.
+- The large-model banner now counts triangles as parsed from the file (r05 1,290,707), not the B-Rep/STL count (1,290,550), which excludes degenerate triangles. `computeAssemblyBounds` also returns `totalParsedTris`.
+
 ## 1.3.0 — 2026-10-24
 
 Large models (1M+ triangles) no longer exhaust memory, and the vendor U3D mesh in RHAdobeMeshResource files is decoded. Much of this release builds on the QA Tester's root-cause analysis and prototypes (`pdf-3d-extractor-qa/fixes/`, REPORT.md "Problem files").
@@ -28,8 +38,11 @@ Large models (1M+ triangles) no longer exhaust memory, and the vendor U3D mesh i
   - PRC parts are kept as typed arrays (`Float64Array` positions, `Uint32Array` indices).
   - Each part gets one compact, welded B-Rep (`vx`/`tv`/`fev` typed arrays). The full object form is re-expanded per part only while exporting XT/STEP, and cached only for models of 300k tris or fewer.
   - Every exporter (STL, ASCII STL, OBJ, IGES, STEP AP214, Parasolid X_T) streams part by part into line-aligned chunks that become a chunked `Blob`, so no single huge string or array is ever built. STL and OBJ never build a B-Rep.
+    - *Correction (1.4.0):* STL and OBJ **do** build the compact B-Rep: `exportPartList` calls `computePartBRep` for every visible part, and the STL triangles are its non-degenerate, welded triangles. What they skip is the full object-form B-Rep that XT/STEP re-expand per part.
   - Measured peak RSS (headless, Node) for parse plus STL/OBJ: r05 0.48 GB, r13 0.61 GB, r07 0.50 GB. Before, r05 hit 1.9 GB after STL and 2.7 GB after OBJ, r13 hit 3.0 GB after STL, and STEP/XT ran out of memory at 9–10 GB.
+    - *Correction (1.4.0):* the QA harness re-measured 667668f at r05 0.57 GB, r13 0.87 GB and r07 0.39 GB peak RSS. The figures above were partly optimistic; the out-of-memory fix itself stands.
 - U3D `RHAdobeMeshResource` (Right Hemisphere / Adobe mesh compression, corpus r09): geometry is now decoded (142k tris, 2 bodies) instead of "unsupported". Uses the Tester's `u3d-rhadobe-mesh.js`, written from the Acrobat SDK 8.1 "U3D Supported Elements" spec. Encodings 8/9 (U3D arithmetic) are not implemented; a file that uses them still gets the clear "unsupported" message.
+  - *Note (1.4.0):* r09 decodes to 142,104 triangles per stream (99,211 verts), which matches the Tester's standalone decoder and `test/expect.json`. The viewer HUD and STL/OBJ/STEP show 142,042 because 62 source triangles are degenerate: each has two distinct vertex indices with bit-identical positions (zero area, no duplicate indices), and the B-Rep weld drops them. No real triangles are lost.
 - Standalone `prc-decoder.js`: `extractPRCFromPDF` now raises a clear `PDF_ENCRYPTED` error rather than failing to inflate encrypted streams. The new `extractPRCFromPDFAsync` / `parsePRCFromPDF` use `pdf-extract.js` + `crypto-lite.js` to read owner-password RC4/AES files (corpus r11, r12, g06).
 
 ### Added

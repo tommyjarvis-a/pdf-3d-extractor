@@ -1,0 +1,184 @@
+/*
+ * affordance.css — "what can I click?" pass for pdf-3d-extractor. Applies in BOTH Simple and Advanced mode.
+ *
+ * Goal: interactive things look like controls, information looks like information.
+ * Layout-neutral by construction: no width/height/padding/margin/border-width/gap changes on existing
+ * elements (only colours, border colours, backgrounds, cursors, outlines, inset box-shadows), so every
+ * Advanced control stays exactly where it is. The single deliberate exception is the status badge,
+ * which gains a leading dot (it is right-aligned on its own, so only it moves).
+ *
+ * Integration: <link rel="stylesheet" href="affordance.css" /> in <head>, BEFORE simple-mode.css.
+ *
+ * Which list rows are really clickable (checked in app.js):
+ *   .part-item   -> click selects/highlights the part; .part-chk toggles visibility      => INTERACTIVE
+ *   .stream-item -> click calls activateStream(idx)                                    => INTERACTIVE
+ *   #dropZone    -> click opens the file picker, accepts drops                         => INTERACTIVE
+ *   #attachList button[data-att] ("Save")                                              => INTERACTIVE (button only)
+ *   .tree-row (#treeList), .feature-item (#featureList / #attachList rows), .kv-box,
+ *   .entity-row, HUD, badges                                                           => INFORMATION ONLY
+ */
+
+/* ===================================================================== INTERACTIVE */
+
+/* ---- buttons: primary = filled (unchanged gradients), secondary = outlined */
+.btn {
+  background: rgba(15, 22, 35, 0.35);
+  border-color: var(--border-hi);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: #5b7db0;
+}
+.btn:active:not(:disabled) { transform: translateY(1px); filter: brightness(0.92); }
+.btn:focus-visible,
+.tab-btn:focus-visible,
+.select-ctrl:focus-visible,
+.dropzone:focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="range"]:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.btn-primary, .btn-emerald { cursor: pointer; }
+.btn-primary { background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%); border-color: #38bdf8; }
+.btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%); border-color: #7dd3fc; }
+.btn-emerald { background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-color: #34d399; }
+.btn:disabled { cursor: not-allowed; }
+
+/* "Load Sample" carried a static .btn-active in the markup, which made a plain action button look
+   like a selected toggle. It is an action: render it as a normal outlined button. */
+#btnLoadSample.btn-active { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); color: var(--text-0); }
+#btnLoadSample.btn-active:hover { background: var(--bg-3); border-color: #5b7db0; }
+
+/* ---- toggle groups -> segmented controls with an obvious active segment */
+.toolbar-group:has(> [data-render]),
+.toolbar-group:has(> [data-view]) {
+  border-radius: 9px;
+  box-shadow: 0 0 0 3px rgba(9, 13, 20, 0.85), 0 0 0 4px var(--border);   /* track, no layout impact */
+  background: rgba(9, 13, 20, 0.85);
+}
+[data-render].btn, [data-view].btn, #btnFitView {
+  background: transparent;
+  border-color: rgba(59, 85, 128, 0.55);
+  color: var(--text-1);
+}
+[data-render].btn:hover:not(.btn-active), [data-view].btn:hover, #btnFitView:hover {
+  background: var(--bg-3);
+  border-color: #5b7db0;
+  color: var(--text-0);
+}
+[data-render].btn.btn-active {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #03101d;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+}
+/* drawer tabs */
+.tab-btn { cursor: pointer; }
+.tab-btn:hover:not(.active) { background: rgba(255, 255, 255, 0.04); color: var(--text-0); }
+.tab-btn.active {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+  background: rgba(34, 211, 238, 0.12);
+}
+
+/* ---- inputs: selects keep their native chevron; all get input chrome + hover + pointer */
+.select-ctrl {
+  cursor: pointer;
+  background-color: var(--bg-0);
+  border-color: var(--border-hi);
+}
+.select-ctrl:hover:not(:disabled) { border-color: #5b7db0; background-color: var(--bg-2); }
+.select-ctrl:focus { border-color: var(--cyan); }
+input[type="checkbox"], input[type="range"] { accent-color: var(--cyan); cursor: pointer; }
+#viewerOptions label, label:has(> input[type="checkbox"]) { cursor: pointer; }
+#viewerOptions label:hover { color: var(--text-0); }
+
+/* ---- file drop zone (click = open) */
+.dropzone { cursor: pointer; }
+
+/* ---- selectable rows: hover background, pointer, selected = left accent bar + tint
+        (simple-mode.js also gives them tabindex=0 / role=option / aria-selected + Enter/Space) */
+.part-item, .stream-item { cursor: pointer; }
+.part-item:hover, .stream-item:hover {
+  background: var(--bg-2);
+  border-color: var(--border-hi);
+}
+.part-item.selected, .stream-item.active {
+  background: rgba(34, 211, 238, 0.10);
+  border-color: rgba(34, 211, 238, 0.65);
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+.part-item.selected .part-name, .stream-item.active .stream-name { color: var(--cyan); }
+.part-chk { cursor: pointer; }
+.part-item:focus-visible, .stream-item:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+
+/* ===================================================================== INFORMATION (quiet) */
+
+/* ---- badges / counts: low-contrast chips, never button-like (border kept at 1px but transparent) */
+.badge {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+  color: var(--text-2);
+  cursor: default;
+  font-weight: 500;
+}
+.badge-cyan { background: rgba(34, 211, 238, 0.06); color: rgba(34, 211, 238, 0.85); border-color: transparent; }
+.badge-emerald { background: rgba(16, 185, 129, 0.07); color: rgba(52, 211, 153, 0.9); border-color: transparent; }
+.badge-amber { background: rgba(245, 158, 11, 0.07); color: rgba(251, 191, 36, 0.9); border-color: transparent; }
+
+/* ---- status: a dot + text, not a pill */
+#statusBadge {
+  background: transparent;
+  border-color: transparent;
+  gap: 6px;
+  letter-spacing: 0.2px;
+}
+#statusBadge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+/* ---- panel headers: labels, not toolbars */
+.panel-header {
+  background: transparent;
+  color: var(--text-2);
+  border-bottom-color: rgba(39, 55, 84, 0.6);
+  cursor: default;
+}
+.panel-card { background: rgba(9, 13, 20, 0.6); }
+
+/* ---- key/value telemetry: plain readouts */
+.kv-box {
+  background: transparent;
+  border-color: transparent;
+  border-left-color: rgba(59, 85, 128, 0.45);
+  border-radius: 0;
+  cursor: default;
+}
+.kv-label { color: var(--text-2); }
+
+/* ---- feature list + attachment rows + product tree rows: plain lines */
+.feature-item {
+  background: transparent;
+  border-color: transparent;
+  border-bottom-color: rgba(39, 55, 84, 0.55);
+  border-radius: 0;
+  cursor: default;
+}
+.feature-item code { color: var(--text-2); }
+.tree-row { cursor: default; color: var(--text-1); }
+.tree-row code { color: var(--text-2); }
+
+/* ---- HUD / hints: read-only overlays */
+.viewport-hud-tl, .viewport-hud-bl { border-color: rgba(39, 55, 84, 0.5); cursor: default; }
+.viewport-hud-bl { color: rgba(124, 145, 177, 0.85); }
+
+/* ---- drawer summary rows */
+.entity-row { cursor: default; }
