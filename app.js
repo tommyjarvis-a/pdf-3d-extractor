@@ -831,6 +831,31 @@
     const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
     r.decodePath = tris ? 'U3D' : 'none';
     if (!tris) {
+      // Vendor mesh "RHAdobeMeshResource" (Adobe Acrobat SDK 8.1 U3D supplement; decoder by QA/Tester)
+      const RH = getModule('RHAdobeMesh', 'u3d-rhadobe-mesh.js');
+      if (RH) {
+        try {
+          const rr = RH.parseU3D(u8);
+          const rparts = (rr.parts || []).filter((q) => q.indices && q.indices.length);
+          if (rparts.length) {
+            r.parts = rparts.map((q) => {
+              const pos = Float64Array.from(q.positionsTyped), idx = Uint32Array.from(q.indices), nv = pos.length / 3, nt = idx.length / 3;
+              return {
+                name: q.name, meshName: q.meshName, materialName: 'RHAdobeMeshResource', analyticFeatures: [], pos, idx,
+                // legacy accessors (harness / older callers); built on demand only
+                get positions() { const a = new Array(nv); for (let i = 0; i < nv; i++) a[i] = [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]]; return a; },
+                get faces() { const a = new Array(nt); for (let t = 0; t < nt; t++) a[t] = [idx[3 * t], idx[3 * t + 1], idx[3 * t + 2]]; return a; },
+                set positions(v) { Object.defineProperty(this, 'positions', { value: v, writable: true, enumerable: true, configurable: true }); },
+                set faces(v) { Object.defineProperty(this, 'faces', { value: v, writable: true, enumerable: true, configurable: true }); }
+              };
+            });
+            r.decodePath = 'U3D/RHAdobeMeshResource';
+            for (const w of rr.warnings || []) r.warnings.push(w);
+            return r;
+          }
+          for (const w of rr.warnings || []) r.warnings.push(w);
+        } catch (e) { r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+      }
       const G = getModule('U3DGuard', 'u3d-guard.js');
       const sc = G ? G.scanU3D(u8) : { types: {}, newTypes: [] };
       const meshDecl = ['ffffff31', 'ffffff36', 'ffffff37'].filter((t) => sc.types[t]);
@@ -3993,12 +4018,13 @@
     getState: () => state, computeAssemblyBounds,
     loadPDFBuffer,
     activateStream,
-    buildParasolidXT: () => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName }),
-    buildSTEPAP214: () => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units }),
-    buildBinarySTL: () => buildBinarySTL(state.parts, state.units),
-    buildASCIISTL: () => buildASCIISTL(state.parts, state.units),
-    buildWavefrontOBJ: () => buildWavefrontOBJ(state.parts, state.units),
-    buildIGESWireframe: () => buildIGESWireframe(state.parts, state.units)
+    // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
+    buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
+    buildSTEPAP214: (o = {}) => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
+    buildBinarySTL: (o = {}) => buildBinarySTL(state.parts, state.units, o),
+    buildASCIISTL: (o = {}) => buildASCIISTL(state.parts, state.units, o),
+    buildWavefrontOBJ: (o = {}) => buildWavefrontOBJ(state.parts, state.units, o),
+    buildIGESWireframe: (o = {}) => buildIGESWireframe(state.parts, state.units, o)
   };
 
   window.addEventListener('DOMContentLoaded', () => {
