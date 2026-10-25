@@ -162,12 +162,15 @@
     const btn = document.getElementById('btnExportCAD'); if (!btn) return;
     const panel = document.getElementById('cadExportPanel'), fill = document.getElementById('cadExportFill');
     const label = document.getElementById('cadExportLabel'), cancel = document.getElementById('cadExportCancel');
+    const bar = document.getElementById('cadExportBar'), sr = document.getElementById('cadExportSr');
     const un = unavailableWhy();
     if (un) { btn.disabled = true; btn.title = un; return; }
     let ctl = null, hideT = 0;
     const show = (pct, text, cls) => { clearTimeout(hideT); panel.hidden = false; panel.classList.remove('is-done', 'is-warn'); if (cls) panel.classList.add(cls);
-      fill.style.width = Math.max(0, Math.min(100, pct)) + '%'; label.textContent = text; label.title = text; };
-    const finish = (text, cls, keepMs) => { show(100, text, cls); cancel.hidden = true; btn.disabled = false; ctl = null; hideT = setTimeout(() => { panel.hidden = true; }, keepMs || 12000); };
+      fill.style.width = Math.max(0, Math.min(100, pct)) + '%'; label.textContent = text; label.title = text;
+      if (bar) { bar.setAttribute('aria-valuenow', String(Math.round(pct))); bar.setAttribute('aria-valuetext', text); } };
+    const say = (text) => { if (sr) sr.textContent = text; };  // announce start/result only, not every progress tick
+    const finish = (text, cls, keepMs) => { show(100, text, cls); say(text); cancel.hidden = true; btn.disabled = false; ctl = null; hideT = setTimeout(() => { panel.hidden = true; }, keepMs || 12000); };
     cancel.addEventListener('click', () => { if (ctl) ctl.abort(); });
     btn.addEventListener('click', async () => {
       if (ctl) return;
@@ -175,6 +178,7 @@
       if (!pre.ok) { finish(pre.message, 'is-warn', 8000); return; }
       if (pre.estimate.mode !== 'fit' && !window.confirm(pre.message + '.\n\nExport the mesh body as STEP anyway?')) return;
       ctl = new AbortController(); btn.disabled = true; cancel.hidden = false;
+      say('CAD surface export started');
       show(0, pre.estimate.kernelCached ? 'Starting…' : 'Loading CAD kernel (first use downloads ' + (KERNEL_BYTES / 1048576).toFixed(1) + ' MB)…');
       try {
         const r = await exportCadSurfaces(null, { signal: ctl.signal, onProgress: (p) => show(p.pct, (p.label || p.stage) + ' — ' + Math.round(p.pct) + '%') });
