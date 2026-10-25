@@ -137,6 +137,13 @@
     background: var(--bg-3);
     border-color: var(--border-hi);
   }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 1px;
+  }
   .btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
@@ -458,6 +465,94 @@
     gap: 5px;
     flex-wrap: wrap;
   }
+  /* Viewer controls: everything clickable looks like a button/toggle; labels are plain text */
+  #viewerControls .toolbar-group + .toolbar-group {
+    padding-left: 8px;
+    border-left: 1px solid var(--border);
+  }
+  .toolbar-label {
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: default;
+    user-select: none;
+    margin-right: 2px;
+  }
+  #viewerControls .btn-sm:not(.btn-active) {
+    background: var(--bg-2);
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  }
+  #viewerControls .btn-sm:hover:not(:disabled):not(.btn-active) {
+    background: var(--bg-3);
+    border-color: var(--border-hi);
+    color: var(--text-0);
+  }
+  #viewerControls .btn-active:hover {
+    filter: brightness(1.15);
+  }
+  .btn-toggle {
+    position: relative;
+  }
+  .btn-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    pointer-events: none;
+  }
+  .btn-toggle::before {
+    content: '';
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    border: 1px solid var(--text-2);
+    background: transparent;
+    flex-shrink: 0;
+  }
+  .btn-toggle.is-on,
+  .btn-toggle:has(input:checked) {
+    background: var(--cyan-dim) !important;
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+  .btn-toggle.is-on::before,
+  .btn-toggle:has(input:checked)::before {
+    background: var(--cyan);
+    border-color: var(--cyan);
+  }
+  .btn-toggle:has(input:focus-visible) {
+    outline: 2px solid var(--cyan);
+    outline-offset: 1px;
+  }
+  .slider-ctrl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-2);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-0);
+    cursor: pointer;
+  }
+  .slider-ctrl:hover {
+    border-color: var(--border-hi);
+    background: var(--bg-3);
+  }
+  .slider-ctrl:focus-within {
+    outline: 2px solid var(--cyan);
+    outline-offset: 1px;
+  }
+  .slider-ctrl input[type="range"] {
+    width: 75px;
+    accent-color: var(--cyan);
+    cursor: pointer;
+  }
   .viewport-wrap {
     position: relative;
     flex: 1;
@@ -479,17 +574,22 @@
     top: 10px;
     left: 12px;
     pointer-events: none;
+    user-select: none;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    background: rgba(9, 13, 20, 0.78);
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 7px 10px;
+    gap: 2px;
     font-family: var(--mono);
     font-size: 11px;
+    font-weight: 400;
+    color: var(--text-2);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
+  }
+  .viewport-hud-tl .hud-title {
     color: var(--text-1);
-    backdrop-filter: blur(6px);
+    font-weight: 600;
+  }
+  .viewport-hud-tl .hud-render {
+    opacity: 0.8;
   }
   .viewport-hud-bl {
     position: absolute;
@@ -499,10 +599,9 @@
     font-family: var(--mono);
     font-size: 10.5px;
     color: var(--text-2);
-    background: rgba(9, 13, 20, 0.75);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 4px 8px;
+    opacity: 0.85;
+    user-select: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   }
 
   /* Bottom Schema / Entity Drawer */
@@ -731,9 +830,10 @@
     <!-- Right Pane: 3D Orbit Viewport + Bottom Inspector Drawer -->
     <section class="stage-pane">
       <!-- Viewport Toolbar -->
-      <div class="viewport-toolbar">
+      <!-- all viewer controls live in this one container (#viewerControls) so they can be moved as a unit -->
+      <div class="viewport-toolbar" id="viewerControls">
         <div class="toolbar-group">
-          <span style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Display:</span>
+          <span class="toolbar-label">Display</span>
           <button class="btn btn-sm btn-active" data-render="shaded-edges">Shaded + CAD Edges</button>
           <button class="btn btn-sm" data-render="brep-faces">B-Rep Face Groups</button>
           <button class="btn btn-sm" data-render="shaded">Shaded Smooth</button>
@@ -741,14 +841,26 @@
           <button class="btn btn-sm" data-render="xray">X-Ray Bore View</button>
         </div>
         <div class="toolbar-group">
-          <span style="font-size:11px;color:var(--text-2);font-family:var(--mono);">View:</span>
+          <span class="toolbar-label">View</span>
           <button class="btn btn-sm" data-view="iso">Iso</button>
           <button class="btn btn-sm" data-view="top">Top (XY)</button>
           <button class="btn btn-sm" data-view="front">Front (XZ)</button>
           <button class="btn btn-sm" data-view="right">Right (YZ)</button>
           <button class="btn btn-sm" id="btnFitView">Fit</button>
-          <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);margin-left:4px;">Explode:</label>
-          <input type="range" id="explodeSlider" min="0" max="100" value="0" style="width:75px;accent-color:var(--cyan);" />
+          <button class="btn btn-sm" data-view="reset" title="Reset orientation, zoom and pan">Reset view</button>
+          <label class="slider-ctrl" title="Explode the assembly">Explode <input type="range" id="explodeSlider" min="0" max="100" value="0" /></label>
+        </div>
+        <div class="toolbar-group" id="orbitMode" role="group" aria-label="Orbit mode">
+          <span class="toolbar-label">Orbit</span>
+          <button class="btn btn-sm btn-active" data-orbit="free" aria-pressed="true" title="Free arcball: tumble past 180&deg; about any axis, no gimbal lock. Ctrl/Alt+drag (or middle-drag) twists about the view axis.">Free</button>
+          <button class="btn btn-sm" data-orbit="turntable" aria-pressed="false" title="Turntable: Z stays up, tilt limited to &plusmn;85&deg;">Turntable (Z-up)</button>
+        </div>
+        <div class="toolbar-group viewer-options" id="viewerOptions">
+          <span class="toolbar-label">Lines</span>
+          <label class="btn btn-sm btn-toggle" title="PRC wires / curves"><input type="checkbox" data-viewopt="wires" />Wires</label>
+          <label class="btn btn-sm btn-toggle" title="Show edges and wires hidden behind geometry, dimmed (WebGL)"><input type="checkbox" data-viewopt="hiddenLines" />Hidden</label>
+          <label class="btn btn-sm btn-toggle" title="Overlay the triangle mesh (WebGL)"><input type="checkbox" data-viewopt="meshWire" />Mesh</label>
+          <label class="btn btn-sm btn-toggle" title="Flat (faceted) shading instead of smooth normals with a 30&deg; crease angle (WebGL)"><input type="checkbox" data-viewopt="flat" />Flat</label>
         </div>
       </div>
 
@@ -757,12 +869,14 @@
       <div class="viewport-wrap">
         <canvas id="viewportCanvas"></canvas>
         <div class="viewport-hud-tl" id="viewportHud">
-          <div><strong style="color:var(--cyan);" id="hudStreamTitle">Stream: /Subtype /U3D (ECMA-363)</strong></div>
+          <div class="hud-title" id="hudStreamTitle">Stream: /Subtype /U3D (ECMA-363)</div>
           <div id="hudAssemblyStats">Parts: 4 | Merged B-Rep Faces: -- | Tris: 480</div>
+          <div id="hudBounds"></div>
           <div id="hudScaleInfo">Units: mm • STEP AP214 export</div>
+          <div class="hud-render" id="hudRenderStats"></div>
         </div>
         <div class="viewport-hud-bl">
-          Left-drag: Orbit • Shift/Right-drag: Pan • Scroll: Zoom • Click part in tree to highlight
+          Drag: Orbit • Ctrl/Alt-drag: Twist • Shift/Right-drag: Pan • Scroll: Zoom • Click part in tree to highlight
         </div>
       </div>
 
@@ -795,6 +909,7 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
   <script src="u3d-rhadobe-mesh.js?v=1.3.0"></script>
   <script src="prc-brep.js?v=1.3.0"></script>
   <script src="prc-decoder.js?v=1.3.0"></script>
+  <script src="viewer-gl.js?v=1.3.0"></script>
   <script src="app.js?v=1.3.0"></script>
 </body>
 </html>

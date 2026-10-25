@@ -53,6 +53,8 @@
     explodeFactor: 0,
     activeTab: 'step',   // 'xt' tab only exists with ?xt=1 (see ENABLE_XT_EXPORT)
     camera: {
+      mode: 'free',        // 'free' (quaternion arcball, unclamped) | 'turntable' (Z-up, pitch clamped); persisted
+      q: null,             // world->view quaternion [w,x,y,z] for 'free' mode
       yaw: -0.68,
       pitch: 0.52,
       zoom: 1.0,
@@ -3086,9 +3088,87 @@
   const PREVIEW_MAX_EDGES = 150000;
   const INSPECTOR_MAX_TRIS = 200000; // XT/STEP inspector preview is skipped above this (use Export)
   const BIG_MODEL_TRIS = 1000000;    // warning banner threshold
+  // Preview geometry of one compact part (vertex-clustered decimation cached per ratio when ratio < 1).
+  function previewGeometry(b, ratio) {
+    if (ratio >= 1) return b;
+    const key = Math.round(ratio * 1e4) / 1e4;
+    b._preview = b._preview || {};
+    if (!b._preview[key]) {
+      const d = decimateCompact(b, ratio);
+      b._preview[key] = d ? { vx: d.pos, tv: d.idx, nt: d.nt, nv: d.pos.length / 3, triFace: null, fev: null } : b;
+    }
+    return b._preview[key];
+  }
+
+  // WebGL path (viewer-gl.js): real depth buffer, smooth normals, depth-tested edges/wires, render on demand.
+  function renderViewportGL(glv) {
+    const bounds = computeAssemblyBounds(state.parts);
+    const explodeRatio = (state.explodeFactor || 0) / 100;
+    const vis = [];
+    let totalTris = 0;
+    state.parts.forEach((part, pIdx) => {
+      if (!part.visible) return;
+      const b = computePartBRep(part);
+      totalTris += b.nt;
+      vis.push({ part, pIdx, b });
+    });
+    const cap = window.PDF3DViewerGL.MAX_TRIS;
+    const ratio = totalTris > cap ? cap / totalTris : 1;
+    state.previewRatio = ratio;
+    let nDraw = 0;
+    const items = vis.map(({ part, pIdx, b }) => {
+      const g = previewGeometry(b, ratio);
+      nDraw += g.nt;
+      const pc = b.bbox.center;
+      return {
+        g, pIdx, color: part.color,
+        offset: [(pc[0] - bounds.center[0]) * explodeRatio * 0.9, (pc[1] - bounds.center[1]) * explodeRatio * 0.9,
+          (pIdx - (state.parts.length - 1) * 0.5) * 28 * explodeRatio]
+      };
+    });
+    glv.render({
+      epoch: state.parts, center: bounds.center, radius: bounds.radius, camera: state.camera,
+      renderMode: state.renderMode || 'shaded-edges', selectedPartIdx: state.selectedPartIdx,
+      items, wires: state.wires || [], palette: PALETTE, grid: { z: bounds.min[2], step: 20, extent: 80 },
+      note: ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : ''
+    });
+  }
+
+  // Camera orientation: free quaternion arcball (default) or legacy Z-up turntable, via window.PDF3DCamera (viewer-gl.js).
+  function viewBasis(cam) {
+    if (window.PDF3DCamera) return window.PDF3DCamera.basis(cam);
+    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    return { r: [cy, -sy, 0], u: [sp * sy, sp * cy, cp], d: [cp * sy, cp * cy, -sp] };
+  }
+  function setCameraYawPitch(yaw, pitch) {
+    if (window.PDF3DCamera) window.PDF3DCamera.setYawPitch(state.camera, yaw, pitch);
+    else { state.camera.yaw = yaw; state.camera.pitch = pitch; }
+  }
+  function syncOrbitButtons() {
+    document.querySelectorAll('[data-orbit]').forEach((b) => {
+      const on = b.getAttribute('data-orbit') === state.camera.mode;
+      b.classList.toggle('btn-active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  // Coalesce pointer-driven redraws into one per animation frame (the Canvas 2D fallback renders synchronously).
+  let viewportRaf = 0;
+  function requestViewportRender() {
+    if (viewportRaf) return;
+    const raf = window.requestAnimationFrame || ((f) => setTimeout(f, 16));
+    viewportRaf = raf(() => { viewportRaf = 0; renderViewport(); });
+  }
+
   function renderViewport() {
     const canvas = document.getElementById('viewportCanvas');
     if (!canvas) return;
+    const glv = window.PDF3DViewerGL ? window.PDF3DViewerGL.attach(canvas) : null;
+    if (glv) { renderViewportGL(glv); return; }
+    const hudRender = document.getElementById('hudRenderStats');
+    if (hudRender) hudRender.textContent = 'Canvas 2D renderer (no WebGL)';
+    // ---- Canvas 2D fallback (no WebGL): painter's algorithm ----
+    const viewOpts = (window.PDF3DViewerGL && window.PDF3DViewerGL.options) || { wires: true };
     const rect = canvas.parentElement.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.max(320, Math.floor(rect.width));
@@ -3105,8 +3185,7 @@
 
     const bounds = computeAssemblyBounds(state.parts);
     const cam = state.camera;
-    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
-    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const camB = viewBasis(cam), vR = camB.r, vU = camB.u, vD = camB.d;
 
     const baseScale = (Math.min(w, h) * 0.39) / bounds.radius;
     const scale = baseScale * cam.zoom;
@@ -3117,12 +3196,10 @@
       const dx = x - bounds.center[0];
       const dy = y - bounds.center[1];
       const dz = z - bounds.center[2];
-      // Z-up CAD turntable orbit: yaw around Z, pitch around X
-      const x1 = dx * cy - dy * sy;
-      const y1 = dx * sy + dy * cy;
-      const z1 = dz;
-      const y2 = y1 * cp - z1 * sp;
-      const z2 = y1 * sp + z1 * cp;
+      // view basis (free arcball or Z-up turntable): x1 = right, z2 = up, y2 = depth
+      const x1 = dx * vR[0] + dy * vR[1] + dz * vR[2];
+      const y2 = dx * vD[0] + dy * vD[1] + dz * vD[2];
+      const z2 = dx * vU[0] + dy * vU[1] + dz * vU[2];
       return {
         sx: cxScreen + x1 * scale,
         sy: cyScreen - z2 * scale,
@@ -3131,12 +3208,7 @@
     }
 
     function rotateVec(nx, ny, nz) {
-      const x1 = nx * cy - ny * sy;
-      const y1 = nx * sy + ny * cy;
-      const z1 = nz;
-      const y2 = y1 * cp - z1 * sp;
-      const z2 = y1 * sp + z1 * cp;
-      return [x1, y2, z2];
+      return [nx * vR[0] + ny * vR[1] + nz * vR[2], nx * vD[0] + ny * vD[1] + nz * vD[2], nx * vU[0] + ny * vU[1] + nz * vU[2]];
     }
 
     // 1. Draw subtle CAD XY datum grid on Z = bounds.min[2]
@@ -3173,16 +3245,7 @@
     state.previewRatio = ratio;
     let nDraw = 0, nEdge = 0;
     for (const it of items) {
-      let g = it.b;
-      if (ratio < 1) {
-        const key = Math.round(ratio * 1e4) / 1e4;
-        it.b._preview = it.b._preview || {};
-        if (!it.b._preview[key]) {
-          const d = decimateCompact(it.b, ratio);
-          it.b._preview[key] = d ? { vx: d.pos, tv: d.idx, nt: d.nt, nv: d.pos.length / 3, triFace: null, fev: null } : it.b;
-        }
-        g = it.b._preview[key];
-      }
+      const g = previewGeometry(it.b, ratio);
       it.g = g; nDraw += g.nt;
       if (g.fev) nEdge += g.fev.length / 2;
     }
@@ -3277,17 +3340,18 @@
         } else {
           ctx.fillStyle = `rgb(${r},${g},${b})`;
           ctx.fill();
-          if (renderMode === 'shaded') {
-            ctx.strokeStyle = `rgb(${r},${g},${b})`;
-            ctx.lineWidth = 0.4;
-            ctx.stroke();
-          }
+          // same-colour hairline stroke closes the per-triangle antialiasing seams (background bleeding
+          // through between adjacent triangles = "tiger stripes")
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.lineWidth = 0.6;
+          ctx.lineJoin = 'round';
+          ctx.stroke();
         }
       }
     }
 
     // PRC wires / curves and exact B-Rep edges
-    if ((state.wires || []).length) {
+    if (viewOpts.wires !== false && (state.wires || []).length) {
       let segBudget = 400000;
       ctx.lineWidth = 1;
       for (const wr of state.wires) {
@@ -3580,6 +3644,10 @@
     if (hudAssemblyStats) {
       hudAssemblyStats.textContent = `Solids: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
     }
+    const hudBounds = document.getElementById('hudBounds');
+    if (hudBounds && bounds.size) {
+      hudBounds.textContent = `Bounds: ${bounds.size.map((v) => (+v).toFixed(1)).join(' \u00d7 ')} ${state.units}`;
+    }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
       hudScaleInfo.textContent = XT_UI_ENABLED
@@ -3798,7 +3866,10 @@
     if (canvas) {
       canvas.addEventListener('mousedown', (ev) => {
         state.camera.Dragging = true;
-        state.camera.dragMode = (ev.shiftKey || ev.button === 2) ? 'pan' : 'orbit';
+        // Shift/right-drag: pan; Ctrl/Alt/Meta+drag or middle-drag: twist about the view axis; plain drag: orbit
+        state.camera.dragMode = (ev.shiftKey || ev.button === 2) ? 'pan'
+          : (ev.ctrlKey || ev.altKey || ev.metaKey || ev.button === 1) ? 'twist' : 'orbit';
+        if (ev.button === 1) ev.preventDefault();
         state.camera.lastX = ev.clientX;
         state.camera.lastY = ev.clientY;
       });
@@ -3811,11 +3882,13 @@
         if (state.camera.dragMode === 'pan') {
           state.camera.panX += dx;
           state.camera.panY += dy;
+        } else if (window.PDF3DCamera) {
+          window.PDF3DCamera.drag(state.camera, dx, dy, state.camera.dragMode === 'twist');
         } else {
           state.camera.yaw += dx * 0.01;
           state.camera.pitch = Math.max(-1.48, Math.min(1.48, state.camera.pitch + dy * 0.01));
         }
-        renderViewport();
+        requestViewportRender();
       });
       window.addEventListener('mouseup', () => {
         state.camera.Dragging = false;
@@ -3825,9 +3898,17 @@
         ev.preventDefault();
         const factor = ev.deltaY < 0 ? 1.12 : 0.89;
         state.camera.zoom = Math.max(0.25, Math.min(8.0, state.camera.zoom * factor));
-        renderViewport();
+        requestViewportRender();
       }, { passive: false });
       window.addEventListener('resize', () => renderViewport());
+      if (window.PDF3DViewerGL) {
+        window.PDF3DViewerGL.onOptionsChange = () => renderViewport();
+        // read-only renderer stats -> muted HUD text (not a control)
+        window.PDF3DViewerGL.onStats = (st) => {
+          const el = document.getElementById('hudRenderStats');
+          if (el) el.textContent = `${st.api} \u2022 drawn ${Number(st.drawnTris || 0).toLocaleString()} tris \u2022 ${(st.cpuMs || 0).toFixed(1)} ms/frame \u2022 GPU ${Math.round((st.gpuBytes || 0) / 1048576)} MB`;
+        };
+      }
     }
 
     // Render mode buttons
@@ -3846,10 +3927,29 @@
         const v = btn.getAttribute('data-view');
         state.camera.panX = 0;
         state.camera.panY = 0;
-        if (v === 'iso') { state.camera.yaw = -0.68; state.camera.pitch = 0.52; }
-        else if (v === 'top') { state.camera.yaw = 0; state.camera.pitch = 1.56; }
-        else if (v === 'front') { state.camera.yaw = 0; state.camera.pitch = 0; }
-        else if (v === 'right') { state.camera.yaw = -Math.PI / 2; state.camera.pitch = 0; }
+        const free = state.camera.mode !== 'turntable';
+        if (v === 'iso') setCameraYawPitch(-0.68, 0.52);
+        else if (v === 'top') setCameraYawPitch(0, free ? Math.PI / 2 : 1.48);
+        else if (v === 'front') setCameraYawPitch(0, 0);
+        else if (v === 'right') setCameraYawPitch(-Math.PI / 2, 0);
+        else if (v === 'reset') { setCameraYawPitch(-0.68, 0.52); state.camera.zoom = 1.0; }
+        renderViewport();
+      });
+    });
+
+    // Orbit mode toggle (Free arcball / Turntable Z-up), persisted in localStorage
+    if (window.PDF3DCamera) {
+      state.camera.mode = window.PDF3DCamera.loadMode();
+      if (state.camera.mode === 'free') state.camera.q = window.PDF3DCamera.fromYawPitch(state.camera.yaw, state.camera.pitch);
+    }
+    syncOrbitButtons();
+    document.querySelectorAll('[data-orbit]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!window.PDF3DCamera) return;
+        const m = btn.getAttribute('data-orbit') === 'turntable' ? 'turntable' : 'free';
+        window.PDF3DCamera.setMode(state.camera, m);
+        window.PDF3DCamera.saveMode(m);
+        syncOrbitButtons();
         renderViewport();
       });
     });

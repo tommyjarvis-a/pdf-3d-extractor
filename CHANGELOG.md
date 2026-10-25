@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased / 1.4.0
+
+### Fixed
+- 3D preview glitches: polygons disappearing/reappearing and "tiger striping" while rotating, dark sliver triangles from back faces over bore walls, the bottom fan showing through walls, and PRC wires / B-Rep edges drawn over solid geometry. The cause was the Canvas 2D painter's-algorithm renderer: per-triangle depth sorting, per-triangle antialiasing seams, and no depth test for lines.
+
+### Changed
+- New WebGL preview renderer (`viewer-gl.js`, no dependencies). It uses WebGL2, falls back to WebGL1 (with `OES_element_index_uint` for 32-bit indices, or de-indexed draws without it), and falls back to the old Canvas 2D path only when WebGL is unavailable or when you add `?gl=0`.
+  - Real 24-bit depth buffer. Near/far planes are fitted to the visible model's bounding sphere every frame (`near = max(d - 1.05r, 0.001r)`, `far = d + 1.05r`). The camera is the same orthographic Z-up turntable as before.
+  - Smooth per-vertex normals with a 30° crease angle, split by B-Rep face group. These are tolerant of inconsistent winding because opposite-facing neighbours are sign-aligned. Lighting is two-sided via `gl_FrontFacing` with no backface culling. A "Flat" option gives faceted shading.
+  - Feature edges, PRC wires and the optional triangle-mesh overlay are depth-tested. Faces use `polygonOffset` and lines get a small depth bias, so hole outlines do not shimmer. Edges and wires are drawn as screen-space quads, so their width is consistent at any devicePixelRatio.
+  - New "Lines:" toolbar options: **Wires** (PRC wires/curves, now off by default), **Hidden** (dimmed hidden edges/wires), **Mesh** (triangle wireframe overlay) and **Flat**. All viewer controls sit in one container, `#viewerControls`.
+  - Renders on demand: frames are coalesced into `requestAnimationFrame` and drawn only when the camera or state changes. Handles resize and devicePixelRatio, and context loss/restore. GPU buffers are cached per part, freed when a new file or stream is loaded, and capped at about 900 MB (LRU).
+  - The preview cap in WebGL mode is raised from 200k to 2M triangles, with vertex-clustered decimation above that. The Canvas 2D fallback keeps the 200k cap.
+- Free rotation: the default orbit is now an unclamped quaternion arcball. The model spins fully around every axis, including over the top and upside down, with no gimbal lock. Previously pitch was clamped to ±1.48 rad (about ±85°) in the Z-up turntable. Ctrl/Alt/Cmd+drag or middle-drag twists about the view axis; Shift/right-drag still pans.
+  - New "Orbit: Free / Turntable (Z-up)" toggle keeps the old turntable available. The choice is saved in `localStorage` (`pdf3d.orbitMode`).
+  - New "Reset view" button. The Iso/Top/Front/Right presets work in both modes. Both renderers share one camera basis (`window.PDF3DCamera`), and pointer redraws are coalesced to one per animation frame.
+- Clearer viewer UI. Every interactive control is a button or toggle with hover, keyboard focus ring and pointer cursor. The Lines options are now toggle buttons with an on/off indicator instead of bare checkboxes, and Explode is a bordered slider control. Group captions (Display / View / Orbit / Lines) are plain uppercase labels. Read-only info in the viewport (stream, solids/faces/tris, bounds, units, renderer + tris drawn + ms/frame + GPU MB) is muted plain text with no panel or button styling, kept apart from the toolbar.
+- Canvas 2D fallback: every filled triangle also gets a same-colour hairline stroke, which closes the antialiasing seams between adjacent triangles. It also respects the Wires toggle.
+
 ## 1.3.0 — 2026-10-24
 
 Large models (1M+ triangles) no longer exhaust memory, and the vendor U3D mesh in RHAdobeMeshResource files is decoded. Much of this release builds on the QA Tester's root-cause analysis and prototypes (`pdf-3d-extractor-qa/fixes/`, REPORT.md "Problem files").
