@@ -166,15 +166,6 @@
     padding: 4px 8px;
     font-size: 11px;
   }
-  /* CAD-surface export progress (Advanced mode) */
-  .cad-export-panel { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-1); font-family: var(--mono); }
-  .cad-export-panel[hidden] { display: none; }
-  .cad-export-bar { width: 120px; height: 6px; border-radius: 3px; background: var(--bg-3); overflow: hidden; }
-  .cad-export-fill { display: block; height: 100%; width: 0; background: var(--cyan); transition: width 0.2s ease; }
-  .cad-export-label { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cad-export-panel.is-done .cad-export-fill { background: var(--emerald); }
-  .cad-export-panel.is-warn .cad-export-fill { background: var(--amber); }
-  .cad-export-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .btn-active {
     background: var(--cyan-dim);
     border-color: var(--cyan);
@@ -710,6 +701,7 @@
 <!-- affordance first (both modes), then Simple-mode layout -->
 <link rel="stylesheet" href="affordance.css?v=1.4.1" />
 <link rel="stylesheet" href="simple-mode.css?v=1.4.1" />
+<link rel="stylesheet" href="cad-export-ui.css?v=1.4.1" />
 </head>
 <body>
 
@@ -775,15 +767,6 @@
       <button class="btn btn-sm" id="btnExportRaw" title="Download extracted raw U3D or PRC stream bytes">
         Raw Stream (.u3d/.prc)
       </button>
-      <button class="btn btn-sm" id="btnExportCAD" title="Fit analytic and B-spline CAD surfaces to the mesh and export them as a STEP AP214 solid (plus the mesh body)">
-        Export as CAD surfaces (STEP)
-      </button>
-      <span class="cad-export-panel" id="cadExportPanel" hidden>
-        <span class="cad-export-bar" id="cadExportBar" role="progressbar" aria-label="CAD surface export" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="cad-export-fill" id="cadExportFill"></span></span>
-        <span class="cad-export-label" id="cadExportLabel"></span>
-        <button class="btn btn-sm" id="cadExportCancel" type="button">Cancel</button>
-        <span class="cad-export-sr" id="cadExportSr" role="status" aria-live="polite"></span>
-      </span>
     </div>
     <div class="export-group">
       <span class="badge badge-emerald" id="statusBadge">READY • WATER-TIGHT 2-MANIFOLD</span>
@@ -947,5 +930,6 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
   <script src="recon/step-merge.js?v=1.4.1"></script>
   <script src="recon/cad-export.js?v=1.4.1"></script>
   <script src="simple-mode.js?v=1.4.1"></script>
+  <script src="cad-export-ui.js?v=1.4.1"></script>
 </body>
 </html>

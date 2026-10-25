@@ -1,0 +1,107 @@
+/*
+ * cad-export-ui.css — styles for cad-export-ui.js (CAD surfaces STEP export).
+ * Only targets elements the add-on creates (class prefix "cad-"); uses the app's tokens
+ * (--bg-*, --border*, --text-*, --cyan, --emerald, --amber, --rose) and the Simple-mode look
+ * (glass panel, 10px radius, cyan focus ring). Integration: <link rel="stylesheet" href="cad-export-ui.css" />
+ */
+.cad-toast, .cad-mi, .cad-adv {
+  --cad-glass: rgba(15, 22, 35, 0.94);
+  --cad-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+[hidden].cad-toast, .cad-toast [hidden], .cad-mi [hidden], .cad-adv [hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- Simple: Export ▾ menu item */
+.sm-mi.cad-mi { align-items: flex-start; white-space: normal; }
+.cad-mi .cad-mi-ico { color: var(--cyan); font-size: 10px; line-height: 17px; }
+.cad-mi .sm-mi-ext { line-height: 17px; }
+.cad-mi-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cad-mi-sub, .cad-mi-sub2 { font: 400 11px var(--sans); color: var(--text-2); max-width: 230px; }
+.cad-mi-sub2 { font-size: 10.5px; }
+/* disabled but still focusable (aria-disabled) so the reason can be read; reason stays legible */
+.sm-mi.cad-mi[aria-disabled="true"], .sm-mi.cad-mi-opt[aria-disabled="true"] { cursor: not-allowed; }
+.sm-mi.cad-mi[aria-disabled="true"]:hover, .sm-mi.cad-mi-opt[aria-disabled="true"]:hover { background: transparent; }
+.cad-mi[aria-disabled="true"] .sm-mi-label, .cad-mi[aria-disabled="true"] .cad-mi-ico, .cad-mi[aria-disabled="true"] .sm-mi-ext,
+.cad-mi-opt[aria-disabled="true"] > * { opacity: 0.45; }
+.cad-mi-sub.cad-why { color: var(--text-1); }
+.cad-mi-sub.cad-why::before { content: "⊘ "; color: var(--amber); }
+.sm-mi.cad-mi-opt { padding-left: 33px; }        /* sub-option of the CAD item */
+
+/* ---------------------------------------------------------------- Advanced: export bar */
+.cad-adv { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.cad-adv-btn::before { content: "◆"; color: var(--cyan); font-size: 9px; }
+.btn.cad-adv-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn.cad-adv-btn[aria-disabled="true"]:hover { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); }
+.btn.cad-adv-btn[aria-disabled="true"]:active { transform: none; filter: none; }
+.cad-adv-opt { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--sans); color: var(--text-1); cursor: pointer; user-select: none; }
+.cad-adv-opt:hover { color: var(--text-0); }
+.cad-adv-opt input { accent-color: var(--cyan); margin: 0; cursor: pointer; }
+.cad-adv-opt:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
+.cad-adv-note { font: 400 11px var(--sans); color: var(--text-2); cursor: default; }
+.cad-adv-note.cad-why::before { content: "⊘ "; color: var(--amber); }
+
+/* ---------------------------------------------------------------- progress / result toast (non-modal) */
+.cad-toast {
+  position: fixed;
+  z-index: 75;                      /* above sheets (40), below popovers (80) and dialogs (90) */
+  right: 16px;
+  bottom: 16px;
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  padding: 12px 14px 12px;
+  border: 1px solid var(--border-hi);
+  border-left: 3px solid var(--cyan);
+  border-radius: 10px;
+  background: var(--cad-glass);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--cad-shadow);
+  color: var(--text-0);
+  font: 400 12.5px var(--sans);
+}
+body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: switch moved to bottom-right corner */
+@media (max-width: 900px) { body:has(.sm-modeswitch--float) .cad-toast { bottom: 52px; } }
+.cad-toast:focus { outline: none; }
+.cad-toast:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.cad-toast[data-tone="ok"] { border-left-color: var(--emerald); }
+.cad-toast[data-tone="warn"] { border-left-color: var(--amber); }
+.cad-toast[data-tone="err"] { border-left-color: var(--rose); }
+.cad-toast[data-tone="muted"] { border-left-color: var(--border-hi); }
+.cad-t-h { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.cad-t-ico { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); flex-shrink: 0; box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18); }
+.cad-toast[data-state="running"] .cad-t-ico { animation: cad-pulse 1.2s ease-in-out infinite; }
+.cad-toast[data-tone="ok"] .cad-t-ico { background: var(--emerald); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18); }
+.cad-toast[data-tone="warn"] .cad-t-ico { background: var(--amber); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18); }
+.cad-toast[data-tone="err"] .cad-t-ico { background: var(--rose); box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.18); }
+.cad-toast[data-tone="muted"] .cad-t-ico { background: var(--text-2); box-shadow: none; }
+.cad-t-title { margin: 0; flex: 1; font: 700 13px var(--sans); color: var(--text-0); }
+.cad-t-time { font: 500 11px var(--mono); color: var(--text-2); cursor: default; }
+.cad-t-x { padding: 2px 7px; font-size: 15px; line-height: 1; }
+.cad-t-stage { margin: 8px 0 6px; color: var(--text-1); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cad-bar { position: relative; height: 6px; border-radius: 999px; background: var(--bg-0); border: 1px solid var(--border); overflow: hidden; }
+.cad-bar-fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: linear-gradient(90deg, #0ea5e9, var(--cyan)); transition: width 0.25s ease-out; }
+.cad-bar.is-indeterminate .cad-bar-fill { width: 30%; animation: cad-indet 1.1s ease-in-out infinite; }
+.cad-t-msg { margin-top: 8px; color: var(--text-1); font-size: 12px; line-height: 1.45; }
+.cad-t-msg p { margin: 0 0 4px; }
+.cad-t-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--border); font-size: 11px; }
+.cad-t-dl dt { color: var(--text-2); }
+.cad-t-dl dd { margin: 0; color: var(--text-1); font-family: var(--mono); font-size: 10.5px; overflow-wrap: anywhere; }
+.cad-t-note { margin: 8px 0 0; color: var(--text-2); font-size: 10.5px; line-height: 1.4; cursor: default; }
+.cad-t-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.cad-t-actions:not(:has(> :not([hidden]))) { display: none; }
+.cad-toast .btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.cad-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 720px) {
+  .cad-toast { left: 8px; right: 8px; bottom: 8px; width: auto; max-width: none; }
+  body:has(.sm-modeswitch--float) .cad-toast { bottom: 48px; }   /* Advanced: floating switch sits bottom-right below 900px */
+  .cad-toast .btn { min-height: 40px; min-width: 40px; justify-content: center; }
+  .cad-mi-sub, .cad-mi-sub2 { max-width: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cad-toast:not([hidden]) { animation: cad-in 0.16s ease-out; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cad-toast[data-state="running"] .cad-t-ico, .cad-bar.is-indeterminate .cad-bar-fill { animation: none; }
+}
+@keyframes cad-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes cad-pulse { 50% { opacity: 0.35; } }
+@keyframes cad-indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }

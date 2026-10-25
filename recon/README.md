@@ -8,7 +8,7 @@ next to the app's own mesh body. This is a JS port of the Python pipeline in nx-
 
 | file | role |
 |---|---|
-| `cad-export.js` | main thread: `window.PDF3D` API, policies (limits, fallbacks), mesh body + merge, Advanced-mode button |
+| `cad-export.js` | main thread: `window.PDF3D` API, policies (limits, fallbacks), mesh body + merge (no UI; see `cad-export-ui.js`) |
 | `cad-worker.js` | classic Web Worker: fetches the kernel (with progress), decodes the PRC, fits, builds, validates, writes the fitted STEP. Started per export, terminated afterwards (frees the WASM heap) |
 | `fit.js`, `fit-linalg.js` | mesh segmentation and surface fitting (primitives, B-spline grids, helical faces, rotational symmetry copies) |
 | `occ-build.js` | topology, edges, trimmed faces, sewing, ShapeFix, validity check, XCAF STEP writer |
@@ -87,9 +87,17 @@ kernel version, so `estimate.kernelCached` is a best guess that the HTTP cache s
    without `.pdf`.
 10. **Script loading:** a separate script, `recon/cad-export.js`, loaded right after `app.js`. It replaces
     `window.PDF3D.canExportCadSurfaces` / `exportCadSurfaces` unless a non-stub implementation is already there.
-    Please drop the stub from production `index.html`. The Advanced panel already has its own button
-    (`#btnExportCAD`, *Export as CAD surfaces (STEP)*, with progress and cancel), so your Advanced group should not be
-    added when `#btnExportCAD` exists. Simple mode is all yours.
+    Please drop the stub from production `index.html`. **UI decision (1.5.0):** Designer's `cad-export-ui.js` /
+    `cad-export-ui.css` is the only export UI, in both Simple and Advanced. The earlier Advanced-only `#btnExportCAD`
+    button and progress panel were removed. index.html loads `cad-export-ui.css` after `simple-mode.css` and
+    `cad-export-ui.js` after `simple-mode.js` (which comes after `recon/cad-export.js`). The add-on files are copied
+    unmodified from `/workspace/pdf3d-simple-mode/`.
+
+    Contract notes for the UI (no change needed on either side):
+    - When `canExportCadSurfaces` returns `ok: true` with a non-empty `message` (`estimate.mode: 'mesh_only'`: U3D,
+      bundled sample, above 200k triangles), the UI doesn't show that message before the run. The result toast shows it
+      as the `mesh_only` reason afterwards. The old Advanced button asked for confirmation first.
+    - `summary.unfitFaces` is an array of `{ part, face }`, and the UI counts it. `cancelled` has `summary: null`, which the UI tolerates.
 
 ## Testing
 
