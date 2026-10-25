@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased / 1.4.0
+## 1.4.0 — 2026-10-25
 
 ### Fixed
 - 3D preview glitches: polygons disappearing/reappearing and "tiger striping" while rotating, dark sliver triangles from back faces over bore walls, the bottom fan showing through walls, and PRC wires / B-Rep edges drawn over solid geometry. The cause was the Canvas 2D painter's-algorithm renderer: per-triangle depth sorting, per-triangle antialiasing seams, and no depth test for lines.
@@ -28,6 +28,11 @@
 ### Fixed (QA)
 - "Reduce detail" on low-poly parts: at 50%, the 22-part dice (g01–g05, g10, r15) kept only 8.3% of its triangles. `decimateCompact` stopped its grid search after 9 steps and fell back to the coarsest grid. The search now runs to convergence and keeps the grid whose triangle count is closest to the target. Measured at 50%: g01 0.44 (was 0.08), r12 0.52, r11 0.50, r14 0.50. A part that no grid can reduce is kept as is.
 - The large-model banner now counts triangles as parsed from the file (r05 1,290,707), not the B-Rep/STL count (1,290,550), which excludes degenerate triangles. `computeAssemblyBounds` also returns `totalParsedTris`.
+- Dense models (r17 engine, r05 grinder) looked dark and cluttered in the default Shaded + edges mode because a B-Rep edge was drawn on nearly every facet. The viewer now draws only feature edges, meaning boundary/non-manifold edges and edges with a dihedral angle above 30° (`displayEdges` in `viewer-gl.js`). It also fades a part's edges out when they would be packed only a few pixels apart on screen (under about 4–16 px² of projected part surface per edge), so zoomed-out dense parts look like 1.3.0 and their edges come back as you zoom in. The selected part's edges are always drawn. Exports (IGES feature edges included) are unchanged.
+- All version strings now say 1.4.0 (`APP_VERSION`, header brand, the `?v=` cache-busts in `index.html`, README, standalone build), so returning visitors don't mix the new page with cached 1.3.0 scripts.
+
+### Known limitations
+- Touch controls on phones are deferred to a later release: one-finger orbit, pinch zoom and two-finger pan in the viewport don't work yet, and the viewport hint shows mouse wording. On a phone, use the View presets and Fit/Reset.
 
 ## 1.3.0 — 2026-10-24
 
