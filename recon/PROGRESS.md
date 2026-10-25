@@ -9,7 +9,7 @@ Outputs go to `test-out/` (untracked). Push only feature/cad-surfaces (never mai
 - [x] 2. DONE Score fitted outputs vs Parasolid refs (test-out/score-*.md)
 - [x] 3. DONE Fallbacks: r17/dice mesh_only, r05/r13 too_large, cancel, standalone unavailable
 - [ ] 4. 25-file corpus harness (flock /tmp/pdf3d-bigrun.lock, capped heap, --jobs=1) vs v1.4.1
-- [ ] 5. Designer suite (/workspace/pdf3d-simple-mode/test)
+- [x] 5. DONE Designer suite (/workspace/pdf3d-simple-mode/test)
 
 ## Log
 - 2026-10-25 09:55 EDT: started; no prior PROGRESS.md existed. HEAD f178afc, tree clean.
@@ -27,3 +27,11 @@ Outputs go to `test-out/` (untracked). Push only feature/cad-surfaces (never mai
   Added recon/tools/cad-ui-real.test.cjs: Designer's UI against the real engine, 23/23 PASS (test-out/designer/cad-ui-real.log).
   Designer stub test cad-export.test.js on the merged copy: 99/100; the 1 FAIL is "no add-on: no CAD elements" — that test expects index.html
   without the add-on, but on this branch index.html ships it (expected mismatch, not a defect).
+- 10:22 EDT: Python head_test re-scored with the current scorer (test-out/score-head_test-python.md): vol +0.102%, fit->ref rms 0.0241 / max 0.2123,
+  coverage 45.8% (JS 45.7%: same scorer artifact, not a JS gap). JS rms is 1.01x Python. CHANGELOG numbers updated to measured values.
+- 10:24 EDT: Designer test.js on the merged copy (/tmp/cad-merged-suite = git archive 8aa983d, real engine + add-on in index.html): 304/306.
+  FAILs: (a) round-trip pixel check, 5 px (known 1.4.1 anti-aliasing diff, baseline also fails it: 305/306);
+  (b) "Export menu lists STL…Raw" sees 2 extra entries (the add-on's separator + CAD item). Designer's README says test.js was not run with the add-on in index.html; expected.
+  The earlier [chromium +macOS focus] Export/Display failures are gone (they were from the old #btnExportCAD panel or CPU contention).
+  safari-focus.test.js (SAFARI=1): pass (test-out/designer/safari-focus.log).
+- 10:25 EDT: step 4 started: 25-file harness, label cad-merged-6c6bc8c (test-out/harness-run.sh, harness.out).

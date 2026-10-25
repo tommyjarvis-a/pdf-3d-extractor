@@ -14,8 +14,8 @@
   - The CAD kernel (opencascade.js 2.0-beta, LGPL-2.1, `recon/vendor/opencascade/`) loads only on first use: 13.7 MB
     gzip / 50.3 MB raw. The worker is terminated after each export, which frees its memory.
   - Reference parts compared with the Python pipeline (`score.py`):
-    - NX 2512 head_test: 421 faces, closed and valid, volume +0.145% (Python +0.102%), mesh→fit max 0.106 mm (Python 0.119 mm), 237/329 face types matched (same as Python), about 45 s.
-    - screw: 34 faces including 5 helical, closed and valid, volume −0.012% (Python −0.013%), fit→ref max 0.0123 mm (Python 0.0127 mm), about 35 s.
+    - NX 2512 head_test: 421 faces, closed and valid, volume +0.145% (Python +0.102%), fit→ref RMS 0.024 mm (Python 0.024 mm), mesh→fit max 0.106 mm (Python 0.119 mm), 237/329 face types matched (same as Python), about 45 s in Chrome.
+    - screw: 34 faces including 5 helical, closed and valid, volume −0.012% (Python −0.013%), fit→ref max 0.0123 mm (Python 0.0127 mm), about 22–25 s in Chrome.
   - Fallbacks:
     - U3D models, the bundled legacy sample, and PRC selections above 200k triangles (e.g. r16, r17 engine) export the mesh body only (`mesh_only`).
     - Selections above 1M triangles (r05 grinder, r13) are refused (`too_large`).
