@@ -149,8 +149,15 @@
       }
     });
     pop.addEventListener('keydown', (ev) => popKeys(ev, pop));
+    // Safari (macOS) never focuses a clicked button, so pressing a menu item moves focus to <body>
+    // and fires focusout before the click lands. Ignore focus loss while a pointer is down in the popover.
+    let ptrInside = false;
+    pop.addEventListener('pointerdown', () => { ptrInside = true; }, true);
+    document.addEventListener('pointerup', () => { if (ptrInside) setTimeout(() => { ptrInside = false; }, 0); }, true);
+    document.addEventListener('pointercancel', () => { ptrInside = false; }, true);
     pop.addEventListener('focusout', () => {
       setTimeout(() => {
+        if (ptrInside) return;
         if (openPop && openPop.pop === pop && !pop.contains(document.activeElement) &&
             document.activeElement !== trigger && document.hasFocus()) closePop(false);
       }, 0);
@@ -335,9 +342,9 @@
         h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
       h('div', { class: 'sm-doc' }, ui.docName, ui.status),
       h('div', { class: 'sm-actions' },
-        h('span', { class: 'sm-switch-slot' }),
         ui.btnOpen, ui.btnMore,
-        h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret)));
+        h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret),
+        h('span', { class: 'sm-switch-slot', 'aria-hidden': 'true' })));
     ui.switchSlot = ui.topbar.querySelector('.sm-switch-slot');
     document.body.insertBefore(ui.topbar, document.body.firstChild);
 
@@ -498,7 +505,7 @@
     window.addEventListener('resize', () => {
       if (openPop) positionPop(openPop);
       syncSheetTop();
-      placeFloatingSwitch();
+      placeSwitch();
     });
 
     // ---------- whole-viewport drag & drop (Simple mode only)
@@ -715,11 +722,24 @@
     if (mode === 'simple') ui.btnMore.focus({ preventScroll: true });
   }
 
-  // ------------------------------------------------------------------ Advanced: float the switch over free top-bar space
-  function placeFloatingSwitch() {
-    if (mode !== 'advanced' || !ui.modeSwitch) return;
+  // ------------------------------------------------------------------ the mode switch stays pinned in ONE spot
+  // Above 720px it is position:fixed at the same top-right point in both modes (Steven: it must not move
+  // when switching). Simple reserves its width with an empty slot at the end of the top bar; Advanced
+  // floats it over the free space right of the brand. On phones (<=720px) Simple keeps it in the top bar row.
+  const PHONE = window.matchMedia('(max-width: 720px)');
+  function placeSwitch() {
+    if (!ui.modeSwitch) return;
     const sw = ui.modeSwitch;
     sw.classList.remove('sm-modeswitch--corner');
+    if (mode === 'simple' && PHONE.matches) {
+      sw.classList.remove('sm-modeswitch--float');
+      if (sw.parentNode !== ui.switchSlot) ui.switchSlot.appendChild(sw);
+      return;
+    }
+    sw.classList.add('sm-modeswitch--float');
+    if (sw.parentNode !== document.body) document.body.appendChild(sw);
+    ui.switchSlot.style.width = sw.offsetWidth + 'px';
+    if (mode !== 'advanced') return;
     const r = sw.getBoundingClientRect();
     const hits = [...document.querySelectorAll('.topbar .brand, .topbar .top-controls, .exportbar')].some((el) => {
       const b = el.getBoundingClientRect();
@@ -743,8 +763,7 @@
 
     if (next === 'simple') {
       document.body.classList.add('sm-simple');
-      ui.modeSwitch.classList.remove('sm-modeswitch--float', 'sm-modeswitch--corner');
-      ui.switchSlot.appendChild(ui.modeSwitch);
+      placeSwitch();
       const partsCard = ($('partList') || {}).closest ? $('partList').closest('.panel-card') : null;
       moveInto(partsCard, ui.partsBody);
       for (const s of ui.infoSections) moveInto(s.card, s.body);
@@ -754,9 +773,7 @@
       ui.dropVeil.hidden = true;
       restoreAll();
       document.body.classList.remove('sm-simple');
-      ui.modeSwitch.classList.add('sm-modeswitch--float');
-      document.body.appendChild(ui.modeSwitch);
-      placeFloatingSwitch();
+      placeSwitch();
     }
     syncHint();
     if (hadFocus) (next === 'simple' ? ui.btnSimple : ui.btnAdvanced).focus({ preventScroll: true });

@@ -1254,9 +1254,12 @@ body.sm-simple .sm-empty {
   body.sm-simple .sm-doc { flex-basis: 0; }
   body.sm-simple .sm-brand-ver { display: none; }
 }
-@media (max-width: 900px) {
-  /* Advanced mode on narrow screens: keep the floating switch out of the wrapped top bar */
-  .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
+/* The pinned switch sits at the same fixed point in both modes; Simple reserves its width at the end of the top bar. */
+.sm-switch-slot { display: none; }
+body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
+@media (max-width: 720px) {
+  body.sm-simple .sm-switch-slot { width: auto !important; height: auto; }
+  body:not(.sm-simple) .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
 }
 @media (max-width: 720px) {
   body.sm-simple .sm-topbar { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
@@ -1353,7 +1356,7 @@ body.sm-simple .sm-empty {
     <div class="brand">
       <div class="brand-badge">3D</div>
       <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.4.0</span></div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.4.1</span></div>
         <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
       </div>
     </div>
@@ -4672,7 +4675,7 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.4.0
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.4.1
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -4689,7 +4692,7 @@ void main() { gl_FragColor = uRGBA; }`;
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.4.1';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export is hidden from the UI pending an NX compatibility fix (NX reports the
@@ -9014,8 +9017,15 @@ void main() { gl_FragColor = uRGBA; }`;
       }
     });
     pop.addEventListener('keydown', (ev) => popKeys(ev, pop));
+    // Safari (macOS) never focuses a clicked button, so pressing a menu item moves focus to <body>
+    // and fires focusout before the click lands. Ignore focus loss while a pointer is down in the popover.
+    let ptrInside = false;
+    pop.addEventListener('pointerdown', () => { ptrInside = true; }, true);
+    document.addEventListener('pointerup', () => { if (ptrInside) setTimeout(() => { ptrInside = false; }, 0); }, true);
+    document.addEventListener('pointercancel', () => { ptrInside = false; }, true);
     pop.addEventListener('focusout', () => {
       setTimeout(() => {
+        if (ptrInside) return;
         if (openPop && openPop.pop === pop && !pop.contains(document.activeElement) &&
             document.activeElement !== trigger && document.hasFocus()) closePop(false);
       }, 0);
@@ -9200,9 +9210,9 @@ void main() { gl_FragColor = uRGBA; }`;
         h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
       h('div', { class: 'sm-doc' }, ui.docName, ui.status),
       h('div', { class: 'sm-actions' },
-        h('span', { class: 'sm-switch-slot' }),
         ui.btnOpen, ui.btnMore,
-        h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret)));
+        h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret),
+        h('span', { class: 'sm-switch-slot', 'aria-hidden': 'true' })));
     ui.switchSlot = ui.topbar.querySelector('.sm-switch-slot');
     document.body.insertBefore(ui.topbar, document.body.firstChild);
 
@@ -9363,7 +9373,7 @@ void main() { gl_FragColor = uRGBA; }`;
     window.addEventListener('resize', () => {
       if (openPop) positionPop(openPop);
       syncSheetTop();
-      placeFloatingSwitch();
+      placeSwitch();
     });
 
     // ---------- whole-viewport drag & drop (Simple mode only)
@@ -9580,11 +9590,24 @@ void main() { gl_FragColor = uRGBA; }`;
     if (mode === 'simple') ui.btnMore.focus({ preventScroll: true });
   }
 
-  // ------------------------------------------------------------------ Advanced: float the switch over free top-bar space
-  function placeFloatingSwitch() {
-    if (mode !== 'advanced' || !ui.modeSwitch) return;
+  // ------------------------------------------------------------------ the mode switch stays pinned in ONE spot
+  // Above 720px it is position:fixed at the same top-right point in both modes (Steven: it must not move
+  // when switching). Simple reserves its width with an empty slot at the end of the top bar; Advanced
+  // floats it over the free space right of the brand. On phones (<=720px) Simple keeps it in the top bar row.
+  const PHONE = window.matchMedia('(max-width: 720px)');
+  function placeSwitch() {
+    if (!ui.modeSwitch) return;
     const sw = ui.modeSwitch;
     sw.classList.remove('sm-modeswitch--corner');
+    if (mode === 'simple' && PHONE.matches) {
+      sw.classList.remove('sm-modeswitch--float');
+      if (sw.parentNode !== ui.switchSlot) ui.switchSlot.appendChild(sw);
+      return;
+    }
+    sw.classList.add('sm-modeswitch--float');
+    if (sw.parentNode !== document.body) document.body.appendChild(sw);
+    ui.switchSlot.style.width = sw.offsetWidth + 'px';
+    if (mode !== 'advanced') return;
     const r = sw.getBoundingClientRect();
     const hits = [...document.querySelectorAll('.topbar .brand, .topbar .top-controls, .exportbar')].some((el) => {
       const b = el.getBoundingClientRect();
@@ -9608,8 +9631,7 @@ void main() { gl_FragColor = uRGBA; }`;
 
     if (next === 'simple') {
       document.body.classList.add('sm-simple');
-      ui.modeSwitch.classList.remove('sm-modeswitch--float', 'sm-modeswitch--corner');
-      ui.switchSlot.appendChild(ui.modeSwitch);
+      placeSwitch();
       const partsCard = ($('partList') || {}).closest ? $('partList').closest('.panel-card') : null;
       moveInto(partsCard, ui.partsBody);
       for (const s of ui.infoSections) moveInto(s.card, s.body);
@@ -9619,9 +9641,7 @@ void main() { gl_FragColor = uRGBA; }`;
       ui.dropVeil.hidden = true;
       restoreAll();
       document.body.classList.remove('sm-simple');
-      ui.modeSwitch.classList.add('sm-modeswitch--float');
-      document.body.appendChild(ui.modeSwitch);
-      placeFloatingSwitch();
+      placeSwitch();
     }
     syncHint();
     if (hadFocus) (next === 'simple' ? ui.btnSimple : ui.btnAdvanced).focus({ preventScroll: true });

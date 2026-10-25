@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.1 — 2026-10-25
+
+### Fixed
+- Simple mode on macOS Safari: every item inside the Simple-mode drop-down menus did nothing. That covers the Export ▾ formats, Display ▾, View ▾, More ▾ orbit and line toggles, and ⋯ About formats / Load sample. They only seemed to work after switching to Advanced and back, because the work was then done with the Advanced controls.
+  - Root cause, found by Designer: Safari on macOS never focuses a clicked button. Pressing a menu item moved focus to `<body>`, so the popover's `focusout` handler closed the menu before the click landed and the item's action never ran. Firefox on macOS behaves the same way.
+  - Fix (Designer, `simple-mode.js`): `bindPopover` ignores focus loss while a pointer is down inside the popover.
+- The Simple | Advanced switch no longer jumps when you change modes. Before, it sat in the Simple top bar left of Open and floated at the top-right in Advanced, 292 px apart at 1280 and 1920 px.
+  - Above 720 px it is now pinned at `top: 12px; right: 16px` in both modes, and Simple reserves its width with an empty slot at the end of the top bar. Fix by Designer (`simple-mode.js`, `simple-mode.css`).
+  - Phones (720 px and below) are unchanged. Advanced on 721–900 px screens now keeps the switch at the top-right instead of the bottom-right corner.
+- `sample-pdf-b64.js` now has a `?v=` cache-bust like every other script, so browsers don't keep a stale copy after an update.
+
+### Tests
+- Designer's `test/safari-focus.test.js` simulates Safari's focus behaviour in Chrome (`SAFARI=1`).
+- Designer's suite (`test/test.js`) gains R141 regression checks:
+  - **R141-A** opens a fresh profile, stays in Simple only, opens sample2 and an NX 2512 PDF through Open, and checks app state or downloaded file names for every Simple control, including the selects and the Explode slider. It runs in Chromium and Playwright WebKit, both with native focus and with Safari-style focus.
+  - **R141-B** checks that the switch keeps the same rect (within 1 px) across mode switches at 1024, 1280, 1440 and 1920 px.
+
 ## 1.4.0 — 2026-10-25
 
 ### Fixed
