@@ -1,13 +1,13 @@
 # PROGRESS — finish/verify "Export as CAD surfaces (STEP)" (1.5.0, feature/cad-surfaces)
 
 Restart guide: read this file top to bottom, then `git log --oneline -10`. Each step below is marked DONE / IN PROGRESS / TODO.
-Outputs go to `test-out/` (untracked). Don't push, don't bump version, don't merge into main, don't touch /workspace/pdf-3d-extractor.
+Outputs go to `test-out/` (untracked). Push only feature/cad-surfaces (never main), don't bump version, don't merge into main, don't touch /workspace/pdf-3d-extractor.
 
 ## Steps
 - [x] 0. DONE Merge main (b2e9f8c, v1.4.1) into feature/cad-surfaces (merge, not rebase)
 - [x] 1. DONE Browser e2e (Playwright, Chrome) head_test + sample2, fittedOnly true/false
-- [ ] 2. Score fitted outputs vs Parasolid refs
-- [ ] 3. Fallbacks: r17/dice mesh_only, r05/r13 too_large, cancel, standalone unavailable
+- [x] 2. DONE Score fitted outputs vs Parasolid refs (test-out/score-*.md)
+- [x] 3. DONE Fallbacks: r17/dice mesh_only, r05/r13 too_large, cancel, standalone unavailable
 - [ ] 4. 25-file corpus harness (flock /tmp/pdf3d-bigrun.lock, capped heap, --jobs=1) vs v1.4.1
 - [ ] 5. Designer suite (/workspace/pdf3d-simple-mode/test)
 
@@ -20,3 +20,10 @@ Outputs go to `test-out/` (untracked). Don't push, don't bump version, don't mer
 - 10:15 EDT: step 1 DONE: browser e2e, 4 runs all `solid` (test-out/*.stp). Standalone (merged build in test-out/standalone-merged.html): preflight unavailable, export skipped/unavailable.
   Designer suite (test.js) first run on merged tree, before the UI swap: failures in [chromium +macOS focus] Export menu/Display (to investigate after the swap).
 - 10:15 EDT: UI swap done (cad-export-ui.* copied unmodified; index.html wiring; cad-export.js Advanced button code removed).
+- 10:18 EDT: step 2 DONE. screw: closed/valid, 34 faces, vol -0.012%, fit->ref max 0.0123 / rms 0.00072 mm (target max 0.012, vol -0.014%).
+  head_test: closed/valid, 421 faces, vol +0.145% (Python +0.10%), fit->ref rms 0.0243 / p99 0.115 / max 0.212 mm (target ~0.025). No fit fix needed.
+  Step 3 DONE (test-out/policy-*.log, cancel-head_test.log): dice mesh_only 0.2 s; r17 mesh_only (403 k tris > 200 k fit limit) 7.2 s, 343 MB STEP, peak tree RSS 3.1 GB;
+  r13 skipped too_large (1.99 M), r05 skipped too_large (1.29 M), no OOM; cancel at fit -> cancelled in 4.5 s.
+  Added recon/tools/cad-ui-real.test.cjs: Designer's UI against the real engine, 23/23 PASS (test-out/designer/cad-ui-real.log).
+  Designer stub test cad-export.test.js on the merged copy: 99/100; the 1 FAIL is "no add-on: no CAD elements" — that test expects index.html
+  without the add-on, but on this branch index.html ships it (expected mismatch, not a defect).
