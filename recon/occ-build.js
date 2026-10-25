@@ -99,20 +99,24 @@
     for (const [k, f] of he) { const a = Math.floor(k / nv); let s = vf.get(a); if (!s) vf.set(a, s = new Set()); s.add(f); }
     const topoV = new Set(); for (const [v, s] of vf) if (s.size >= 3) topoV.add(v);
     const nxt = new Map(); // f -> Map(a->b)
+    const bad = new Map(); // face -> reason (topology cannot be built; the face is skipped -> shell fallback)
     for (const [k, f] of he) {
       const a = Math.floor(k / nv), b = k - a * nv; const g = he.get(K(b, a));
-      if (g !== undefined && g !== f) { let d = nxt.get(f); if (!d) nxt.set(f, d = new Map()); if (d.has(a)) throw new Error('pinch vertex ' + a + ' in face ' + f); d.set(a, b); }
+      if (g === undefined) { bad.set(f, 'open mesh boundary'); continue; }
+      if (g !== f) { let d = nxt.get(f); if (!d) nxt.set(f, d = new Map()); if (d.has(a)) { bad.set(f, 'pinch vertex ' + a); continue; } d.set(a, b); }
     }
     const loops = new Map();
     for (const [f, d] of nxt) {
-      const seen = new Set(); const LL = [];
+      if (bad.has(f)) continue;
+      const seen = new Set(); const LL = []; let ok = true;
       for (const s of d.keys()) {
         if (seen.has(s)) continue;
         const L = [s]; seen.add(s); let v = d.get(s);
-        while (v !== s) { if (v === undefined || seen.has(v)) throw new Error('pinch vertex ' + v + ' in face ' + f); L.push(v); seen.add(v); v = d.get(v); }
+        while (v !== s) { if (v === undefined || seen.has(v)) { ok = false; break; } L.push(v); seen.add(v); v = d.get(v); }
+        if (!ok) break;
         LL.push(L);
       }
-      loops.set(f, LL);
+      if (ok) loops.set(f, LL); else bad.set(f, 'pinch vertex in boundary loop');
     }
     const edges = new Map(); const faceLoops = new Map(); const extraV = new Set();
     const nb = (a, b) => he.get(K(b, a));
@@ -145,7 +149,7 @@
       faceLoops.set(f, fl);
     }
     const TV = new Set([...topoV, ...extraV]);
-    return { edges, faceLoops, TV };
+    return { edges, faceLoops, TV, bad };
   }
 
   // ---------- cubic interpolation (replacement for GeomAPI_Interpolate, which has no HArray binding) ----------
@@ -267,7 +271,11 @@
 
     const t0 = Date.now();
     progress({ stage: 'topology' });
-    const { edges, faceLoops, TV } = buildTopology(V, T, F);
+    const { edges, faceLoops, TV, bad } = buildTopology(V, T, F);
+    const skip = new Map(); for (const [f, why] of bad) skip.set(f, why);
+    for (const f of (input.skip || [])) if (!skip.has(f)) skip.set(f, 'surface fit out of tolerance');
+    for (const r of R) if (r.type === 'FREEFORM' && !ff[String(r.face)] && !(r.split_of != null && ff[String(r.split_of)]) && !skip.has(r.face)) skip.set(r.face, 'no freeform surface');
+    const failE = new Set(); const shouldStop = opt.shouldStop || (() => false);
     const B = new oc.BRep_Builder();
     const vmap = new Map(); for (const v of TV) vmap.set(v, new oc.BRepBuilderAPI_MakeVertex(gp(P(v))).Vertex());
     const emap = new Map(); const ckind = {}; const surfCache = new Map();
@@ -276,8 +284,12 @@
     for (const [key, e] of edges) {
       if ((++ei & 255) === 0) progress({ stage: 'edges', done: ei, total: edges.size });
       const seq = e.seq; const pts = seq.map(P); const fs = [...e.faces].sort((a, b) => a - b);
+      if (fs.every(f => skip.has(f))) continue;
+      if ((ei & 63) === 0 && shouldStop()) return { cancelled: true };
       let cv, k;
-      if (fs.length === 2 && fam(fs[0]) === fam(fs[1])) {
+      try {
+      if (seq[0] === seq[seq.length - 1]) throw new Error('closed segment');
+      if (fs.length === 2 && fam(fs[0]) === fam(fs[1]) && !skip.has(fs[0])) {
         const f0 = fs[0]; if (!surfCache.has(f0)) surfCache.set(f0, makeSurface(Rby.get(f0)));
         const S = surfCache.get(f0); const uv = [];
         for (const q of pts) { const pr = new oc.GeomAPI_ProjectPointOnSurf_2(gp(q), S, extAlgo); const u = { current: 0 }, v = { current: 0 }; pr.LowerDistanceParameters(u, v); uv.push([u.current, v.current]); pr.delete(); }
@@ -290,11 +302,12 @@
         Q[0] = pts[0]; Q[Q.length - 1] = pts[pts.length - 1];
         cv = polyCurve(Q); k = 'cut';
       } else[cv, k] = makeCurve(pts);
-      ckind[k] = (ckind[k] || 0) + 1;
-      if (seq[0] === seq[seq.length - 1]) throw new Error('closed segment');
-      const mk = new oc.BRepBuilderAPI_MakeEdge_27(cv, vmap.get(seq[0]), vmap.get(seq[seq.length - 1]));
+      let mk = new oc.BRepBuilderAPI_MakeEdge_27(cv, vmap.get(seq[0]), vmap.get(seq[seq.length - 1]));
+      if (!mk.IsDone()) { mk.delete(); k = 'poly'; mk = new oc.BRepBuilderAPI_MakeEdge_27(polyCurve(pts), vmap.get(seq[0]), vmap.get(seq[seq.length - 1])); }
       if (!mk.IsDone()) throw new Error('edge fail ' + k);
+      ckind[k] = (ckind[k] || 0) + 1;
       emap.set(key, mk.Edge()); mk.delete();
+      } catch (err) { failE.add(key); for (const f of fs) if (!skip.has(f)) skip.set(f, 'edge construction failed: ' + (err && err.message || err)); }
     }
     const tEdges = Date.now();
     const faces = [], finfo = [];
@@ -302,6 +315,9 @@
     for (const r of R) {
       if ((++fi & 7) === 0) progress({ stage: 'faces', done: fi, total: R.length });
       const f = r.face; const vs = regVerts.get(f); if (!vs) { finfo.push({ face: f, type: r.type, how: 'EMPTY' }); continue; }
+      if (skip.has(f)) { finfo.push({ face: f, type: r.type, split_of: r.split_of, how: 'SKIPPED', why: skip.get(f) }); continue; }
+      if (shouldStop()) return { cancelled: true };
+      try {
       let S = makeSurface(r);
       const dots = []; const step = Math.max(1, Math.floor(vs.length / 15));
       for (let i = 0; i < vs.length; i += step) {
@@ -327,16 +343,22 @@
       const ana = new oc.BRepCheck_Analyzer(face, true, false); const valid = ana.IsValid_2(); ana.delete();
       const g = new oc.GProp_GProps_1(); oc.BRepGProp.SurfaceProperties_1(face, g, false, false); const fa = g.Mass(); g.delete();
       if (!valid || Math.abs(fa - marea) > 0.02 * marea + 0.05) how = 'FAILED';
-      faces.push(face); finfo.push({ face: f, type: r.type, split_of: r.split_of, reversed: rev, how, mesh_area: marea, area: fa });
+      if (how !== 'FAILED') faces.push(face);
+      finfo.push({ face: f, type: r.type, split_of: r.split_of, reversed: rev, how, mesh_area: marea, area: fa, why: how === 'FAILED' ? (valid ? 'trimmed area differs from mesh' : 'invalid trimmed face') : undefined });
+      } catch (err) { finfo.push({ face: f, type: r.type, split_of: r.split_of, how: 'FAILED', why: 'face construction failed: ' + (err && err.message || err) }); }
     }
     const tFaces = Date.now();
     progress({ stage: 'sew' });
     const shell = new oc.TopoDS_Shell(); B.MakeShell(shell); for (const fc of faces) B.Add(shell, fc);
-    const solid = new oc.TopoDS_Solid(); B.MakeSolid(solid); B.Add(solid, shell);
-    const sfs = new oc.ShapeFix_Shape_2(solid); sfs.SetPrecision(1e-3); sfs.SetMaxTolerance(0.5); sfs.Perform(new oc.Message_ProgressRange_1());
-    const fitted = sfs.Shape();
+    const complete = finfo.every(x => x.how === 'trimmed' || x.how === 'EMPTY');
+    let fitted;
+    if (complete) {
+      const solid = new oc.TopoDS_Solid(); B.MakeSolid(solid); B.Add(solid, shell);
+      const sfs = new oc.ShapeFix_Shape_2(solid); sfs.SetPrecision(1e-3); sfs.SetMaxTolerance(0.5); sfs.Perform(new oc.Message_ProgressRange_1());
+      fitted = sfs.Shape(); sfs.delete();
+    } else fitted = shell; // open shell of the good faces only (never a broken solid)
     const tFix = Date.now();
-    return { fitted, finfo, ckind, timing: { edges: tEdges - t0, faces: tFaces - tEdges, fix: tFix - tFaces } };
+    return { fitted, complete, nGood: faces.length, finfo, ckind, timing: { edges: tEdges - t0, faces: tFaces - tEdges, fix: tFix - tFaces } };
   }
 
   function check(oc, shape) {

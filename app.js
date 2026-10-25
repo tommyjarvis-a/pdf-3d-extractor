@@ -4173,7 +4173,7 @@
     activateStream,
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
     buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
-    buildSTEPAP214: (o = {}) => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
+    buildSTEPAP214: (o = {}) => buildSTEPAP214(o.parts || state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
     buildBinarySTL: (o = {}) => buildBinarySTL(state.parts, state.units, o),
     buildASCIISTL: (o = {}) => buildASCIISTL(state.parts, state.units, o),
     buildWavefrontOBJ: (o = {}) => buildWavefrontOBJ(state.parts, state.units, o),
