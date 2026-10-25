@@ -689,7 +689,10 @@ function section(d, off){ const r=inflateRaw(d, off+2); return r.data; }
 /* ---------------------------------------------------------------- PDF extraction */
 function latin1(u8,a,b){ let s=''; const CH=8192; for(let i=a;i<b;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,Math.min(b,i+CH))); return s; }
 function extractPRCFromPDF(u8){
-  const s=latin1(u8,0,u8.length); const re=/\/Subtype\s*\/PRC\b/g; let m; const found=[];
+  const s=latin1(u8,0,u8.length);
+  if(/\/Encrypt\s+(\d+\s+\d+\s+R|<<)/.test(s.slice(Math.max(0,s.lastIndexOf('trailer')),s.length)) || /\/Type\s*\/XRef[^]*?\/Encrypt\b/.test(s.slice(-65536))){
+    const e=new Error('PDF: encrypted document - use PRCDecoder.extractPRCFromPDFAsync (pdf-extract.js + crypto-lite.js decrypt it)'); e.code='PDF_ENCRYPTED'; throw e; }
+  const re=/\/Subtype\s*\/PRC\b/g; let m; const found=[];
   while((m=re.exec(s))){
     let ds=s.lastIndexOf('obj',m.index); if(ds<0) continue; const objHead=s.lastIndexOf('\n',ds);
     const st=s.indexOf('stream',m.index); if(st<0) continue; const dict=s.slice(ds,st);
@@ -705,6 +708,16 @@ function extractPRCFromPDF(u8){
   if(!found.length) throw new Error('PDF: no /Subtype /PRC stream found (is this a 3D PDF with PRC? U3D is not supported)');
   return found;
 }
+
+// Full PDF path (xref/object streams, RC4/AES decryption) via the app's pdf-extract.js when it is available.
+function getPdfExtract(){ if(typeof PDF3DExtract!=='undefined') return PDF3DExtract; if(typeof self!=='undefined'&&self.PDF3DExtract) return self.PDF3DExtract; if(typeof globalThis!=='undefined'&&globalThis.PDF3DExtract) return globalThis.PDF3DExtract; if(typeof require==='function'){ try{ return require('./pdf-extract.js'); }catch(e){} } return null; }
+async function extractPRCFromPDFAsync(u8){
+  const X=getPdfExtract(); if(!X) return extractPRCFromPDF(u8);
+  const st=(await X.extract3DStreamsFromPDF(u8,'input.pdf',{inflate:(b)=>inflate(b)})).filter(x=>x.subtype==='PRC').map(x=>x.rawBytes);
+  if(!st.length) throw new Error('PDF: no /Subtype /PRC stream found (is this a 3D PDF with PRC? U3D is not supported)');
+  return st;
+}
+async function parsePRCFromPDF(u8, opts){ return parsePRC((await extractPRCFromPDFAsync(u8))[0], opts); }
 
 /* ---------------------------------------------------------------- top level */
 function getBrep(){ if(typeof PRCBrep!=='undefined') return PRCBrep; if(typeof self!=='undefined'&&self.PRCBrep) return self.PRCBrep; if(typeof globalThis!=='undefined'&&globalThis.PRCBrep) return globalThis.PRCBrep; if(typeof require==='function'){ try{ return require('./prc-brep.js'); }catch(e){} } return null; }
@@ -870,5 +883,5 @@ function assemble(hdr, fss, model, opts){
       raw: opts.raw? {header:hdr, fileStructures:fss, model} : undefined } };
 }
 
-return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema, makeSchemaVM, triangulate3d, wirePolylines, decodeTess3dCompressed, huffDecode, vertexNormal} };
+return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, inflate, BitReader, _internal:{readSchema, makeSchemaVM, triangulate3d, wirePolylines, decodeTess3dCompressed, huffDecode, vertexNormal} };
 });
