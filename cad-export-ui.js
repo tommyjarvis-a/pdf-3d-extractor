@@ -21,8 +21,8 @@
   if (window.PDF3DCadExportUI) return;
 
   const $ = (id) => document.getElementById(id);
-  const MB = (b) => (b / 1048576).toFixed(1).replace(/\.0$/, '');
-  const DEFAULT_KERNEL = 13.8 * 1048576;
+  const MB = (b) => (b / 1e6).toFixed(1).replace(/\.0$/, '');  // decimal MB, same as the app's own label
+  const DEFAULT_KERNEL = 13719175;  // gzip transfer size of the CAD kernel (13.7 MB); the engine's estimate wins when given
   const REASON_TEXT = {
     unavailable: 'Not available in this build',
     too_large: 'Model too large for surface fitting',
@@ -36,9 +36,18 @@
     kernel: 'Starting CAD kernel…', segment: 'Finding faces in the mesh…', fit: 'Fitting faces…',
     build: 'Building solid…', validate: 'Checking the solid…', write: 'Writing STEP…'
   };
+  // engine failures (1.5.0 reasonCode) -> plain wording; the engine falls back to a mesh-only file
+  const ENGINE_FAIL = {
+    kernel_download: { title: 'CAD kernel didn\u2019t download',
+      line: 'The surface-fitting kernel couldn\u2019t be downloaded. You may be offline, or a firewall, proxy or browser extension blocked it. Try again once you\u2019re connected.' },
+    worker_failed: { title: 'Surface fitting couldn\u2019t start',
+      line: 'The browser blocked the surface-fitting worker (offline, or a browser or site security setting). Reload the page and try again.' },
+    out_of_memory: { title: 'Ran out of memory',
+      line: 'The browser ran out of memory while fitting surfaces. Select fewer parts and try again.' }
+  };
   const TYPE_NAMES = {
     plane: ['plane', 'planes'], cylinder: ['cylinder', 'cylinders'], cone: ['cone', 'cones'], sphere: ['sphere', 'spheres'],
-    torus: ['torus', 'tori'], bspline: ['B-spline', 'B-spline'], nurbs: ['B-spline', 'B-spline'], other: ['other', 'other']
+    torus: ['torus', 'tori'], revolution: ['surface of revolution', 'surfaces of revolution'], bspline: ['B-spline surface', 'B-spline surfaces'], nurbs: ['B-spline surface', 'B-spline surfaces'], other: ['other', 'other']
   };
 
   // ------------------------------------------------------------------ tiny DOM helper (same shape as simple-mode.js)
@@ -466,13 +475,22 @@
         if (meshLine) lines.push(meshLine);
         return { status: 'shell', tone: 'warn', title: 'Surfaces exported, not a closed solid', lines, details, download: has };
       }
-      case 'mesh_only':
+      case 'mesh_only': {
+        const why = ENGINE_FAIL[res.reasonCode];
+        if (why) {
+          return { status: 'mesh_only', tone: 'warn', title: has ? why.title + ': mesh body exported' : why.title, download: has, details,
+            lines: [why.line, has ? 'The STEP contains the mesh body only (triangles), no fitted surfaces.' : 'Nothing was exported.'] };
+        }
         return { status: 'mesh_only', tone: 'warn', title: 'No clean fit: mesh body exported', download: has, details,
           lines: [(res.reason || 'The surfaces could not be fitted cleanly.').replace(/\.?$/, '.'),
             has ? 'The STEP contains the mesh body only (triangles), no fitted surfaces.' : 'Nothing was exported.'] };
+      }
       case 'skipped':
         return { status: 'skipped', tone: 'muted', title: 'Nothing exported', download: false, details: [],
-          lines: [(res.reason || 'The model was skipped.').replace(/\.?$/, '.'), 'Use Export STEP / STL for a mesh export.'] };
+          lines: [(res.reason || 'The model was skipped.').replace(/\.?$/, '.'),
+            res.reasonCode === 'no_fit' || res.reasonCode === 'fit_limit' || res.reasonCode === 'no_face_data'
+              ? 'Turn off \u201cFitted solid only\u201d to get the mesh body in a STEP file instead.'
+              : 'The mesh exports (STEP, STL, OBJ) still work.'] };
       case 'cancelled':
         return { status: 'cancelled', tone: 'muted', title: 'Export cancelled', download: false, details: [], lines: [] };
       default:

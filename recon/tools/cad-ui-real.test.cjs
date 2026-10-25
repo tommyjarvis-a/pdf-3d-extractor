@@ -44,7 +44,7 @@ const openMenu = async (p) => { if (!(await p.isVisible(MENU))) await p.click(TR
     await openMenu(p);
     const mi = await p.$eval(MI, (e) => ({ dis: e.getAttribute('aria-disabled'), label: e.querySelector('.sm-mi-label').textContent, sub: e.querySelector('.cad-mi-sub').textContent, sub2: e.querySelector('.cad-mi-sub2').textContent }));
     ok('simple: CAD item enabled with real preflight', mi.dis === 'false' && mi.label === 'CAD surfaces (STEP)' && mi.sub === 'Fitted solid + mesh fallback', JSON.stringify(mi));
-    ok('simple: uncached kernel wording from real estimate', /First use downloads 13\.1 MB/.test(mi.sub2), mi.sub2);
+    ok('simple: uncached kernel wording from real estimate', /First use downloads 13\.7 MB/.test(mi.sub2), mi.sub2);
     const stages = new Set();
     await p.exposeFunction('__stage', (s) => stages.add(s));
     await p.evaluate(() => new MutationObserver(() => { const s = document.querySelector('.cad-t-stage'); if (s) window.__stage(s.textContent); }).observe(document.body, { subtree: true, childList: true, characterData: true }));
@@ -57,7 +57,7 @@ const openMenu = async (p) => { if (!(await p.isVisible(MENU))) await p.click(TR
     t = await toast(p);
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     ok('simple: real result = Fitted solid exported', t.status === 'solid' && t.title === 'Fitted solid exported' && /34 faces fitted into a closed solid/.test(t.text) && /mesh body is included/.test(t.text), t.title + ' / ' + secs + ' s');
-    ok('simple: face breakdown from real byType', /34 \(24 B-splines?, 8 cylinders, 2 planes\)/i.test(t.text) || /34 \(/.test(t.text), (t.text.match(/Fitted faces[^\n]*\n?[^\n]*/) || [''])[0].replace(/\s+/g, ' '));
+    ok('simple: face breakdown from real byType', /34 \(24 B-spline surfaces, 8 cylinders, 2 planes\)/.test(t.text), (t.text.match(/Fitted faces[^\n]*\n?[^\n]*/) || [''])[0].replace(/\s+/g, ' '));
     ok('simple: stages shown from API labels (kernel, fitting, writing)', [...stages].some((s) => /kernel/i.test(s)) && [...stages].some((s) => /fit/i.test(s)) && [...stages].some((s) => /writ/i.test(s)), [...stages].slice(0, 6).join(' | '));
     await settle(p, 800);
     ok('simple: downloaded sample2-surfaces.stp', p.downloads.length === 1 && p.downloads[0].suggestedFilename() === 'sample2-surfaces.stp', p.downloads.map((d) => d.suggestedFilename()).join(','));
