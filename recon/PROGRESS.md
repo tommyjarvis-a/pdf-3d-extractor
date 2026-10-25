@@ -64,3 +64,12 @@ Never edit Designer's cad-export-ui.js; strings that live there are listed for D
     full run -> true, after caches.delete -> false.
   - Size: labels use 1e6 (13.7 MB). Designer's MB() helper still divides by 1048576 (Designer list).
   - Standalone rebuilt and re-checked (file:// and http): unchanged PASS.
+
+## 13:40 EDT — 1.5.0 release verification DONE
+- e2e: screw solid 34 faces (plane 2 / cylinder 8 / bspline 24), fit→ref max 0.0123 mm, watertight, BRepCheck valid.
+  head_test solid 421 faces, byType plane 29 / cylinder 190 / cone 21 / sphere 4 / torus 31 / revolution 48 / bspline 98, fit→ref max 0.2123 mm.
+- Designer suite (fixture = git archive of adf9bf9 + Designer files): test.js (updated) 307/308. The only FAIL is
+  "Advanced after 4 Simple<->Advanced round trips pixel-identical" (5 px differ): Designer's unconfirmed fix, not a blocker. L6 checks pass.
+  cad-export.test.js 100/100 (stub fixture: index.html without add-on, index-cad-noapi.html, index-cad.html + stub).
+  safari-focus SAFARI=1 rc 0. cad-ui-real 23/23.
+- 25-file harness v150-96bbf5d (flock, 4 GB heap, --jobs=1): app PASS 25/25; compare-runs vs v141-b2e9f8c: 25 PASS->PASS, 0 deltas.
