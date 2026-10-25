@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.4.1
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.4.1';
+  const APP_VERSION = '1.5.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export is hidden from the UI pending an NX compatibility fix (NX reports the
@@ -4173,7 +4173,7 @@
     activateStream,
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
     buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
-    buildSTEPAP214: (o = {}) => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
+    buildSTEPAP214: (o = {}) => buildSTEPAP214(o.parts || state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
     buildBinarySTL: (o = {}) => buildBinarySTL(state.parts, state.units, o),
     buildASCIISTL: (o = {}) => buildASCIISTL(state.parts, state.units, o),
     buildWavefrontOBJ: (o = {}) => buildWavefrontOBJ(state.parts, state.units, o),

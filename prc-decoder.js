@@ -430,8 +430,10 @@ function facePrimitives(f, cb){
 }
 function faceVertexCount(f){ let n=0; facePrimitives(f,(k,o,t,nv)=>{ n+=nv; }); return n; }
 // Returns {tris:[[a,b,c]...] (point indices, i.e. coord/3), faceOf:[faceIdx...]}
-function triangulate3d(t){
+function triangulate3d(t, wantN){
   const A=t.triangulated, tris=[], faceOf=[]; const noN=!!t.mustRecalcNormals;
+  // wantN (opt-in, used by the CAD-surfaces export): also record the normal index of every triangle corner
+  const cornerN=wantN?[]:null; let lastN=-1;
   // When normals are not stored, the writers' StartTriangulated offsets still count them:
   // recompute the offsets by running through the faces (texture indices only count if
   // the tessellation carries texture coordinates).
@@ -439,18 +441,18 @@ function triangulate3d(t){
   t.faces.forEach((f,fi)=>{ let p=noN? run : f.startTriangulated; const nt=(noN && !hasTex)? 0 : f.numTexIndices;
     facePrimitives(f,(kind,one,textured,nv,single)=>{
       const tex=textured; const savedNt=nt; // textured flags carry nt indices; untextured carry none
-      const take=(withNormal)=>{ if(withNormal&&!noN) p++; if(tex) p+=savedNt; const v=A[p++]; if(v===undefined) throw new Error('PRC: triangulated index overflow in face '+fi); if(v%3) throw new Error('PRC: point index not multiple of 3 in face '+fi); return v/3; };
+      const take=(withNormal)=>{ if(withNormal&&!noN){ lastN=A[p]; p++; } if(tex) p+=savedNt; const v=A[p++]; if(v===undefined) throw new Error('PRC: triangulated index overflow in face '+fi); if(v%3) throw new Error('PRC: point index not multiple of 3 in face '+fi); return v/3; };
       if(kind==='tri'){
-        for(let i=0;i<nv/3;i++){ let a,b,c; if(one){ a=take(true); b=take(false); c=take(false); } else { a=take(true); b=take(true); c=take(true); } tris.push([a,b,c]); faceOf.push(fi); }
+        for(let i=0;i<nv/3;i++){ let a,b,c,na,nb,nc; if(one){ a=take(true); na=nb=nc=lastN; b=take(false); c=take(false); } else { a=take(true); na=lastN; b=take(true); nb=lastN; c=take(true); nc=lastN; } tris.push([a,b,c]); if(cornerN) cornerN.push([na,nb,nc]); faceOf.push(fi); }
       } else {
-        const idx=[]; for(let i=0;i<nv;i++){ const wn= one ? (single ? i===0 : true) : true; idx.push(take(wn)); }
-        if(kind==='fan') for(let i=1;i+1<nv;i++){ tris.push([idx[0],idx[i],idx[i+1]]); faceOf.push(fi); }
-        else for(let i=0;i+2<nv;i++){ tris.push(i&1?[idx[i+1],idx[i],idx[i+2]]:[idx[i],idx[i+1],idx[i+2]]); faceOf.push(fi); }
+        const idx=[], nidx=[]; for(let i=0;i<nv;i++){ const wn= one ? (single ? i===0 : true) : true; idx.push(take(wn)); nidx.push(lastN); }
+        if(kind==='fan') for(let i=1;i+1<nv;i++){ tris.push([idx[0],idx[i],idx[i+1]]); if(cornerN) cornerN.push([nidx[0],nidx[i],nidx[i+1]]); faceOf.push(fi); }
+        else for(let i=0;i+2<nv;i++){ tris.push(i&1?[idx[i+1],idx[i],idx[i+2]]:[idx[i],idx[i+1],idx[i+2]]); if(cornerN) cornerN.push(i&1?[nidx[i+1],nidx[i],nidx[i+2]]:[nidx[i],nidx[i+1],nidx[i+2]]); faceOf.push(fi); }
       }
     });
     run=p;
   });
-  return {tris, faceOf};
+  return cornerN? {tris, faceOf, cornerN} : {tris, faceOf};
 }
 // Wire polylines: returns [[pointIndex...]...]
 function wirePolylines(coords, w){
@@ -824,7 +826,7 @@ function assemble(hdr, fss, model, opts){
           item.partName=p.name; parts.push(p); return;
         }
         if(tess.kind==='3d'){
-          const {tris,faceOf}=triangulate3d(tess); if(!tris.length) return;
+          const {tris,faceOf,cornerN}=triangulate3d(tess, !!opts.withNormals); if(!tris.length) return;
           let col=resolveColor(fs.globals,rst);
           if(!col){ // fall back to first face line attribute
             for(const f of tess.faces){ if(f.lineAttributes.length){ col=resolveColor(fs.globals,f.lineAttributes[0]-1); if(col) break; } } }
@@ -832,6 +834,7 @@ function assemble(hdr, fss, model, opts){
           const p={name:uniq(label), positions:T?null:mkPos(), faces:tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:ri.tessIndex, riType:ri.type, faceIndexPerTriangle:faceOf, numTessFaces:tess.faces.length,
             faceColors: faceColors.some(Boolean)? faceColors : null, matrix:isIdentity(RM)?null:RM};
+          if(cornerN && !tess.mustRecalcNormals && tess.normals && tess.normals.length){ p.cornerNormalIdx=cornerN; p.tessNormals=tess.normals; }
           if(T) typedPart(p,applyFlat(RM,c),packTris(tris,(c.length/3)|0));
           item.partName=p.name; parts.push(p);
         } else if(tess.kind==='wire'){

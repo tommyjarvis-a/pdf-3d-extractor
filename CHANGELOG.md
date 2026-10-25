@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.5.0 — 2026-10-25
+
+### Added
+- **Export as CAD surfaces (STEP)**, in both modes through Designer's export UI (`cad-export-ui.js` / `cad-export-ui.css`):
+  a **CAD surfaces (STEP)** item with a **Fitted solid only** option in Simple's Export ▾ menu, and a **CAD Surfaces (.stp)**
+  button with a **Fitted only** checkbox in Advanced. Rebuilds a CAD model from a PRC part's triangle
+  mesh: it fits planes, cylinders, cones, spheres, tori, B-splines and helical faces (screw threads), trims them, and
+  sews them into a closed, validated solid with OpenCascade. The STEP AP214 file holds the fitted `<part>_fitted`
+  body plus the app's usual mesh body as `<part>_mesh` (*fitted only* leaves the mesh body out).
+  - Runs in a Web Worker; the viewer stays usable. A progress toast shows the stage, percent, elapsed time and **Cancel**,
+    then a plain-language result (fitted solid, open shell, mesh body only, nothing exported, cancelled).
+  - The CAD kernel (opencascade.js 2.0-beta, LGPL-2.1, `recon/vendor/opencascade/`) loads only on first use: 13.7 MB
+    gzip / 50.3 MB raw. The worker is terminated after each export, which frees its memory.
+  - Reference parts compared with the Python pipeline (`score.py`):
+    - NX 2512 head_test: 421 faces, closed and valid, volume +0.145% (Python +0.102%), fit→ref RMS 0.024 mm (Python 0.024 mm), mesh→fit max 0.106 mm (Python 0.119 mm), 237/329 face types matched (same as Python), about 45 s in Chrome.
+    - screw: 34 faces including 5 helical, closed and valid, volume −0.012% (Python −0.013%), fit→ref max 0.0123 mm (Python 0.0127 mm), about 22–25 s in Chrome.
+  - Fallbacks:
+    - U3D models, the bundled legacy sample, and PRC selections above 200k triangles (e.g. r16, r17 engine) export the mesh body only (`mesh_only`).
+    - Selections above 1M triangles (r05 grinder, r13) are refused (`too_large`).
+    - Fit failures or out-of-memory fall back to the mesh body.
+  - Not available in the single-file offline build or from `file://`. The menu item and button are disabled with an explanation.
+  - The kernel wasm is kept in Cache Storage after the first download, so later exports start without downloading it;
+    the "first use downloads 13.7 MB" note checks that cache. Offline or blocked downloads give a plain message and the mesh body.
+  - Scripting API for the UI: `PDF3D.canExportCadSurfaces(partIds)` and `PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal })`. See `recon/README.md`.
+- `CAD3DExtractor.buildSTEPAP214({ parts })` accepts an explicit part list. The PRC decoder can return per-corner
+  normal indices (`withNormals`, opt-in, used by the fitter); default output is unchanged.
+
 ## 1.4.1 — 2026-10-25
 
 ### Fixed
