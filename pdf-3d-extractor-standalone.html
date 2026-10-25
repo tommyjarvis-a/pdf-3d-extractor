@@ -595,7 +595,7 @@
     <div class="brand">
       <div class="brand-badge">3D</div>
       <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.2.0</span></div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.3.0</span></div>
         <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • Native Parasolid XT (.x_t) • STEP AP214 (.stp) • STL • OBJ</div>
       </div>
     </div>
@@ -619,6 +619,13 @@
         <option value="sheet-unsewn">Open Sheet Surfaces (NX House/Deck Recovery)</option>
         <option value="merged-assembly">Multi-Body Assembly (10 ASSEMBLY + Instances)</option>
         <option value="faceted">Triangulated Faceted Sheet B-Rep (1:1 Mesh)</option>
+      </select>
+      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Reduce detail:</label>
+      <select class="select-ctrl" id="detailSelect" title="Optional decimation (vertex clustering) applied to exported files only. Off = full detail.">
+        <option value="1" selected>Off (full detail)</option>
+        <option value="0.5">50% of triangles</option>
+        <option value="0.25">25% of triangles</option>
+        <option value="0.1">10% of triangles</option>
       </select>
     </div>
   </header>
@@ -749,6 +756,7 @@
       </div>
 
       <!-- 3D Viewport Canvas -->
+      <div id="bigModelBanner" style="display:none;padding:6px 12px;background:rgba(251,191,36,0.14);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;font-family:var(--mono);"></div>
       <div class="viewport-wrap">
         <canvas id="viewportCanvas"></canvas>
         <div class="viewport-hud-tl" id="viewportHud">
@@ -1307,6 +1315,287 @@ function wrapParseU3D(orig) {
 }
 return { wrapParseU3D, scanU3D };
 });
+
+</script>
+  <script data-src="u3d-rhadobe-mesh.js">
+'use strict';
+/*
+ * fixes/u3d-rhadobe-mesh.js - decoder for the U3D vendor extension "RHAdobeMeshResource"
+ *   (Right Hemisphere Adobe 3D Mesh Compression, Acrobat 8.1+), declared via a New Object Type block 0xFFFFFF16
+ *   (GUID 96a804a6-3fb9-43c5-b2df-2a31b5569340, vendor "Right Hemisphere Adobe Systems", info "version 1.0") and
+ *   stored in New Object Blocks (block type = the declaration's "New Declaration Block Type", 0x100..0xFFFFFF).
+ *
+ * FIXES: r09_coretech_compare_u3d_2annots_aes128.pdf (CoreTechnologie 3D_Evolution, AES-128; both annots carry the
+ *   byte-identical U3D stream with 2 RHAdobe meshes: PartBody_2Resource 70,958 tris / 49,549 verts and
+ *   PartBody_5Resource 71,146 tris / 49,662 verts). Stock app: 0 tris + "Unsupported proprietary U3D mesh" (u3d-guard).
+ *
+ * FORMAT (Adobe Acrobat SDK 8.1 "U3D Supported Elements", ch.2 + appendix A; verified byte-exact on r09, every
+ *   encoded array ends exactly at its declared size and the 2nd mesh ends exactly at the U3D block end):
+ *   String ObjectName (U16 len + UTF-8)  [no Chain Index / Character Encoding string seen in this producer]
+ *   U8 ChunkFlags: bits0-3 version(0), bit4 subchunks (must be 0), bit5 skeleton, bits6-7 MaterialsCount encoding
+ *       (0 => 1 material; 1/2/3 => U8/U16/U32 count follows)
+ *   Materials[count]: U8 MaterialFlag (b0-1 tex dims layer0, b2-3 bytes-1 of ShadingID, b4-5 bytes-1 of NumTexLayers,
+ *       b6 hasDiffuse, b7 hasSpecular), UN NumTexLayers, UN OriginalShadingID, ceil((layers-1)/4) bytes of dims
+ *   U8 ValuesFlags (b0 faces, b1 positions, b2 normals, b3 diffuse, b4 specular, b5 texcoords present;
+ *       b6-7 bytes-1 of each count) + the counts
+ *   Float arrays (planar XXX..YYY..ZZZ): U8 DataType then per component: 0 = raw F32[n]; 2 = F32 min, F32 max,
+ *       [U32 NumQuants + UINT block, only if min != max], value = min + q*(max-min)/NumQuants; 3 = alpha/theta normals.
+ *       positions*3, normals*3 (if count), diffuse*4, specular*4, texcoords*4
+ *   UINT arrays: [face material IDs, only if >1 material], position face idx [3F], normal face idx [3F if normals],
+ *       diffuse idx, specular idx (for faces whose material has the flag), texcoord idx [3F per tex layer]
+ *   UINT block: U8 (b0-5 encoding, b6-7 bytes-1 of size field); 0 all-zero (no size), 1 replicate U32 (no size);
+ *       otherwise U8|16|24|32 byte size, then data: 2 U4, 3 U8, 4 U16, 5 U24, 6 U32, 7 RH39, 8/9 U3D arithmetic
+ *       (NOT implemented - not used by r09), 10 UIC1 (implemented from the appendix, verified on the spec's cube example).
+ *
+ * INTEGRATION (app.js, read-only for QA; for Dev):
+ *   <\script src="u3d-rhadobe-mesh.js"> (global RHAdobeMesh) before app.js. In parseU3DStreamCore's block loop, on block
+ *   0xFFFFFF16 whose name is 'RHAdobeMeshResource' remember its declBlockType; on a block of that type call
+ *   const m = RHAdobeMesh.decodeBlock(u8, dataOffset, dataSize) and meshes.set(m.name, { meshName: m.name,
+ *   positions: m.positionsAoA(), faces: m.facesAoA(), chainIdx: 0 }) - the existing Model Node code then applies the
+ *   node transforms. Or, minimal: in parseU3DStream() when tris==0 and the guard sees RHAdobeMeshResource, return
+ *   RHAdobeMesh.parseU3D(u8) (same {parts:[{name,meshName,visible,color,positions,faces}]} shape as app parts).
+ *   Typed arrays (m.positions Float32Array, m.indices Uint32Array) are available for Dev's typed-array parts.
+ * CLI: node fixes/u3d-rhadobe-mesh.js <in.u3d|in.pdf> [-o out.stl] [--obj out.obj] [--json summary.json] [--no-transform]
+ *   (.pdf input uses fixes/pdf-extract.js + crypto-lite.js, so AES/RC4 owner-only files work.)
+ * LIMITS: encodings 8/9 (U3D arithmetic coder) and normals type 3 decode paths are unverified (8/9 throw); skeleton and
+ *   subchunk data are ignored; texture coordinates are decoded (OBJ vt) but textures/materials are not mapped; tested
+ *   only on the CoreTechnologie producer in r09 (1 material, no normals, no colours).
+ */
+(function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.RHAdobeMesh = factory(); })(typeof self !== 'undefined' ? self : this, function () {
+  const GUID = '96a804a6-3fb9-43c5-b2df-2a31b5569340';
+  function Reader(u8, p, end) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const R = { p, end,
+      u8() { if (R.p >= R.end) throw new Error('RHAdobe: read past block end'); return u8[R.p++]; },
+      u16() { const v = dv.getUint16(R.p, true); R.p += 2; return v; },
+      u24() { const v = u8[R.p] | (u8[R.p + 1] << 8) | (u8[R.p + 2] << 16); R.p += 3; return v >>> 0; },
+      u32() { const v = dv.getUint32(R.p, true); R.p += 4; return v; },
+      f32() { const v = dv.getFloat32(R.p, true); R.p += 4; return v; },
+      n(bytes) { return bytes === 1 ? R.u8() : bytes === 2 ? R.u16() : bytes === 3 ? R.u24() : R.u32(); },
+      str() { const L = R.u16(); const s = new TextDecoder().decode(u8.subarray(R.p, R.p + L)); R.p += L; return s; } };
+    return R;
+  }
+  function rh39(R, count, end) {
+    const out = new Uint32Array(count); let o = 0, offset = 0, c = count;
+    while (c && R.p < end) {
+      const b = R.u8(); const op = (b >> 4) & 7; let len = b & 15;
+      if (b & 0x80) len = 17 + (len << 8) + R.u8(); else len++;
+      if (op === 7) { offset = R.n(len); continue; }
+      if (c < len) throw new Error('RH39: run longer than remaining count'); c -= len; let b4 = 0;
+      for (let i = 0; i < len; i++) {
+        let v;
+        switch (op) { case 6: v = R.u8(); break; case 4: v = R.u16(); break; case 0: v = R.u32(); break;
+          case 2: v = offset + R.u8(); break; case 3: v = offset + R.u16(); break; case 5: v = offset; break;
+          default: if (i & 1) v = offset + (b4 >> 4); else { b4 = R.u8(); v = offset + (b4 & 15); } }
+        out[o++] = v >>> 0;
+      }
+    }
+    if (c) throw new Error('RH39: data ended ' + c + ' values early');
+    return out;
+  }
+  function uic1(R, count, end, vertical) {
+    const out = new Uint32Array(count); const PV = new Uint32Array(32), PD = new Int32Array(32);
+    let cv = 0, cd = 0, q = 0, qv = 0, r = 0;
+    const gv = (w) => PV[cv >= w ? cv - w : 32 + cv - w], gd = (w) => PD[cd >= w ? cd - w : 32 + cd - w];
+    const C = [0xFF, 0xFF00, 0xFF0000, 0xFF000000, 0xFFFFFF, 0xFFFFFFFF];
+    for (let i = 0; i < count; i++) {
+      const prev = r; const pv = vertical && i >= 3 ? out[i - 3] : 0;
+      if (q) { q--; r = gv(qv); } else {
+        if (R.p >= end) throw new Error('UIC1: data ended at value ' + i);
+        const cmd = R.u8(), a = cmd >> 4;
+        switch (cmd & 15) {
+          case 0: r = gv(a); break; case 5: r = gv(16 + a); break;
+          case 13: r = gv(a >> 2); qv = a & 3; q = 1; break; case 14: r = gv(0); qv = 0; q = a + 2; break;
+          case 6: r = (r + gd(a)) >>> 0; break;
+          case 1: r = (cmd & 16) ? (r + (cmd >> 5) + 1) >>> 0 : (r - ((cmd >> 5) + 1)) >>> 0; break; // per appendix A.2 code
+          case 3: r = (pv + a + 1) >>> 0; break; case 4: r = (pv - a - 1) >>> 0; break;
+          case 7: r = (pv + a + 17) >>> 0; break; case 8: r = (pv - a - 17) >>> 0; break;
+          case 9: r = (r + a + (R.u8() << 4) + 3) >>> 0; break; case 10: r = (r - (a + (R.u8() << 4) + 3)) >>> 0; break;
+          case 11: r = a + (R.u8() << 4); break; case 12: r = a + (R.u16() << 4); break;
+          case 15:
+            if (a <= 4) r = a; else if (a <= 10) r = C[a - 5];
+            else if (a === 11) { const bl = R.u8(); r = ((R.u16() << 8) + bl) >>> 0; }
+            else if (a === 12) r = R.u32();
+            else if (a === 13) { qv = 0; q = R.u16() + 35; r = gv(0); } // replicate last value 36+N times (this one + 35+N queued)
+            else throw new Error('UIC1: undefined extended command ' + a);
+            break;
+          default: throw new Error('UIC1: undefined command 2');
+        }
+      }
+      r >>>= 0; out[i] = r; cv = (cv + 1) & 31; PV[cv] = r;
+      if (r !== prev) { const d = r > prev ? r - prev : -(prev - r); if (Math.abs(d) < 0x7fffffff) { cd = (cd + 1) & 31; PD[cd] = d; } }
+    }
+    return out;
+  }
+  function uintBlock(R, count, vertical, info) {
+    const b = R.u8(), t = b & 63;
+    if (t === 0) return new Uint32Array(count);
+    if (t === 1) return new Uint32Array(count).fill(R.u32());
+    const size = R.n((b >> 6) + 1), start = R.p, end = start + size; let out;
+    if (t === 2) { out = new Uint32Array(count); let b4 = 0; for (let i = 0; i < count; i++) { if (!(i & 1)) b4 = R.u8(); out[i] = i & 1 ? b4 >> 4 : b4 & 15; } }
+    else if (t >= 3 && t <= 6) { out = new Uint32Array(count); for (let i = 0; i < count; i++) out[i] = R.n(t - 2); }
+    else if (t === 7) out = rh39(R, count, end);
+    else if (t === 10) out = uic1(R, count, end, vertical);
+    else throw new Error('RHAdobe: UINT encoding ' + t + (t === 8 || t === 9 ? ' (U3D arithmetic coder) not implemented' : ' unknown'));
+    if (info) info.push({ enc: t, size, consumed: R.p - start });
+    R.p = end; return out;
+  }
+  function floatArray(R, n, comps, info) {
+    const dt = R.u8(); const out = [];
+    for (let c = 0; c < comps; c++) {
+      if (dt === 0) { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = R.f32(); out.push(a); continue; }
+      if (dt === 3) { // alpha/theta normals: whole 3-vector from 2 arrays
+        const nq = R.u32(); const al = uintBlock(R, n, false, info), th = uintBlock(R, n, false, info);
+        const x = new Float32Array(n), y = new Float32Array(n), z = new Float32Array(n), k = 2 * Math.PI / nq;
+        for (let i = 0; i < n; i++) { const A = al[i] * k, T = th[i] * k; x[i] = Math.sin(T) * Math.cos(A); y[i] = Math.sin(T) * Math.sin(A); z[i] = Math.cos(T); }
+        return [x, y, z];
+      }
+      if (dt !== 2) throw new Error('RHAdobe: float DataType ' + dt);
+      const mn = R.f32(), mx = R.f32();
+      if (mn === mx) { out.push(new Float32Array(n).fill(mn)); continue; }
+      const nq = R.u32(); const q = uintBlock(R, n, false, info); const a = new Float32Array(n), s = (mx - mn) / nq;
+      for (let i = 0; i < n; i++) a[i] = mn + q[i] * s; out.push(a);
+    }
+    return out;
+  }
+  /** Decode one RHAdobeMeshResource New Object Block payload (u8[off .. off+size)). */
+  function decodeBlock(u8, off, size) {
+    const R = Reader(u8, off, off + size); const info = [];
+    const name = R.str();
+    const flags = R.u8(); if (flags & 15) throw new Error('RHAdobe: chunk version ' + (flags & 15) + ' != 0');
+    if (flags & 16) throw new Error('RHAdobe: subchunk extension data not supported');
+    const mcEnc = flags >> 6; const nMat = mcEnc === 0 ? 1 : R.n([0, 1, 2, 4][mcEnc]);
+    const materials = [];
+    for (let m = 0; m < nMat; m++) {
+      const mf = R.u8(); const layers = R.n(((mf >> 4) & 3) + 1); const shadingId = R.n(((mf >> 2) & 3) + 1);
+      const dims = [mf & 3]; const extra = Math.max(0, layers - 1); for (let k = 0; k < Math.ceil(extra / 4); k++) { const b = R.u8(); for (let j = 0; j < 4 && dims.length < layers; j++) dims.push((b >> (2 * j)) & 3); }
+      materials.push({ layers, shadingId, texDims: dims, hasDiffuse: !!(mf & 64), hasSpecular: !!(mf & 128) });
+    }
+    const vf = R.u8(), vs = (vf >> 6) + 1; const cnt = {};
+    ['faces', 'positions', 'normals', 'diffuse', 'specular', 'texCoords'].forEach((k, b) => { cnt[k] = vf & (1 << b) ? R.n(vs) : 0; });
+    const F = cnt.faces;
+    const P = floatArray(R, cnt.positions, 3, info);
+    const N = cnt.normals ? floatArray(R, cnt.normals, 3, info) : null;
+    const D = cnt.diffuse ? floatArray(R, cnt.diffuse, 4, info) : null;
+    const S = cnt.specular ? floatArray(R, cnt.specular, 4, info) : null;
+    const T = cnt.texCoords ? floatArray(R, cnt.texCoords, 4, info) : null;
+    const matIds = nMat > 1 ? uintBlock(R, F, false, info) : new Uint32Array(F);
+    const indices = uintBlock(R, F * 3, true, info);
+    const normalIdx = cnt.normals ? uintBlock(R, F * 3, true, info) : null;
+    const nDif = materials.some((m) => m.hasDiffuse) ? 3 * Array.from(matIds).filter((id) => materials[id] && materials[id].hasDiffuse).length : 0;
+    const diffuseIdx = nDif ? uintBlock(R, nDif, true, info) : null;
+    const nSpc = materials.some((m) => m.hasSpecular) ? 3 * Array.from(matIds).filter((id) => materials[id] && materials[id].hasSpecular).length : 0;
+    const specularIdx = nSpc ? uintBlock(R, nSpc, true, info) : null;
+    const texIdx = []; const maxLayers = Math.max(0, ...materials.map((m) => m.layers));
+    if (cnt.texCoords) for (let l = 0; l < maxLayers; l++) texIdx.push(uintBlock(R, F * 3, true, info)); // assumes every face uses all layers
+    const positions = new Float32Array(cnt.positions * 3);
+    for (let i = 0; i < cnt.positions; i++) { positions[3 * i] = P[0][i]; positions[3 * i + 1] = P[1][i]; positions[3 * i + 2] = P[2][i]; }
+    let badIndex = 0; for (let i = 0; i < indices.length; i++) if (indices[i] >= cnt.positions) badIndex++;
+    const uv = T ? (() => { const a = new Float32Array(cnt.texCoords * 2); for (let i = 0; i < cnt.texCoords; i++) { a[2 * i] = T[0][i]; a[2 * i + 1] = T[1][i]; } return a; })() : null;
+    return { name, materials, counts: cnt, positions, indices, matIds, uv, uvIndices: texIdx[0] || null, normals: N, normalIdx, diffuse: D, diffuseIdx, specular: S, specularIdx,
+      badIndex, bytesUsed: R.p - off, bytesDeclared: size, exactEnd: R.p === off + size, arrays: info,
+      positionsAoA() { const a = new Array(cnt.positions); for (let i = 0; i < cnt.positions; i++) a[i] = [positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]]; return a; },
+      facesAoA() { const a = new Array(F); for (let i = 0; i < F; i++) a[i] = [indices[3 * i], indices[3 * i + 1], indices[3 * i + 2]]; return a; } };
+  }
+  const p4 = (x) => (x + 3) & ~3;
+  /** Walk a U3D stream: blocks + modifier chains; returns {decls, meshes, nodes, warnings}. */
+  function scan(u8) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); const td = new TextDecoder();
+    const str = (o) => { const L = dv.getUint16(o, true); return [td.decode(u8.subarray(o + 2, o + 2 + L)), o + 2 + L]; };
+    const decls = new Map(), meshes = [], nodes = [], warnings = [];
+    function block(o, lim) {
+      const type = dv.getUint32(o, true), ds = dv.getUint32(o + 4, true), ms = dv.getUint32(o + 8, true); const d0 = o + 12;
+      if (d0 + ds > lim) throw new Error('U3D block overruns stream at ' + o);
+      if (type === 0xFFFFFF14) { // modifier chain: name, type, attrs, [sphere], [aabb], pad, count, blocks
+        let [, q] = str(d0); const attr = dv.getUint32(q + 4, true); q += 8; if (attr & 1) q += 16; if (attr & 2) q += 24;
+        q = d0 + p4(q - d0); const n = dv.getUint32(q, true); q += 4;
+        for (let i = 0; i < n; i++) q = block(q, d0 + ds);
+      } else if (type === 0xFFFFFF16) {
+        let [name, q] = str(d0); q += 4; const g = [dv.getUint32(q, true).toString(16).padStart(8, '0'), dv.getUint16(q + 4, true).toString(16).padStart(4, '0'), dv.getUint16(q + 6, true).toString(16).padStart(4, '0'),
+          Array.from(u8.subarray(q + 8, q + 10), (b) => b.toString(16).padStart(2, '0')).join(''), Array.from(u8.subarray(q + 10, q + 16), (b) => b.toString(16).padStart(2, '0')).join('')].join('-');
+        q += 16; const declType = dv.getUint32(q, true); decls.set(declType, { name, guid: g });
+        if (name !== 'RHAdobeMeshResource' || g !== GUID) warnings.push(`New Object Type '${name}' ${g} is not RHAdobeMeshResource; its blocks are skipped`);
+      } else if (type >= 0x100 && type <= 0xFFFFFF && type !== 0x00443355) {
+        const dcl = decls.get(type);
+        if (dcl && dcl.name === 'RHAdobeMeshResource') {
+          try { meshes.push(decodeBlock(u8, d0, ds)); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); }
+        } else warnings.push(`New Object Block type 0x${type.toString(16)} at ${o} has no RHAdobeMeshResource declaration`);
+      } else if (type === 0xFFFFFF21 || type === 0xFFFFFF22) { // group/model node: name, parents{name, 4x4 col-major}, [resource]
+        let [name, q] = str(d0); const np = dv.getUint32(q, true); q += 4; const parents = [];
+        for (let i = 0; i < np; i++) { let pn; [pn, q] = str(q); const m = new Float64Array(16); for (let k = 0; k < 16; k++) m[k] = dv.getFloat32(q + 4 * k, true); q += 64; parents.push({ name: pn, m }); }
+        let resource = null; if (type === 0xFFFFFF22) [resource] = str(q);
+        nodes.push({ name, model: type === 0xFFFFFF22, parents, resource });
+      }
+      return d0 + p4(ds) + p4(ms);
+    }
+    let o = 0; while (o + 12 <= u8.length) o = block(o, u8.length);
+    return { decls, meshes, nodes, warnings };
+  }
+  const mul = (a, b) => { const r = new Float64Array(16); for (let c = 0; c < 4; c++) for (let rr = 0; rr < 4; rr++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + rr] * b[c * 4 + k]; r[c * 4 + rr] = s; } return r; };
+  const I = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
+  function worldMatrices(nodes, name, depth = 0) {
+    const n = nodes.find((x) => x.name === name); if (!n || depth > 64) return [I()];
+    const out = []; for (const p of n.parents) { const base = p.name && p.name !== '' && nodes.some((x) => x.name === p.name) ? worldMatrices(nodes, p.name, depth + 1) : [I()]; for (const B of base) out.push(mul(B, p.m)); }
+    return out.length ? out : [I()];
+  }
+  /** App-shaped result: parts with node transforms applied (one part per model-node instance). */
+  function parseU3D(u8, opts = {}) {
+    const sc = scan(u8); const parts = [];
+    for (const m of sc.meshes) {
+      const users = sc.nodes.filter((n) => n.model && n.resource === m.name);
+      const insts = opts.noTransform || !users.length ? [{ node: m.name.replace(/Resource$/, ''), M: I() }] : users.flatMap((u) => worldMatrices(sc.nodes, u.name).map((M) => ({ node: u.name, M })));
+      for (const { node, M } of insts) {
+        const P = m.positions, nv = P.length / 3, pos = new Float32Array(P.length);
+        for (let i = 0; i < nv; i++) { const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2];
+          pos[3 * i] = M[0] * x + M[4] * y + M[8] * z + M[12]; pos[3 * i + 1] = M[1] * x + M[5] * y + M[9] * z + M[13]; pos[3 * i + 2] = M[2] * x + M[6] * y + M[10] * z + M[14]; }
+        parts.push({ name: node, meshName: m.name, visible: true, positionsTyped: pos, indices: m.indices, uv: m.uv, uvIndices: m.uvIndices, matrix: Array.from(M),
+          get positions() { const a = new Array(nv); for (let i = 0; i < nv; i++) a[i] = [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]]; return a; },
+          get faces() { return m.facesAoA(); }, analyticFeatures: [] });
+      }
+    }
+    return { format: 'U3D (ECMA-363) + RHAdobeMeshResource', parts, meshes: sc.meshes, nodes: sc.nodes, warnings: sc.warnings, decodePath: 'U3D/RHAdobeMeshResource' };
+  }
+  return { GUID, decodeBlock, scan, parseU3D, _rh39: rh39, _uic1: uic1, _uintBlock: uintBlock, Reader };
+});
+
+if (typeof require !== 'undefined' && require.main === module) (async () => {
+  const fs = require('fs'), path = require('path'); const M = module.exports;
+  const a = process.argv.slice(2); const arg = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
+  const inp = a[0]; if (!inp) { console.error('usage: node u3d-rhadobe-mesh.js <in.u3d|in.pdf> [-o out.stl] [--obj out.obj] [--json s.json] [--no-transform]'); process.exit(1); }
+  const t0 = Date.now(); let u3ds = []; const raw = new Uint8Array(fs.readFileSync(inp));
+  if (/\.pdf$/i.test(inp)) {
+    const X = require('./pdf-extract'); const zlib = require('zlib');
+    const streams = await X.extract3DStreamsFromPDF(raw, path.basename(inp), { inflate: async (b) => new Uint8Array(zlib.inflateSync(Buffer.from(b))) });
+    const seen = new Set(); for (const s of streams) { if (s.subtype !== 'U3D') continue; const h = require('crypto').createHash('sha1').update(s.rawBytes).digest('hex'); if (seen.has(h)) continue; seen.add(h); u3ds.push(s.rawBytes); }
+    console.error(`pdf: ${streams.length} 3D stream(s), ${u3ds.length} distinct U3D`);
+  } else u3ds = [raw];
+  const parts = [], meshes = [], warnings = [];
+  for (const u of u3ds) { const r = M.parseU3D(u, { noTransform: a.includes('--no-transform') }); parts.push(...r.parts); meshes.push(...r.meshes); warnings.push(...r.warnings); }
+  let tris = 0, verts = 0, bad = 0, degen = 0; const bb = [[Infinity, Infinity, Infinity], [-Infinity, -Infinity, -Infinity]];
+  for (const p of parts) { tris += p.indices.length / 3; verts += p.positionsTyped.length / 3; for (let i = 0; i < p.positionsTyped.length; i++) { const v = p.positionsTyped[i], k = i % 3; if (v < bb[0][k]) bb[0][k] = v; if (v > bb[1][k]) bb[1][k] = v; } }
+  const out = arg('-o');
+  if (out) { const buf = Buffer.alloc(84 + tris * 50); buf.write('RHAdobeMeshResource via fixes/u3d-rhadobe-mesh.js', 0); buf.writeUInt32LE(tris, 80); let o = 84;
+    for (const p of parts) { const P = p.positionsTyped, ix = p.indices;
+      for (let t = 0; t < ix.length; t += 3) { const A = ix[t] * 3, B = ix[t + 1] * 3, C = ix[t + 2] * 3;
+        if (A >= P.length || B >= P.length || C >= P.length) { bad++; o += 50; continue; }
+        const ux = P[B] - P[A], uy = P[B + 1] - P[A + 1], uz = P[B + 2] - P[A + 2], vx = P[C] - P[A], vy = P[C + 1] - P[A + 1], vz = P[C + 2] - P[A + 2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz); if (l) { nx /= l; ny /= l; nz /= l; } else degen++;
+        buf.writeFloatLE(nx, o); buf.writeFloatLE(ny, o + 4); buf.writeFloatLE(nz, o + 8); o += 12;
+        for (const V of [A, B, C]) { buf.writeFloatLE(P[V], o); buf.writeFloatLE(P[V + 1], o + 4); buf.writeFloatLE(P[V + 2], o + 8); o += 12; } o += 2; } }
+    fs.writeFileSync(out, buf); }
+  const objp = arg('--obj');
+  if (objp) { const w = fs.createWriteStream(objp); w.write('# RHAdobeMeshResource via fixes/u3d-rhadobe-mesh.js\n'); let vb = 1, tb = 1;
+    for (const p of parts) { w.write(`o ${p.name}\n`); const P = p.positionsTyped; let s = ''; for (let i = 0; i < P.length; i += 3) { s += `v ${P[i]} ${P[i + 1]} ${P[i + 2]}\n`; if (s.length > 1 << 20) { w.write(s); s = ''; } }
+      const U = p.uv; if (U) for (let i = 0; i < U.length; i += 2) { s += `vt ${U[i]} ${U[i + 1]}\n`; if (s.length > 1 << 20) { w.write(s); s = ''; } }
+      const ix = p.indices, ti = p.uvIndices; for (let t = 0; t < ix.length; t += 3) { s += ti ? `f ${ix[t] + vb}/${ti[t] + tb} ${ix[t + 1] + vb}/${ti[t + 1] + tb} ${ix[t + 2] + vb}/${ti[t + 2] + tb}\n` : `f ${ix[t] + vb} ${ix[t + 1] + vb} ${ix[t + 2] + vb}\n`; if (s.length > 1 << 20) { w.write(s); s = ''; } }
+      w.write(s); vb += P.length / 3; if (U) tb += U.length / 2; }
+    await new Promise((r) => w.end(r)); }
+  const summary = { input: inp, distinctU3D: u3ds.length, meshes: meshes.map((m) => ({ name: m.name, faces: m.counts.faces, positions: m.counts.positions, texCoords: m.counts.texCoords, normals: m.counts.normals, materials: m.materials.length, badIndex: m.badIndex, exactEnd: m.exactEnd, bytes: m.bytesDeclared, encodings: m.arrays.map((x) => x.enc).join(',') })),
+    parts: parts.map((p) => ({ name: p.name, mesh: p.meshName, tris: p.indices.length / 3, matrixIsIdentity: p.matrix.every((v, i) => v === (i % 5 === 0 ? 1 : 0)) })),
+    tris, verts, badIndex: bad, zeroAreaTris: degen, bbox: bb, ms: Date.now() - t0, rssMB: process.memoryUsage().rss >> 20, warnings };
+  if (arg('--json')) fs.writeFileSync(arg('--json'), JSON.stringify(summary, null, 1));
+  console.log(JSON.stringify(summary, null, 1));
+})().catch((e) => { console.error(e.stack || e); process.exit(2); });
 
 </script>
   <script data-src="prc-brep.js">
@@ -2618,6 +2907,14 @@ function cross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]
 function mul(a,b){ const m=new Array(16).fill(0); for(let i=0;i<4;i++) for(let j=0;j<4;j++){ let s=0; for(let k=0;k<4;k++) s+=a[i*4+k]*b[k*4+j]; m[i*4+j]=s; } return m; }
 function apply(m,p){ const x=p[0],y=p[1],z=p[2]; const w=m[12]*x+m[13]*y+m[14]*z+m[15]||1;
   return [(m[0]*x+m[1]*y+m[2]*z+m[3])/w,(m[4]*x+m[5]*y+m[6]*z+m[7])/w,(m[8]*x+m[9]*y+m[10]*z+m[11])/w]; }
+// typed output (opts.typed): flat Float64Array positions + Uint32Array triangle indices
+// (0xFFFFFFFF marks an invalid/missing index). Index arrays are shared between instances.
+function applyFlat(m,c){ const n=(c.length/3)|0, out=new Float64Array(n*3);
+  for(let i=0;i<n;i++){ const q=apply(m,[c[3*i],c[3*i+1],c[3*i+2]]); out[3*i]=q[0]; out[3*i+1]=q[1]; out[3*i+2]=q[2]; } return out; }
+function applyArr(P){ const out=new Float64Array(P.length*3); for(let i=0;i<P.length;i++){ const q=P[i]; out[3*i]=q[0]; out[3*i+1]=q[1]; out[3*i+2]=q[2]; } return out; }
+function packTris(tris,nv){ const out=new Uint32Array(tris.length*3);
+  for(let f=0;f<tris.length;f++){ const t=tris[f]; for(let k=0;k<3;k++){ const v=t?t[k]:undefined; out[3*f+k]=(Number.isInteger(v)&&v>=0&&v<nv)? v : 0xFFFFFFFF; } } return out; }
+function typedPart(p,pos,idx){ p.pos=pos; p.idx=idx; p.positions=null; p.faces={length:idx.length/3}; p.faceIndexPerTriangle=null; }
 function isIdentity(m){ const I=identity(); return m.every((v,i)=>Math.abs(v-I[i])<1e-12); }
 
 /* ---------------------------------------------------------------- container */
@@ -2640,7 +2937,10 @@ function section(d, off){ const r=inflateRaw(d, off+2); return r.data; }
 /* ---------------------------------------------------------------- PDF extraction */
 function latin1(u8,a,b){ let s=''; const CH=8192; for(let i=a;i<b;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,Math.min(b,i+CH))); return s; }
 function extractPRCFromPDF(u8){
-  const s=latin1(u8,0,u8.length); const re=/\/Subtype\s*\/PRC\b/g; let m; const found=[];
+  const s=latin1(u8,0,u8.length);
+  if(/\/Encrypt\s+(\d+\s+\d+\s+R|<<)/.test(s.slice(Math.max(0,s.lastIndexOf('trailer')),s.length)) || /\/Type\s*\/XRef[^]*?\/Encrypt\b/.test(s.slice(-65536))){
+    const e=new Error('PDF: encrypted document - use PRCDecoder.extractPRCFromPDFAsync (pdf-extract.js + crypto-lite.js decrypt it)'); e.code='PDF_ENCRYPTED'; throw e; }
+  const re=/\/Subtype\s*\/PRC\b/g; let m; const found=[];
   while((m=re.exec(s))){
     let ds=s.lastIndexOf('obj',m.index); if(ds<0) continue; const objHead=s.lastIndexOf('\n',ds);
     const st=s.indexOf('stream',m.index); if(st<0) continue; const dict=s.slice(ds,st);
@@ -2656,6 +2956,16 @@ function extractPRCFromPDF(u8){
   if(!found.length) throw new Error('PDF: no /Subtype /PRC stream found (is this a 3D PDF with PRC? U3D is not supported)');
   return found;
 }
+
+// Full PDF path (xref/object streams, RC4/AES decryption) via the app's pdf-extract.js when it is available.
+function getPdfExtract(){ if(typeof PDF3DExtract!=='undefined') return PDF3DExtract; if(typeof self!=='undefined'&&self.PDF3DExtract) return self.PDF3DExtract; if(typeof globalThis!=='undefined'&&globalThis.PDF3DExtract) return globalThis.PDF3DExtract; if(typeof require==='function'){ try{ return require('./pdf-extract.js'); }catch(e){} } return null; }
+async function extractPRCFromPDFAsync(u8){
+  const X=getPdfExtract(); if(!X) return extractPRCFromPDF(u8);
+  const st=(await X.extract3DStreamsFromPDF(u8,'input.pdf',{inflate:(b)=>inflate(b)})).filter(x=>x.subtype==='PRC').map(x=>x.rawBytes);
+  if(!st.length) throw new Error('PDF: no /Subtype /PRC stream found (is this a 3D PDF with PRC? U3D is not supported)');
+  return st;
+}
+async function parsePRCFromPDF(u8, opts){ return parsePRC((await extractPRCFromPDFAsync(u8))[0], opts); }
 
 /* ---------------------------------------------------------------- top level */
 function getBrep(){ if(typeof PRCBrep!=='undefined') return PRCBrep; if(typeof self!=='undefined'&&self.PRCBrep) return self.PRCBrep; if(typeof globalThis!=='undefined'&&globalThis.PRCBrep) return globalThis.PRCBrep; if(typeof require==='function'){ try{ return require('./prc-brep.js'); }catch(e){} } return null; }
@@ -2743,18 +3053,22 @@ function assemble(hdr, fss, model, opts){
         if(!tess){ if(ri.type==='BrepModel' && ri.exact) exactPart(ri, RM, rst, item); return; }
         const visible=!!((ri.graphics?ri.graphics.behavior:1)&1);
         const label=pth.concat(pd.name&&pd.name!==po.name?[pd.name]:[]).concat([ri.name||(ri.type+'#'+ri.tessIndex)]).join('/');
-        const pos=[]; const c=tess.coordinates||[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]]));
+        const c=tess.coordinates||[]; const T=!!opts.typed;
+        const mkPos=()=>{ const pos=[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]])); return pos; };
         if(tess.kind==='compressed'){
           if(!tess.decoded){ try{ tess.decoded=decodeTess3dCompressed(tess, w=>warnings.push('tess #'+ri.tessIndex+': '+w)); }
             catch(e){ tess.decoded={coordinates:[],tris:[],faceOf:[],error:e.message}; warnings.push('tess #'+ri.tessIndex+' ('+label+'): '+e.message); } }
           const D=tess.decoded; if(!D.tris.length) return;
-          const cpos=[]; const cc=D.coordinates; for(let i=0;i<cc.length;i+=3) cpos.push(apply(RM,[cc[i],cc[i+1],cc[i+2]]));
+          const cc=D.coordinates; let cpos=null, cidx=null;
+          if(T){ cpos=applyFlat(RM,cc); cidx=D._idx||(D._idx=packTris(D.tris,(cc.length/3)|0)); }
+          else { cpos=[]; for(let i=0;i<cc.length;i+=3) cpos.push(apply(RM,[cc[i],cc[i+1],cc[i+2]])); }
           let col=resolveColor(fs.globals,rst); const la=tess.lineAttributes||[];
           const faceColors=[]; for(let f=0;f<tess.numFaces;f++){ const a=tess.multipleLineAttr? null : la[f]; const c2=a!=null? resolveColor(fs.globals,a-1):null; faceColors.push(c2?c2.rgb:null); }
           if(!col){ const f0=faceColors.find(Boolean); if(f0) col={rgb:f0,alpha:1}; }
           const p={name:uniq(label), positions:cpos, faces:D.tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:ri.tessIndex, riType:ri.type, faceIndexPerTriangle:D.faceOf, numTessFaces:tess.numFaces,
             faceColors: faceColors.some(Boolean)? faceColors : null, matrix:isIdentity(RM)?null:RM, compressedTess:true};
+          if(T) typedPart(p,cpos,cidx);
           item.partName=p.name; parts.push(p); return;
         }
         if(tess.kind==='3d'){
@@ -2763,13 +3077,14 @@ function assemble(hdr, fss, model, opts){
           if(!col){ // fall back to first face line attribute
             for(const f of tess.faces){ if(f.lineAttributes.length){ col=resolveColor(fs.globals,f.lineAttributes[0]-1); if(col) break; } } }
           const faceColors=tess.faces.map(f=>{ const cc=f.lineAttributes.length? resolveColor(fs.globals,f.lineAttributes[0]-1):null; return cc?cc.rgb:null; });
-          const p={name:uniq(label), positions:pos, faces:tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
+          const p={name:uniq(label), positions:T?null:mkPos(), faces:tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:ri.tessIndex, riType:ri.type, faceIndexPerTriangle:faceOf, numTessFaces:tess.faces.length,
             faceColors: faceColors.some(Boolean)? faceColors : null, matrix:isIdentity(RM)?null:RM};
+          if(T) typedPart(p,applyFlat(RM,c),packTris(tris,(c.length/3)|0));
           item.partName=p.name; parts.push(p);
         } else if(tess.kind==='wire'){
           const col=resolveColor(fs.globals,rst);
-          const w={name:uniq(label), positions:pos, polylines:wirePolylines(c,tess.wireIndexes), color:col?col.rgb:[0,0,0], visible, tessIndex:ri.tessIndex, riType:ri.type};
+          const w={name:uniq(label), positions:mkPos(), polylines:wirePolylines(c,tess.wireIndexes), color:col?col.rgb:[0,0,0], visible, tessIndex:ri.tessIndex, riType:ri.type};
           item.wireName=w.name; wires.push(w);
         }
       };
@@ -2789,6 +3104,7 @@ function assemble(hdr, fss, model, opts){
           const p={name:uniq(label), positions:m.positions.map(q=>apply(RM,q)), faces:m.tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:null, riType:ri.type, faceIndexPerTriangle:m.faceOf||null, numTessFaces:m.numFaces||0,
             faceColors:null, matrix:isIdentity(RM)?null:RM, source:'brep'};
+          if(opts.typed) typedPart(p,applyArr(p.positions),m._idx||(m._idx=packTris(m.tris,m.positions.length)));
           item.partName=p.name; parts.push(p); }
         const pl=m.edges&&m.edges.polylines; if(pl&&pl.length&&m.edges.positions){
           const w={name:uniq(label+' edges'), positions:m.edges.positions.map(q=>apply(RM,q)), polylines:pl, color:[0,0,0], visible, tessIndex:null, riType:ri.type, source:'brep'};
@@ -2815,13 +3131,13 @@ function assemble(hdr, fss, model, opts){
       raw: opts.raw? {header:hdr, fileStructures:fss, model} : undefined } };
 }
 
-return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema, makeSchemaVM, triangulate3d, wirePolylines, decodeTess3dCompressed, huffDecode, vertexNormal} };
+return { parsePRC, extractPRCFromPDF, extractPRCFromPDFAsync, parsePRCFromPDF, inflate, BitReader, _internal:{readSchema, makeSchemaVM, triangulate3d, wirePolylines, decodeTess3dCompressed, huffDecode, vertexNormal} };
 });
 
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.2.0
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.3.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -2838,7 +3154,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.3.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   const PALETTE = [
@@ -3653,6 +3969,31 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
     r.decodePath = tris ? 'U3D' : 'none';
     if (!tris) {
+      // Vendor mesh "RHAdobeMeshResource" (Adobe Acrobat SDK 8.1 U3D supplement; decoder by QA/Tester)
+      const RH = getModule('RHAdobeMesh', 'u3d-rhadobe-mesh.js');
+      if (RH) {
+        try {
+          const rr = RH.parseU3D(u8);
+          const rparts = (rr.parts || []).filter((q) => q.indices && q.indices.length);
+          if (rparts.length) {
+            r.parts = rparts.map((q) => {
+              const pos = Float64Array.from(q.positionsTyped), idx = Uint32Array.from(q.indices), nv = pos.length / 3, nt = idx.length / 3;
+              return {
+                name: q.name, meshName: q.meshName, materialName: 'RHAdobeMeshResource', analyticFeatures: [], pos, idx,
+                // legacy accessors (harness / older callers); built on demand only
+                get positions() { const a = new Array(nv); for (let i = 0; i < nv; i++) a[i] = [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]]; return a; },
+                get faces() { const a = new Array(nt); for (let t = 0; t < nt; t++) a[t] = [idx[3 * t], idx[3 * t + 1], idx[3 * t + 2]]; return a; },
+                set positions(v) { Object.defineProperty(this, 'positions', { value: v, writable: true, enumerable: true, configurable: true }); },
+                set faces(v) { Object.defineProperty(this, 'faces', { value: v, writable: true, enumerable: true, configurable: true }); }
+              };
+            });
+            r.decodePath = 'U3D/RHAdobeMeshResource';
+            for (const w of rr.warnings || []) r.warnings.push(w);
+            return r;
+          }
+          for (const w of rr.warnings || []) r.warnings.push(w);
+        } catch (e) { r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+      }
       const G = getModule('U3DGuard', 'u3d-guard.js');
       const sc = G ? G.scanU3D(u8) : { types: {}, newTypes: [] };
       const meshDecl = ['ffffff31', 'ffffff36', 'ffffff37'].filter((t) => sc.types[t]);
@@ -4253,7 +4594,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
   // -------------------------------------------------------------------------
   // 4. ISO 14739-1 (PRC) Binary Stream Decoder
   // -------------------------------------------------------------------------
-  // Companion decoders are separate <script> files (prc-brep.js, prc-decoder.js, pdf-extract.js, ...);
+  // Companion decoders are separate <\script> files (prc-brep.js, prc-decoder.js, pdf-extract.js, ...);
   // in Node (tests) they are require()d from the app directory.
   function getModule(globalName, file) {
     const g = (typeof window !== 'undefined' && window[globalName]) || (typeof globalThis !== 'undefined' && globalThis[globalName]);
@@ -4276,7 +4617,8 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     } catch (_) { return null; }
   }
 
-  async function parsePRCStream(u8) {
+  async function parsePRCStream(u8, opts) {
+    const typed = !!(opts && opts.typed);
     const magic = asciiSlice(u8, 0, 3);
     if (magic !== 'PRC') {
       throw new Error('Invalid PRC header signature');
@@ -4298,9 +4640,10 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
         parts
       };
     }
+    const scaleFlat = (a, k) => { for (let i = 0; i < a.length; i++) a[i] = a[i] * k; return a; }; // typed pos is per-instance, scale in place
     const D = getModule('PRCDecoder', 'prc-decoder.js');
     if (!D) throw new Error('PRC decoder (prc-decoder.js) is not loaded');
-    const popts = { warnings: [] };
+    const popts = { warnings: [], typed };
     const r = D.parsePRC(u8, popts);
     const warnings = (r.warnings || popts.warnings || []).slice();
     const mm = r.units && r.units.unitsInMM > 0 ? r.units.unitsInMM : 1;
@@ -4308,10 +4651,12 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const parts = r.parts.filter((p) => p.faces && p.faces.length).map((p, idx) => ({
       name: p.name || `PRC_Body_${idx + 1}`, meshName: `${p.name || 'PRC_Body_' + (idx + 1)}_Mesh`, materialName: 'PRC_Style',
       color: p.color || PALETTE[idx % PALETTE.length], opacity: p.opacity, visible: p.visible !== false,
-      positions: mm === 1 ? p.positions : p.positions.map(toMM),
+      positions: p.pos ? null : mm === 1 ? p.positions : p.positions.map(toMM),
+      pos: p.pos ? (mm === 1 ? p.pos : scaleFlat(p.pos, mm)) : undefined, idx: p.idx,
       faces: p.faces, analyticFeatures: p.analyticFeatures || [], faceIndexPerTriangle: p.faceIndexPerTriangle,
       numTessFaces: p.numTessFaces, source: p.source || 'tess'
     }));
+    r.parts.length = 0; // let the decoder's per-part arrays go as soon as possible
     const wires = (r.wires || []).map((w, i) => ({
       name: w.name || `PRC_Wire_${i + 1}`, color: w.color, visible: w.visible !== false,
       positions: mm === 1 ? w.positions : w.positions.map(toMM), polylines: w.polylines || []
@@ -4338,42 +4683,75 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
   // -------------------------------------------------------------------------
   // 5. Coplanar B-Rep Face Merger & Analytic Feature / Hole Loop Reconstructor
   // -------------------------------------------------------------------------
-  function computePartBRep(part) {
+  // Input normalisation: every part ends up with flat typed geometry
+  //   part.pos : Float64Array(3*nVerts)   part.idx : Uint32Array(3*nTris), 0xFFFFFFFF = invalid index
+  // (the PRC decoder emits this directly with {typed:true}; U3D / sample parts are packed here).
+  const BAD_INDEX = 0xFFFFFFFF;
+  function packPartInput(part) {
+    if (part.pos && part.idx) return;
+    const P = part.positions || [], F = part.faces || [];
+    const nv = P.length;
+    const pos = new Float64Array(nv * 3);
+    for (let i = 0; i < nv; i++) { const q = P[i]; pos[3 * i] = q[0]; pos[3 * i + 1] = q[1]; pos[3 * i + 2] = q[2]; }
+    const idx = new Uint32Array(F.length * 3);
+    for (let f = 0; f < F.length; f++) {
+      const t = F[f];
+      for (let k = 0; k < 3; k++) { const v = t ? t[k] : undefined; idx[3 * f + k] = Number.isInteger(v) && v >= 0 && v < nv ? v : BAD_INDEX; }
+    }
+    part.pos = pos; part.idx = idx;
+  }
+
+  // Unit triangle normal exactly as the B-Rep builder computes it (shared by every exporter).
+  // Returns the doubled area (0 => degenerate) and writes the normal into out.
+  function triNormalInto(vx, a, b, c, out) {
+    const a3 = 3 * a, b3 = 3 * b, c3 = 3 * c;
+    const ux = vx[b3] - vx[a3], uy = vx[b3 + 1] - vx[a3 + 1], uz = vx[b3 + 2] - vx[a3 + 2];
+    const wx = vx[c3] - vx[a3], wy = vx[c3 + 1] - vx[a3 + 1], wz = vx[c3 + 2] - vx[a3 + 2];
+    let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    const area2 = Math.hypot(nx, ny, nz);
+    out[0] = nx / area2; out[1] = ny / area2; out[2] = nz / area2;
+    return area2;
+  }
+
+  // Full (transient) B-Rep of one part: welded verts, triangle records, coplanar merged faces with
+  // boundary loops, feature edges and the manifold check. Exporters expand one part at a time and
+  // drop the result, so peak memory is bounded by the largest part rather than the assembly.
+  function computeFullBRep(pos, idx, analyticFeatures, withFeatures) {
     // 1. Weld coincident vertices within 1e-4 source units so topological half-edges match
+    const nIn = (pos.length / 3) | 0;
     const weldMap = new Map();
     const weldedVerts = [];
-    const vertRemap = new Int32Array(part.positions.length);
-
-    for (let i = 0; i < part.positions.length; i++) {
-      const [x, y, z] = part.positions[i];
+    const vertRemap = new Int32Array(nIn);
+    for (let i = 0; i < nIn; i++) {
+      const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2];
       const key = `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`;
       let wIdx = weldMap.get(key);
       if (wIdx === undefined) {
         wIdx = weldedVerts.length;
-        weldedVerts.push([Number(x), Number(y), Number(z)]);
+        weldedVerts.push([x, y, z]);
         weldMap.set(key, wIdx);
       }
       vertRemap[i] = wIdx;
     }
+    weldMap.clear();
+    const NV = Math.max(1, weldedVerts.length);
 
     // 2. Build non-degenerate welded triangles & per-triangle normals
     const tris = [];
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-
     for (const [x, y, z] of weldedVerts) {
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     }
-
-    for (let f = 0; f < part.faces.length; f++) {
-      const [i0, i1, i2] = part.faces[f];
-      if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
+    const nF = (idx.length / 3) | 0;
+    for (let f = 0; f < nF; f++) {
+      const i0 = idx[3 * f], i1 = idx[3 * f + 1], i2 = idx[3 * f + 2];
+      if (i0 >= nIn || i1 >= nIn || i2 >= nIn) continue;
       const a = vertRemap[i0], b = vertRemap[i1], c = vertRemap[i2];
       if (a === b || b === c || c === a) continue;
       const p0 = weldedVerts[a], p1 = weldedVerts[b], p2 = weldedVerts[c];
-      if (!p0 || !p1 || !p2) continue;
       const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
       const vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
       let nx = uy * vz - uz * vy;
@@ -4387,27 +4765,28 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     }
 
     // 3. Group triangles into connected coplanar faces & check 2-manifold watertightness
+    //    (numeric edge keys: undirected min*NV+max, directed u*NV+v; Map order == insertion order)
     const edgeToTris = new Map();
     const directedHalfEdges = new Map();
-    const undirectedKey = (u, v) => (u < v ? `${u}_${v}` : `${v}_${u}`);
-    tris.forEach((t, tIdx) => {
-      const [a, b, c] = t.verts;
-      for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+    const undirectedKey = (u, v) => (u < v ? u * NV + v : v * NV + u);
+    for (let tIdx = 0; tIdx < tris.length; tIdx++) {
+      const [a, b, c] = tris[tIdx].verts;
+      for (let e = 0; e < 3; e++) {
+        const u = e === 0 ? a : e === 1 ? b : c, v = e === 0 ? b : e === 1 ? c : a;
         const k = undirectedKey(u, v);
-        if (!edgeToTris.has(k)) edgeToTris.set(k, []);
-        edgeToTris.get(k).push(tIdx);
-        const dk = `${u}->${v}`;
+        const l = edgeToTris.get(k);
+        if (l) l.push(tIdx); else edgeToTris.set(k, [tIdx]);
+        const dk = u * NV + v;
         directedHalfEdges.set(dk, (directedHalfEdges.get(dk) || 0) + 1);
       }
-    });
+    }
 
-    // Strict 2-manifold watertight check: every undirected edge must have 1 u->v and 1 v->u half-edge
     let unmatchedHalfEdges = 0;
     const featureEdges = [];
-    for (const [k, list] of edgeToTris.entries()) {
-      const [u, v] = k.split('_').map(Number);
-      const fwdCount = directedHalfEdges.get(`${u}->${v}`) || 0;
-      const revCount = directedHalfEdges.get(`${v}->${u}`) || 0;
+    for (const [k, list] of edgeToTris) {
+      const u = Math.floor(k / NV), v = k - u * NV;
+      const fwdCount = directedHalfEdges.get(u * NV + v) || 0;
+      const revCount = directedHalfEdges.get(v * NV + u) || 0;
       if (list.length !== 2 || fwdCount !== 1 || revCount !== 1) {
         unmatchedHalfEdges += Math.max(1, Math.abs(2 - list.length));
       }
@@ -4417,17 +4796,18 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
         const n0 = tris[list[0]].normal;
         const n1 = tris[list[1]].normal;
         const dot = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
-        if (dot < 0.96) {
-          featureEdges.push([u, v]);
-        }
+        if (dot < 0.96) featureEdges.push([u, v]);
       }
     }
+    directedHalfEdges.clear();
 
-    // First pass: flood-fill coplanar triangle clusters & collect raw boundary loops
+    // First pass: flood-fill coplanar triangle clusters & collect raw boundary half-edges
     const visited = new Uint8Array(tris.length);
     const rawClusters = [];
-    const vertexClusterSet = new Map(); // vIdx -> Set of cluster indices touching vIdx on boundary
-
+    // number of distinct clusters touching each vertex on their boundary (clusters are built one
+    // after another, so "last cluster seen" is enough to count distinct ones)
+    const vClusterCount = new Int32Array(NV);
+    const vLastCluster = new Int32Array(NV).fill(-1);
     for (let i = 0; i < tris.length; i++) {
       if (visited[i]) continue;
       visited[i] = 1;
@@ -4435,19 +4815,18 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       const pSeed = weldedVerts[seed.verts[0]];
       const cluster = [i];
       const queue = [i];
-
       while (queue.length > 0) {
         const curr = queue.pop();
         const [a, b, c] = tris[curr].verts;
-        for (const [u, v] of [[a, b], [b, c], [c, a]]) {
-          const neighbors = edgeToTris.get(undirectedKey(u, v)) || [];
-          if (neighbors.length !== 2) continue; // Do not merge across non-manifold edges
+        for (let e = 0; e < 3; e++) {
+          const u = e === 0 ? a : e === 1 ? b : c, v = e === 0 ? b : e === 1 ? c : a;
+          const neighbors = edgeToTris.get(undirectedKey(u, v));
+          if (!neighbors || neighbors.length !== 2) continue; // Do not merge across non-manifold edges
           for (const nb of neighbors) {
             if (visited[nb]) continue;
             const n = tris[nb].normal;
             const dot = seed.normal[0] * n[0] + seed.normal[1] * n[1] + seed.normal[2] * n[2];
             if (dot > 0.9999) {
-              // Ensure all 3 vertices of candidate triangle lie within 1e-4 of seed plane
               let maxDist = 0;
               for (const vIdx of tris[nb].verts) {
                 const pv = weldedVerts[vIdx];
@@ -4468,41 +4847,48 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
         }
       }
 
-      const halfEdgeSet = new Set();
-      const halfEdges = [];
-      for (const tIdx of cluster) {
-        const [a, b, c] = tris[tIdx].verts;
-        halfEdgeSet.add(`${a}->${b}`);
-        halfEdgeSet.add(`${b}->${c}`);
-        halfEdgeSet.add(`${c}->${a}`);
-        halfEdges.push([a, b], [b, c], [c, a]);
+      let boundaryHalfEdges;
+      if (cluster.length === 1) {
+        const [a, b, c] = seed.verts;
+        boundaryHalfEdges = [a, b, b, c, c, a];
+      } else {
+        const halfEdgeSet = new Set();
+        for (const tIdx of cluster) {
+          const [a, b, c] = tris[tIdx].verts;
+          halfEdgeSet.add(a * NV + b); halfEdgeSet.add(b * NV + c); halfEdgeSet.add(c * NV + a);
+        }
+        boundaryHalfEdges = [];
+        for (const tIdx of cluster) {
+          const [a, b, c] = tris[tIdx].verts;
+          if (!halfEdgeSet.has(b * NV + a)) boundaryHalfEdges.push(a, b);
+          if (!halfEdgeSet.has(c * NV + b)) boundaryHalfEdges.push(b, c);
+          if (!halfEdgeSet.has(a * NV + c)) boundaryHalfEdges.push(c, a);
+        }
       }
-
-      const boundaryHalfEdges = halfEdges.filter(([u, v]) => !halfEdgeSet.has(`${v}->${u}`));
       const cIdx = rawClusters.length;
-      for (const [u, v] of boundaryHalfEdges) {
-        if (!vertexClusterSet.has(u)) vertexClusterSet.set(u, new Set());
-        if (!vertexClusterSet.has(v)) vertexClusterSet.set(v, new Set());
-        vertexClusterSet.get(u).add(cIdx);
-        vertexClusterSet.get(v).add(cIdx);
+      for (let h = 0; h < boundaryHalfEdges.length; h++) {
+        const w = boundaryHalfEdges[h];
+        if (vLastCluster[w] !== cIdx) { vLastCluster[w] = cIdx; vClusterCount[w]++; }
       }
       rawClusters.push({ seed, cluster, boundaryHalfEdges });
     }
+    edgeToTris.clear();
 
     // Second pass: chain boundary half-edges into closed loops & simplify only degree-2 collinear vertices
     const mergedFaces = [];
     for (let cIdx = 0; cIdx < rawClusters.length; cIdx++) {
-      const { seed, cluster, boundaryHalfEdges } = rawClusters[cIdx];
+      const { seed, cluster, boundaryHalfEdges: bh } = rawClusters[cIdx];
+      rawClusters[cIdx] = null;
       const nextMap = new Map();
-      for (const [u, v] of boundaryHalfEdges) {
-        if (!nextMap.has(u)) nextMap.set(u, []);
-        nextMap.get(u).push(v);
+      for (let h = 0; h < bh.length; h += 2) {
+        const l = nextMap.get(bh[h]);
+        if (l) l.push(bh[h + 1]); else nextMap.set(bh[h], [bh[h + 1]]);
       }
-
       const loops = [];
       const usedHE = new Set();
-      for (const [startU, startV] of boundaryHalfEdges) {
-        const heKey = `${startU}->${startV}`;
+      for (let h = 0; h < bh.length; h += 2) {
+        const startU = bh[h], startV = bh[h + 1];
+        const heKey = startU * NV + startV;
         if (usedHE.has(heKey)) continue;
         const loop = [startU];
         usedHE.add(heKey);
@@ -4513,23 +4899,18 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
           const candidates = nextMap.get(curr) || [];
           let chosen = -1;
           for (const cand of candidates) {
-            if (!usedHE.has(`${curr}->${cand}`)) {
-              chosen = cand;
-              break;
-            }
+            if (!usedHE.has(curr * NV + cand)) { chosen = cand; break; }
           }
           if (chosen === -1) break;
-          usedHE.add(`${curr}->${chosen}`);
+          usedHE.add(curr * NV + chosen);
           curr = chosen;
         }
         if (loop.length >= 3) {
           // Only simplify collinear vertex vCurr if at most 2 coplanar clusters meet at vCurr
-          // (preventing T-junction edge mismatches with perpendicular faces!)
           const simplified = [];
           for (let k = 0; k < loop.length; k++) {
             const vCurr = loop[k];
-            const incidentClusters = vertexClusterSet.get(vCurr);
-            if (!incidentClusters || incidentClusters.size <= 2) {
+            if (vClusterCount[vCurr] <= 2) {
               const pPrev = weldedVerts[loop[(k - 1 + loop.length) % loop.length]];
               const pCurr = weldedVerts[vCurr];
               const pNext = weldedVerts[loop[(k + 1) % loop.length]];
@@ -4548,10 +4929,8 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
           loops.push(simplified.length >= 3 ? simplified : loop);
         }
       }
-
       // Sort loops by 3D polygon perimeter descending so loops[0] is Outer loop and loops[1..] are Inner hole loops
-      loops.sort((la, lb) => polygonPerimeter(lb, weldedVerts) - polygonPerimeter(la, weldedVerts));
-
+      if (loops.length > 1) loops.sort((la, lb) => polygonPerimeter(lb, weldedVerts) - polygonPerimeter(la, weldedVerts));
       mergedFaces.push({
         normal: seed.normal,
         planeD: seed.planeD,
@@ -4561,11 +4940,11 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     }
 
     // 4. Detect Cylindrical Bores/Bosses & Planar Datums if not already supplied by PRC
-    const detectedFeatures = part.analyticFeatures && part.analyticFeatures.length > 0
-      ? [...part.analyticFeatures]
+    const detectedFeatures = !withFeatures ? null
+      : analyticFeatures && analyticFeatures.length > 0 ? [...analyticFeatures]
       : detectAnalyticFeatures(weldedVerts, mergedFaces);
 
-    part.brep = {
+    return {
       weldedVerts,
       tris,
       mergedFaces,
@@ -4580,6 +4959,70 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       },
       detectedFeatures
     };
+  }
+
+  // Full B-Rep is kept in memory only for models up to this many triangles (fast path for normal
+  // models); above it, exporters re-expand each part from the compact arrays (welding is idempotent).
+  const FULL_CACHE_TRIS = (typeof globalThis !== 'undefined' && globalThis.PDF3D_FULL_CACHE_TRIS != null) ? globalThis.PDF3D_FULL_CACHE_TRIS : 300000;
+  let fullCacheEnabled = true;
+
+  // Compact B-Rep summary stored on part.brep (what the UI and the mesh exporters need):
+  //   vx Float64Array welded verts, tv Uint32Array kept triangles, triFace Int32Array merged-face id,
+  //   fev Uint32Array feature edge pairs, plus counts. weldedVerts/tris/mergedFaces/featureEdges are
+  //   {length} stubs for count-only consumers. The part's raw input is replaced by the welded arrays.
+  function computePartBRep(part) {
+    if (part.brep && part.brep.compact) return part.brep;
+    packPartInput(part);
+    const nInTris = (part.idx.length / 3) | 0;
+    const full = computeFullBRep(part.pos, part.idx, part.analyticFeatures, true);
+    const wv = full.weldedVerts, T = full.tris, MF = full.mergedFaces, FE = full.featureEdges;
+    const nv = wv.length, nt = T.length;
+    const vx = new Float64Array(nv * 3);
+    for (let i = 0; i < nv; i++) { const q = wv[i]; vx[3 * i] = q[0]; vx[3 * i + 1] = q[1]; vx[3 * i + 2] = q[2]; }
+    const tv = new Uint32Array(nt * 3);
+    for (let i = 0; i < nt; i++) { const v = T[i].verts; tv[3 * i] = v[0]; tv[3 * i + 1] = v[1]; tv[3 * i + 2] = v[2]; }
+    const triFace = new Int32Array(nt);
+    let holeCount = 0;
+    for (let f = 0; f < MF.length; f++) {
+      const mf = MF[f];
+      for (const t of mf.tris) triFace[t] = f;
+      if (mf.loops.length > 1) holeCount += mf.loops.length - 1;
+    }
+    const fev = new Uint32Array(FE.length * 2);
+    for (let i = 0; i < FE.length; i++) { fev[2 * i] = FE[i][0]; fev[2 * i + 1] = FE[i][1]; }
+    const brep = {
+      compact: true, nv, nt, vx, tv, triFace, fev,
+      faceCount: MF.length, holeCount,
+      weldedVerts: { length: nv }, tris: { length: nt }, mergedFaces: { length: MF.length }, featureEdges: { length: FE.length },
+      unmatchedHalfEdges: full.unmatchedHalfEdges, isWatertight: full.isWatertight,
+      bbox: full.bbox, detectedFeatures: full.detectedFeatures,
+      _full: null
+    };
+    if (fullCacheEnabled) { full.detectedFeatures = null; brep._full = full; }
+    // Replace raw input with the welded compact data (re-welding it reproduces the same B-Rep).
+    part.pos = vx; part.idx = tv;
+    part.positions = null; part.faces = { length: nInTris };
+    part.triCount = nInTris;
+    part.faceIndexPerTriangle = null;
+    part.brep = brep;
+    return brep;
+  }
+
+  // Compact a list of parts in place; caches the full B-Rep only for small models.
+  function compactParts(parts) {
+    let total = 0;
+    for (const p of parts) total += p.idx ? p.idx.length / 3 : (p.faces ? p.faces.length : 0);
+    const prev = fullCacheEnabled;
+    fullCacheEnabled = total <= FULL_CACHE_TRIS;
+    try { for (const p of parts) computePartBRep(p); } finally { fullCacheEnabled = prev; }
+    return total;
+  }
+
+  // Full B-Rep for one part (cached for small models, else rebuilt from the compact arrays).
+  function getFullBRep(part) {
+    const b = computePartBRep(part);
+    if (b._full) return b._full;
+    return computeFullBRep(b.vx, b.tv, null, false);
   }
 
   function polygonPerimeter(loop, verts) {
@@ -4690,8 +5133,73 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     return Number(v.toPrecision(16)).toString();
   }
 
+  // -------------------------------------------------------------------------
+  // Streaming text output. Exporters push lines into a TextSink which flushes them into ~8 Mi-char
+  // line-aligned chunks (or Blob parts in the browser), so no exporter ever holds a giant lines[] array.
+  // result() == lines.join('\n') exactly: a single string below TEXT_SINGLE_LIMIT, else a chunk array.
+  // -------------------------------------------------------------------------
+  const SINK_FLUSH = 1 << 23;
+  class TextSink {
+    constructor(blob) { this.buf = []; this.bufLen = 0; this.chunks = []; this.total = 0; this.blob = !!blob && typeof Blob !== 'undefined'; this.lines = 0; }
+    push(line) {
+      this.buf.push(line); this.bufLen += line.length + 1; this.lines++;
+      if (this.bufLen >= SINK_FLUSH) this._flush(true);
+    }
+    // keepLast: retain the last line so result() can omit the final '\n' without touching chunks
+    _flush(keepLast) {
+      const n = keepLast ? this.buf.length - 1 : this.buf.length;
+      if (n <= 0) return;
+      const part = this.buf.slice(0, n);
+      const s = part.join('\n') + '\n';
+      this.buf = keepLast ? [this.buf[this.buf.length - 1]] : [];
+      this.bufLen = keepLast ? this.buf[0].length + 1 : 0;
+      this.total += s.length;
+      this.chunks.push(this.blob ? new Blob([s]) : s);
+    }
+    // Move all lines of another sink (each followed by '\n') to the end of this one.
+    append(other) {
+      if (!other.lines) return;
+      this._flush(false); other._flush(false);
+      for (const c of other.chunks) this.chunks.push(c);
+      this.total += other.total; this.lines += other.lines;
+      other.chunks = []; other.total = 0; other.lines = 0;
+    }
+    result() {
+      const last = this.buf.join('\n');
+      this.buf = []; this.bufLen = 0;
+      const total = this.total + last.length;
+      const chunks = this.chunks; this.chunks = []; this.total = 0;
+      if (this.blob) { chunks.push(last); return chunks; }
+      if (total < TEXT_SINGLE_LIMIT) { chunks.push(last); return chunks.length === 1 ? chunks[0] : chunks.join(''); }
+      if (last.length) chunks.push(last);
+      else if (chunks.length) chunks[chunks.length - 1] = chunks[chunks.length - 1].slice(0, -1);
+      return chunks;
+    }
+  }
+  // Doubly linked record chain (XT EDGE/VERTEX/PLANE/LINE/POINT): holds one pending record until its
+  // successor is known. fmt(prev, next) renders the line.
+  class ChainSink {
+    constructor(blob) { this.sink = new TextSink(blob); this.pendIdx = 0; this.pendPrev = 0; this.pendFmt = null; this.first = 0; this.count = 0; }
+    push(idx, fmt) {
+      let prev = 0;
+      if (this.pendFmt) { this.sink.push(this.pendFmt(this.pendPrev, idx)); prev = this.pendIdx; }
+      else this.first = idx;
+      this.pendIdx = idx; this.pendPrev = prev; this.pendFmt = fmt; this.count++;
+    }
+    end() { if (this.pendFmt) { this.sink.push(this.pendFmt(this.pendPrev, 0)); this.pendFmt = null; } return this.sink; }
+  }
+
+  // Parts to export: visible ones, optionally replaced by a reduced-detail copy (state.exportDetail < 1).
+  function exportPartList(parts, options) {
+    const detail = options && options.detail != null ? options.detail : (state.exportDetail || 1);
+    const vis = parts.filter((p) => p.visible);
+    for (const p of vis) computePartBRep(p);
+    if (!(detail > 0 && detail < 1)) return vis;
+    return vis.map((p) => decimatedPart(p, detail));
+  }
+
   function buildParasolidXT(parts, options = {}) {
-    const visibleParts = parts.filter((p) => p.visible);
+    const visibleParts = exportPartList(parts, options);
     const brepMode = options.brepMode || state.brepMode || 'merged';
     const useMerged = brepMode !== 'faceted';
     const forceSheet = brepMode === 'sheet-unsewn' || brepMode === 'faceted';
@@ -4723,35 +5231,29 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       '**END_OF_HEADER*****************************************************************',
       'T51 : TRANSMIT FILE created by modeller version 120000017 SCH_1200000_120060'
     ];
+    const out = new TextSink(options.blob);
+    for (const l of headerLines) out.push(l);
 
-    const bodyLines = [];
     let nextIdx = 1;
     const allocIdx = () => nextIdx++;
-
-    for (const p of visibleParts) {
-      if (!p.brep) computePartBRep(p);
-    }
 
     // Compute dynamic size box (res_size >= 1000) so large architectural models in ft/m never exceed size box
     let maxCoordAbsM = 1.0;
     for (const p of visibleParts) {
-      for (const [x, y, z] of p.brep.weldedVerts) {
-        const ax = Math.abs(x * scaleM), ay = Math.abs(y * scaleM), az = Math.abs(z * scaleM);
-        if (ax > maxCoordAbsM) maxCoordAbsM = ax;
-        if (ay > maxCoordAbsM) maxCoordAbsM = ay;
-        if (az > maxCoordAbsM) maxCoordAbsM = az;
+      const vx = p.brep.vx;
+      for (let i = 0; i < vx.length; i++) {
+        const a = Math.abs(vx[i] * scaleM);
+        if (a > maxCoordAbsM) maxCoordAbsM = a;
       }
     }
     const resSize = Math.max(1000, Math.ceil((maxCoordAbsM * 2.5) / 1000) * 1000);
 
     // Helper: check if a part's sourceFaces form a strict 2-manifold closed solid within Parasolid 1e-8 m plane tolerance
-    function getValidSolidFaces(part) {
+    function getValidSolidFaces(part, B) {
       if (forceSheet || !part.brep.isWatertight) return null;
-      const verts = part.brep.weldedVerts;
+      const verts = B.weldedVerts;
       const candidateFaces = [];
-
-      // If any merged face has vertices deviating by > 4e-9 m from its plane, decompose that face into exact triangles
-      const rawFaces = useMerged ? part.brep.mergedFaces : part.brep.tris.map((t) => ({ normal: t.normal, loops: [t.verts], tris: [] }));
+      const rawFaces = useMerged ? B.mergedFaces : B.tris.map((t) => ({ normal: t.normal, loops: [t.verts], tris: [] }));
       for (const mf of rawFaces) {
         const n = normalizeVec3(mf.normal);
         const p0 = verts[mf.loops[0][0]];
@@ -4771,13 +5273,13 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
           candidateFaces.push({ normal: n, loops: mf.loops });
         } else {
           for (const tIdx of mf.tris) {
-            const t = part.brep.tris[tIdx];
+            const t = B.tris[tIdx];
             candidateFaces.push({ normal: normalizeVec3(t.normal), loops: [t.verts] });
           }
         }
       }
-
       // Verify every undirected edge across candidateFaces has exactly 1 '+' fin and 1 '-' fin
+      const NV = Math.max(1, verts.length);
       const edgeCheck = new Map();
       for (const sf of candidateFaces) {
         for (const lp of sf.loops) {
@@ -4785,53 +5287,85 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
           for (let k = 0; k < lp.length; k++) {
             const u = lp[k], v = lp[(k + 1) % lp.length];
             if (u === v) return null;
-            const minV = Math.min(u, v), maxV = Math.max(u, v);
-            const key = `${minV}_${maxV}`;
-            let st = edgeCheck.get(key);
-            if (!st) {
-              st = { pos: 0, neg: 0 };
-              edgeCheck.set(key, st);
-            }
-            if (u === minV) st.pos++;
-            else st.neg++;
+            const key = u < v ? u * NV + v : v * NV + u;
+            const st = edgeCheck.get(key) || 0;
+            edgeCheck.set(key, st + (u < v ? 1 : 65536));
           }
         }
       }
       for (const st of edgeCheck.values()) {
-        if (st.pos !== 1 || st.neg !== 1) return null;
+        if (st !== 65537) return null;
       }
       return candidateFaces;
     }
 
-    // Emit one Parasolid 12 BODY record + all topological/geometric children
-    // bodyParts is an array of part objects to include in this BODY
-    function emitBodyRecord(bodyIdx, refInstanceIdx, bodyParts) {
+    // Emit one Parasolid 12 BODY record + all topological/geometric children, one part at a time.
+    // Returns false (nothing written) if solid mode was requested and a part is not a valid solid.
+    function emitBody(bodyIdx, refInstanceIdx, bodyParts, isSolidBody) {
       let nodeIdCounter = 1;
       const allocNodeId = () => nodeIdCounter++;
-
-      // Determine if all parts in this body can be emitted as closed 2-manifold solid lumps (body_type = 1)
-      const solidFaceLists = bodyParts.map((p) => getValidSolidFaces(p));
-      const isSolidBody = !forceSheet && solidFaceLists.every((fl) => fl !== null) && bodyParts.length > 0;
-
-      const vertexEntities = [];
-      const edgeEntities = [];
-      const faceEntities = [];
-      const loopEntities = [];
-      const finEntities = [];
-      const planeEntities = [];
+      const BL = options.blob;
+      const faceS = new TextSink(BL), loopS = new TextSink(BL), finS = new TextSink(BL);
+      const edgeC = new ChainSink(BL), vertC = new ChainSink(BL), planeC = new ChainSink(BL), lineC = new ChainSink(BL), pointC = new ChainSink(BL);
+      const shellC = new ChainSink(BL);
       const regionRecords = [];
       const shellRecords = [];
+      let vertexEntities, edgeEntities, faceEntities, loopEntities, finEntities, planeEntities;
+      const resetPart = () => { vertexEntities = []; edgeEntities = []; faceEntities = []; loopEntities = []; finEntities = []; planeEntities = []; };
+      const flushPart = () => {
+        for (const f of faceEntities) {
+          faceS.push(`14 ${f.fIdx} ${f.nodeIdF} 0 ? ${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} + 0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx}`);
+        }
+        for (const lp of loopEntities) loopS.push(`15 ${lp.lpIdx} ${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx}`);
+        for (const fn of finEntities) {
+          finS.push(`17 ${fn.fnIdx} 0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`);
+        }
+        for (const e of edgeEntities) {
+          const primaryFin = e.posFin ? e.posFin.fnIdx : (e.negFin ? e.negFin.fnIdx : 0);
+          const s0 = `16 ${e.eIdx} ${e.nodeIdE} 0 ? ${primaryFin} `, s1 = ` ${e.lIdx} 0 0 ${bodyIdx}`;
+          edgeC.push(e.eIdx, (prevE, nextE) => s0 + prevE + ' ' + nextE + s1);
+        }
+        for (const v of vertexEntities) {
+          const s0 = `18 ${v.vIdx} ${v.nodeIdV} 0 ${v.firstFinIdx} `, s1 = ` ${v.pIdx} ? ${bodyIdx}`;
+          vertC.push(v.vIdx, (prevV, nextV) => s0 + prevV + ' ' + nextV + s1);
+        }
+        for (const s of planeEntities) {
+          const [px, py, pz] = s.pOrig;
+          const [nx, ny, nz] = s.normal;
+          const [ux, uy, uz] = s.uAxis;
+          const s0 = `50 ${s.surfIdx} ${s.nodeIdS} 0 ${s.fIdx} `;
+          const s1 = ` 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(nx)} ${fmtNum(ny)} ${fmtNum(nz)} ${fmtNum(ux)} ${fmtNum(uy)} ${fmtNum(uz)}`;
+          planeC.push(s.surfIdx, (prevS, nextS) => s0 + nextS + ' ' + prevS + s1);
+        }
+        for (const e of edgeEntities) {
+          const [px, py, pz] = e.originM;
+          const [dx, dy, dz] = e.dir;
+          const s0 = `30 ${e.lIdx} ${e.nodeIdL} 0 ${e.eIdx} `;
+          const s1 = ` 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(dx)} ${fmtNum(dy)} ${fmtNum(dz)}`;
+          lineC.push(e.lIdx, (prevL, nextL) => s0 + nextL + ' ' + prevL + s1);
+        }
+        for (const v of vertexEntities) {
+          const [x, y, z] = v.xyzM;
+          const s0 = `29 ${v.pIdx} ${v.nodeIdP} 0 ${v.vIdx} `, s1 = ` ${fmtNum(x)} ${fmtNum(y)} ${fmtNum(z)}`;
+          pointC.push(v.pIdx, (prevP, nextP) => s0 + nextP + ' ' + prevP + s1);
+        }
+        resetPart();
+      };
+      resetPart();
 
       const regVoidIdx = allocIdx();
       const regVoidNodeId = allocNodeId();
+      let bodyShellPtr = 0;
 
       if (isSolidBody) {
         // Closed 2-Manifold Solid Body (body_type = 1) with K >= 1 disjoint solid lumps
         const lumpInfos = [];
         for (let pPos = 0; pPos < bodyParts.length; pPos++) {
           const part = bodyParts[pPos];
-          const verts = part.brep.weldedVerts;
-          const sourceFaces = solidFaceLists[pPos];
+          const B = getFullBRep(part);
+          const sourceFaces = getValidSolidFaces(part, B);
+          if (!sourceFaces) return false;
+          const verts = B.weldedVerts;
 
           const regSolidIdx = allocIdx();
           const regSolidNodeId = allocNodeId();
@@ -4860,10 +5394,11 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
             return vEnt;
           };
 
+          const NV = Math.max(1, verts.length);
           const localEdgeMap = new Map();
           const getOrCreateEdge = (uRaw, vRaw) => {
             const minRaw = Math.min(uRaw, vRaw), maxRaw = Math.max(uRaw, vRaw);
-            const key = `${minRaw}_${maxRaw}`;
+            const key = minRaw * NV + maxRaw;
             let e = localEdgeMap.get(key);
             if (!e) {
               const vMinEnt = getOrCreateVert(minRaw);
@@ -4878,8 +5413,6 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
                 nodeIdL: allocNodeId(),
                 uRaw: minRaw,
                 vRaw: maxRaw,
-                vMinEnt,
-                vMaxEnt,
                 originM: p0,
                 dir,
                 posFin: null,
@@ -4943,13 +5476,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
                 vx.firstFinIdx = loopFins[k].fnIdx;
               }
 
-              const lpObj = {
-                lpIdx,
-                nodeIdLp,
-                firstFinIdx: loopFins[0].fnIdx,
-                fIdx,
-                nextLoopIdx: 0
-              };
+              const lpObj = { lpIdx, nodeIdLp, firstFinIdx: loopFins[0].fnIdx, fIdx, nextLoopIdx: 0 };
               faceLoops.push(lpObj);
               loopEntities.push(lpObj);
             }
@@ -4970,15 +5497,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
             };
             lumpFaces.push(fObj);
             faceEntities.push(fObj);
-
-            planeEntities.push({
-              surfIdx,
-              nodeIdS,
-              fIdx,
-              pOrig,
-              normal,
-              uAxis
-            });
+            planeEntities.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
           }
 
           for (let i = 0; i < lumpFaces.length; i++) {
@@ -4995,14 +5514,15 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
             shellSolidNodeId,
             firstFaceIdx: lumpFaces.length > 0 ? lumpFaces[0].fIdx : 0
           });
-        }
 
-        // Link 2-fin rings on all edges
-        for (const e of edgeEntities) {
-          if (e.posFin && e.negFin) {
-            e.posFin.otherFin = e.negFin.fnIdx;
-            e.negFin.otherFin = e.posFin.fnIdx;
+          // Link 2-fin rings on this lump's edges (edges never span parts)
+          for (const e of edgeEntities) {
+            if (e.posFin && e.negFin) {
+              e.posFin.otherFin = e.negFin.fnIdx;
+              e.negFin.otherFin = e.posFin.fnIdx;
+            }
           }
+          flushPart();
         }
 
         // Build Void Region + Solid Regions and Void Shells + Solid Shells
@@ -5020,17 +5540,17 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
           shellRecords.push(`13 ${L.shellVoidIdx} ${L.shellVoidNodeId} 0 0 ${nextVoidSh} 0 0 0 ${regVoidIdx} ${L.firstFaceIdx}`);
           shellRecords.push(`13 ${L.shellSolidIdx} ${L.shellSolidNodeId} 0 ${bodyIdx} 0 ${L.firstFaceIdx} 0 0 ${L.regSolidIdx} 0`);
         }
+        bodyShellPtr = lumpInfos.length >= 1 ? lumpInfos[0].shellSolidIdx : 0;
       } else {
         // Open / Architectural Sheet Body (body_type = 3)
         // Each merged planar B-Rep face (with outer + hole loops) is emitted as a connected 13 SHELL
         // in regVoidIdx with exact plane-projected loop vertices and a [posFin (+), dummy negFin (-)] pair per edge.
-        const sheetShells = [];
-
         for (const part of bodyParts) {
-          const verts = part.brep.weldedVerts;
+          const B = getFullBRep(part);
+          const verts = B.weldedVerts;
           const sourceFaces = useMerged
-            ? part.brep.mergedFaces.map((mf) => ({ normal: mf.normal, loops: mf.loops }))
-            : part.brep.tris.map((t) => ({ normal: t.normal, loops: [t.verts] }));
+            ? B.mergedFaces.map((mf) => ({ normal: mf.normal, loops: mf.loops }))
+            : B.tris.map((t) => ({ normal: t.normal, loops: [t.verts] }));
 
           for (const sf of sourceFaces) {
             const validLoops = sf.loops.filter((lp) => lp && lp.length >= 3);
@@ -5088,8 +5608,6 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
                   lIdx: allocIdx(),
                   nodeIdE: allocNodeId(),
                   nodeIdL: allocNodeId(),
-                  vMinEnt: vStartEnt,
-                  vMaxEnt: vEndEnt,
                   originM: p0,
                   dir,
                   posFin: null,
@@ -5099,31 +5617,14 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
 
                 // Real '+' fin along loop edge (vStart -> vEnd, points to vEnd)
                 const posFin = {
-                  fnIdx: posFnIdx,
-                  lpIdx,
-                  fwdFin: 0,
-                  bwdFin: 0,
-                  fwdVxIdx: vEndEnt.vIdx,
-                  vxEntity: vEndEnt,
-                  nextAtVx: 0,
-                  otherFin: dummyNegFnIdx,
-                  edge,
-                  sense: '+'
+                  fnIdx: posFnIdx, lpIdx, fwdFin: 0, bwdFin: 0, fwdVxIdx: vEndEnt.vIdx, vxEntity: vEndEnt,
+                  nextAtVx: 0, otherFin: dummyNegFnIdx, edge, sense: '+'
                 };
-
                 // Dummy '-' fin on open boundary edge (vEnd -> vStart, points to vStart, loop/fwd/bwd = 0)
                 // Per Parasolid XT Spec 5.3.9.1 & 5.3.9.2, dummy fin provides the start vertex of the edge
                 const dummyNegFin = {
-                  fnIdx: dummyNegFnIdx,
-                  lpIdx: 0,
-                  fwdFin: 0,
-                  bwdFin: 0,
-                  fwdVxIdx: vStartEnt.vIdx,
-                  vxEntity: vStartEnt,
-                  nextAtVx: 0,
-                  otherFin: posFnIdx,
-                  edge,
-                  sense: '-'
+                  fnIdx: dummyNegFnIdx, lpIdx: 0, fwdFin: 0, bwdFin: 0, fwdVxIdx: vStartEnt.vIdx, vxEntity: vStartEnt,
+                  nextAtVx: 0, otherFin: posFnIdx, edge, sense: '-'
                 };
 
                 edge.posFin = posFin;
@@ -5144,13 +5645,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
                 vx.firstFinIdx = loopFins[k].fnIdx;
               }
 
-              const lpObj = {
-                lpIdx,
-                nodeIdLp,
-                firstFinIdx: loopFins[0].fnIdx,
-                fIdx,
-                nextLoopIdx: 0
-              };
+              const lpObj = { lpIdx, nodeIdLp, firstFinIdx: loopFins[0].fnIdx, fIdx, nextLoopIdx: 0 };
               faceLoops.push(lpObj);
               loopEntities.push(lpObj);
             }
@@ -5160,131 +5655,53 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
             }
 
             faceEntities.push({
-              fIdx,
-              nodeIdF,
-              firstLoopIdx: faceLoops[0].lpIdx,
-              backShellIdx: shIdx,
-              frontShellIdx: shIdx,
-              surfIdx,
-              nextF: 0,
-              prevF: 0
+              fIdx, nodeIdF, firstLoopIdx: faceLoops[0].lpIdx, backShellIdx: shIdx, frontShellIdx: shIdx, surfIdx, nextF: 0, prevF: 0
             });
+            planeEntities.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
 
-            planeEntities.push({
-              surfIdx,
-              nodeIdS,
-              fIdx,
-              pOrig,
-              normal,
-              uAxis
-            });
-
-            sheetShells.push({ shIdx, shNodeId, fIdx });
+            const sfIdx = fIdx;
+            shellC.push(shIdx, (prevSh, nextSh) => `13 ${shIdx} ${shNodeId} 0 ${bodyIdx} ${nextSh} ${sfIdx} 0 0 ${regVoidIdx} ${sfIdx}`);
           }
+          flushPart();
         }
 
-        const firstShellIdx = sheetShells.length > 0 ? sheetShells[0].shIdx : 0;
+        const firstShellIdx = shellC.count > 0 ? shellC.first : 0;
         regionRecords.push(`19 ${regVoidIdx} ${regVoidNodeId} 0 ${bodyIdx} 0 0 ${firstShellIdx} V`);
-        for (let i = 0; i < sheetShells.length; i++) {
-          const sh = sheetShells[i];
-          const nextSh = i + 1 < sheetShells.length ? sheetShells[i + 1].shIdx : 0;
-          shellRecords.push(`13 ${sh.shIdx} ${sh.shNodeId} 0 ${bodyIdx} ${nextSh} ${sh.fIdx} 0 0 ${regVoidIdx} ${sh.fIdx}`);
-        }
+        bodyShellPtr = firstShellIdx;
       }
 
       const highestNodeId = nodeIdCounter;
       const bodyTypeCode = isSolidBody ? 1 : 3;
-      const bodyShellPtr = isSolidBody
-        ? (shellRecords.length >= 2 ? Number(shellRecords[1].split(' ')[1]) : 0)
-        : (shellRecords.length >= 1 ? Number(shellRecords[0].split(' ')[1]) : 0);
-      const firstSurfIdx = planeEntities.length > 0 ? planeEntities[0].surfIdx : 0;
-      const firstCurveIdx = edgeEntities.length > 0 ? edgeEntities[0].lIdx : 0;
-      const firstPointIdx = vertexEntities.length > 0 ? vertexEntities[0].pIdx : 0;
-      const firstEdgeIdx = edgeEntities.length > 0 ? edgeEntities[0].eIdx : 0;
-      const firstVxIdx = vertexEntities.length > 0 ? vertexEntities[0].vIdx : 0;
+      const firstSurfIdx = planeC.count > 0 ? planeC.first : 0;
+      const firstCurveIdx = lineC.count > 0 ? lineC.first : 0;
+      const firstPointIdx = pointC.count > 0 ? pointC.first : 0;
+      const firstEdgeIdx = edgeC.count > 0 ? edgeC.first : 0;
+      const firstVxIdx = vertC.count > 0 ? vertC.first : 0;
 
       // 12 = BODY (standard top-level or instance-referenced body: next = 0, previous = 0)
-      bodyLines.push(
-        `12 ${bodyIdx} ${highestNodeId} 0 0 0 0 0 0 ${resSize} 1e-8 ${refInstanceIdx} 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx}`
-      );
+      out.push(`12 ${bodyIdx} ${highestNodeId} 0 0 0 0 0 0 ${resSize} 1e-8 ${refInstanceIdx} 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx}`);
+      for (const rLine of regionRecords) out.push(rLine);   // 19 = REGION
+      for (const sLine of shellRecords) out.push(sLine);    // 13 = SHELL (solid)
+      out.append(shellC.end());                            // 13 = SHELL (sheet)
+      out.append(faceS);                                   // 14 = FACE
+      out.append(loopS);                                   // 15 = LOOP
+      out.append(finS);                                    // 17 = FIN
+      out.append(edgeC.end());                             // 16 = EDGE chain
+      out.append(vertC.end());                             // 18 = VERTEX chain
+      out.append(planeC.end());                            // 50 = PLANE chain
+      out.append(lineC.end());                             // 30 = LINE chain
+      out.append(pointC.end());                            // 29 = POINT chain
+      return true;
+    }
 
-      // 19 = REGION records
-      for (const rLine of regionRecords) bodyLines.push(rLine);
-
-      // 13 = SHELL records
-      for (const sLine of shellRecords) bodyLines.push(sLine);
-
-      // 14 = FACE records (both back shell and front_shell populated per SCH_1200000_120060)
-      for (const f of faceEntities) {
-        bodyLines.push(
-          `14 ${f.fIdx} ${f.nodeIdF} 0 ? ${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} + 0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx}`
-        );
-      }
-
-      // 15 = LOOP records
-      for (const lp of loopEntities) {
-        bodyLines.push(`15 ${lp.lpIdx} ${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx}`);
-      }
-
-      // 17 = FIN records (including dummy fins for open sheet edges)
-      for (const fn of finEntities) {
-        bodyLines.push(
-          `17 ${fn.fnIdx} 0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`
-        );
-      }
-
-      // 16 = EDGE chain (primaryFin is always posFin so edge->halfedge->vertex = vEnd and other->vertex = vStart)
-      for (let i = 0; i < edgeEntities.length; i++) {
-        const e = edgeEntities[i];
-        const prevE = i > 0 ? edgeEntities[i - 1].eIdx : 0;
-        const nextE = i + 1 < edgeEntities.length ? edgeEntities[i + 1].eIdx : 0;
-        const primaryFin = e.posFin ? e.posFin.fnIdx : (e.negFin ? e.negFin.fnIdx : 0);
-        bodyLines.push(`16 ${e.eIdx} ${e.nodeIdE} 0 ? ${primaryFin} ${prevE} ${nextE} ${e.lIdx} 0 0 ${bodyIdx}`);
-      }
-
-      // 18 = VERTEX chain
-      for (let i = 0; i < vertexEntities.length; i++) {
-        const v = vertexEntities[i];
-        const prevV = i > 0 ? vertexEntities[i - 1].vIdx : 0;
-        const nextV = i + 1 < vertexEntities.length ? vertexEntities[i + 1].vIdx : 0;
-        bodyLines.push(`18 ${v.vIdx} ${v.nodeIdV} 0 ${v.firstFinIdx} ${prevV} ${nextV} ${v.pIdx} ? ${bodyIdx}`);
-      }
-
-      // 50 = PLANE surface chain (strictly 1-to-1 with 14 FACE entities; no orphan surfaces)
-      for (let i = 0; i < planeEntities.length; i++) {
-        const s = planeEntities[i];
-        const nextS = i + 1 < planeEntities.length ? planeEntities[i + 1].surfIdx : 0;
-        const prevS = i > 0 ? planeEntities[i - 1].surfIdx : 0;
-        const [px, py, pz] = s.pOrig;
-        const [nx, ny, nz] = s.normal;
-        const [ux, uy, uz] = s.uAxis;
-        bodyLines.push(
-          `50 ${s.surfIdx} ${s.nodeIdS} 0 ${s.fIdx} ${nextS} ${prevS} 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(nx)} ${fmtNum(ny)} ${fmtNum(nz)} ${fmtNum(ux)} ${fmtNum(uy)} ${fmtNum(uz)}`
-        );
-      }
-
-      // 30 = LINE curve chain
-      for (let i = 0; i < edgeEntities.length; i++) {
-        const e = edgeEntities[i];
-        const nextL = i + 1 < edgeEntities.length ? edgeEntities[i + 1].lIdx : 0;
-        const prevL = i > 0 ? edgeEntities[i - 1].lIdx : 0;
-        const [px, py, pz] = e.originM;
-        const [dx, dy, dz] = e.dir;
-        bodyLines.push(
-          `30 ${e.lIdx} ${e.nodeIdL} 0 ${e.eIdx} ${nextL} ${prevL} 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(dx)} ${fmtNum(dy)} ${fmtNum(dz)}`
-        );
-      }
-
-      // 29 = POINT chain
-      for (let i = 0; i < vertexEntities.length; i++) {
-        const v = vertexEntities[i];
-        const nextP = i + 1 < vertexEntities.length ? vertexEntities[i + 1].pIdx : 0;
-        const prevP = i > 0 ? vertexEntities[i - 1].pIdx : 0;
-        const [x, y, z] = v.xyzM;
-        bodyLines.push(
-          `29 ${v.pIdx} ${v.nodeIdP} 0 ${v.vIdx} ${nextP} ${prevP} ${fmtNum(x)} ${fmtNum(y)} ${fmtNum(z)}`
-        );
-      }
+    function emitBodyRecord(bodyIdx, refInstanceIdx, bodyParts) {
+      // Solid (body_type 1) only if every part is a valid closed 2-manifold; parts are expanded one at a
+      // time, so try solid first (fast reject on the cached watertight flag) and fall back to sheet.
+      const solidPossible = !forceSheet && bodyParts.length > 0 && bodyParts.every((p) => p.brep.isWatertight);
+      const saveIdx = nextIdx;
+      if (solidPossible && emitBody(bodyIdx, refInstanceIdx, bodyParts, true)) return;
+      nextIdx = saveIdx;
+      emitBody(bodyIdx, refInstanceIdx, bodyParts, false);
     }
 
     if (useAssemblyRoot) {
@@ -5292,16 +5709,12 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       const instIndices = visibleParts.map(() => allocIdx());
       const bodyIndices = visibleParts.map(() => allocIdx());
       const highestAsmNodeId = visibleParts.length + 1;
-      bodyLines.push(
-        `10 ${asmIdx} ${highestAsmNodeId} 0 0 0 0 0 0 0 ${resSize} 1e-8 0 0 0 1 0 1 ${instIndices[0]}`
-      );
+      out.push(`10 ${asmIdx} ${highestAsmNodeId} 0 0 0 0 0 0 0 ${resSize} 1e-8 0 0 0 1 0 1 ${instIndices[0]}`);
       for (let i = 0; i < visibleParts.length; i++) {
         const instIdx = instIndices[i];
         const nextInst = i + 1 < instIndices.length ? instIndices[i + 1] : 0;
         const prevInst = i > 0 ? instIndices[i - 1] : 0;
-        bodyLines.push(
-          `11 ${instIdx} ${i + 1} 0 ${asmIdx} ${bodyIndices[i]} 0 1 ${nextInst} ${prevInst} 0 0`
-        );
+        out.push(`11 ${instIdx} ${i + 1} 0 ${asmIdx} ${bodyIndices[i]} 0 1 ${nextInst} ${prevInst} 0 0`);
       }
       for (let i = 0; i < visibleParts.length; i++) {
         emitBodyRecord(bodyIndices[i], instIndices[i], [visibleParts[i]]);
@@ -5312,16 +5725,11 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     }
 
     // End of transmit file
-    bodyLines.push('1 0');
-    bodyLines.push('');
-
-    return joinLarge(headerLines.concat(bodyLines));
+    out.push('1 0');
+    out.push('');
+    return out.result();
   }
 
-  // -------------------------------------------------------------------------
-  // Large text output: V8 strings top out at ~2^29 chars, so exporters return a plain string for normal
-  // models and an array of line-aligned chunks (each <= 32 Mi chars) for huge ones. Concatenating the chunks
-  // gives exactly lines.join('\n'). triggerDownload() hands the chunks to Blob([...chunks]) directly.
   // -------------------------------------------------------------------------
   const TEXT_SINGLE_LIMIT = 1 << 27;
   const TEXT_CHUNK = 1 << 25;
@@ -5364,18 +5772,26 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
   // 7. STEP AP214 (ISO-10303-21 .stp) Solid & Open-Shell Surface B-Rep Exporter
   // -------------------------------------------------------------------------
   function buildSTEPAP214(parts, options = {}) {
-    const visibleParts = parts.filter((p) => p.visible);
+    const visibleParts = exportPartList(parts, options);
     const brepMode = options.brepMode || state.brepMode || 'merged';
     const useMerged = brepMode !== 'faceted';
     const forceSheet = brepMode === 'sheet-unsewn' || brepMode === 'faceted';
     const units = options.units || state.units || 'mm';
     const unitScale = getScaleFromMM(units);
 
+    const out = new TextSink(options.blob);
+    out.push('ISO-10303-21;');
+    out.push('HEADER;');
+    out.push("FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');");
+    out.push(`FILE_NAME('${(state.fileName || 'assembly').replace(/\.pdf$/i, '')}.stp','2026-10-23T12:00:00',('Steven Moran'),('CAD Engineering Workbench'),'3D PDF Geometry Extractor','1.0','');`);
+    out.push("FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));");
+    out.push('ENDSEC;');
+    out.push('DATA;');
+
     let id = 1;
-    const entities = [];
     const add = (expr) => {
       const curr = id++;
-      entities.push(`#${curr} = ${expr};`);
+      out.push(`#${curr} = ${expr};`);
       return curr;
     };
 
@@ -5413,10 +5829,9 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     let hasOpenShell = false;
 
     for (const part of visibleParts) {
-      if (!part.brep) computePartBRep(part);
-      const brep = part.brep;
+      const brep = getFullBRep(part);
       const verts = brep.weldedVerts;
-      const isPartSolid = !forceSheet && brep.isWatertight;
+      const isPartSolid = !forceSheet && part.brep.isWatertight;
 
       // Allocate CARTESIAN_POINT & VERTEX_POINT lazily so only used vertices are emitted
       const stepVertMap = new Map();
@@ -5434,9 +5849,10 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       };
 
       const edgeCurveMap = new Map();
+      const NV = Math.max(1, verts.length);
       const getEdgeCurve = (u, v) => {
         const minV = Math.min(u, v), maxV = Math.max(u, v);
-        const key = `${minV}_${maxV}`;
+        const key = minV * NV + maxV;
         let ec = edgeCurveMap.get(key);
         if (!ec) {
           const sv0 = getStepVert(minV);
@@ -5516,32 +5932,20 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const pds = add(`PRODUCT_DEFINITION_SHAPE('','',#${pd})`);
     add(`SHAPE_DEFINITION_REPRESENTATION(#${pds},#${shapeRep})`);
 
-    return joinLarge([
-      'ISO-10303-21;',
-      'HEADER;',
-      "FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');",
-      `FILE_NAME('${(state.fileName || 'assembly').replace(/\.pdf$/i, '')}.stp','2026-10-23T12:00:00',('Steven Moran'),('CAD Engineering Workbench'),'3D PDF Geometry Extractor','1.0','');`,
-      "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
-      'ENDSEC;',
-      'DATA;',
-      ...entities,
-      'ENDSEC;',
-      'END-ISO-10303-21;',
-      ''
-    ]);
+    out.push('ENDSEC;');
+    out.push('END-ISO-10303-21;');
+    out.push('');
+    return out.result();
   }
 
   // -------------------------------------------------------------------------
   // 8. STL (Binary & ASCII), Wavefront OBJ, and IGES 5.3 Exporters
   // -------------------------------------------------------------------------
-  function buildBinarySTL(parts, units = 'mm') {
-    const visibleParts = parts.filter((p) => p.visible);
+  function buildBinarySTL(parts, units = 'mm', options = {}) {
+    const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
     let totalTris = 0;
-    for (const p of visibleParts) {
-      if (!p.brep) computePartBRep(p);
-      totalTris += p.brep.tris.length;
-    }
+    for (const p of visibleParts) totalTris += p.brep.nt;
 
     const buf = new ArrayBuffer(84 + totalTris * 50);
     const dv = new DataView(buf);
@@ -5552,18 +5956,21 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     dv.setUint32(80, totalTris, true);
 
     let offset = 84;
+    const n = [0, 0, 0];
     for (const p of visibleParts) {
-      const verts = p.brep.weldedVerts;
-      for (const t of p.brep.tris) {
-        dv.setFloat32(offset, t.normal[0], true);
-        dv.setFloat32(offset + 4, t.normal[1], true);
-        dv.setFloat32(offset + 8, t.normal[2], true);
+      const { vx, tv, nt } = p.brep;
+      for (let t = 0; t < nt; t++) {
+        const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
+        triNormalInto(vx, a, b, c, n);
+        dv.setFloat32(offset, n[0], true);
+        dv.setFloat32(offset + 4, n[1], true);
+        dv.setFloat32(offset + 8, n[2], true);
         offset += 12;
         for (let k = 0; k < 3; k++) {
-          const v = verts[t.verts[k]];
-          dv.setFloat32(offset, v[0] * scale, true);
-          dv.setFloat32(offset + 4, v[1] * scale, true);
-          dv.setFloat32(offset + 8, v[2] * scale, true);
+          const v3 = 3 * (k === 0 ? a : k === 1 ? b : c);
+          dv.setFloat32(offset, vx[v3] * scale, true);
+          dv.setFloat32(offset + 4, vx[v3 + 1] * scale, true);
+          dv.setFloat32(offset + 8, vx[v3 + 2] * scale, true);
           offset += 12;
         }
         dv.setUint16(offset, 0, true);
@@ -5573,62 +5980,66 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     return new Uint8Array(buf);
   }
 
-  function buildASCIISTL(parts, units = 'mm') {
-    const visibleParts = parts.filter((p) => p.visible);
+  function buildASCIISTL(parts, units = 'mm', options = {}) {
+    const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
-    const lines = ['solid CAD_3D_PDF_Assembly'];
+    const out = new TextSink(options.blob);
+    out.push('solid CAD_3D_PDF_Assembly');
+    const n = [0, 0, 0];
     for (const p of visibleParts) {
-      if (!p.brep) computePartBRep(p);
-      const verts = p.brep.weldedVerts;
-      for (const t of p.brep.tris) {
-        lines.push(`  facet normal ${fmtNum(t.normal[0])} ${fmtNum(t.normal[1])} ${fmtNum(t.normal[2])}`);
-        lines.push('    outer loop');
+      const { vx, tv, nt } = p.brep;
+      for (let t = 0; t < nt; t++) {
+        const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
+        triNormalInto(vx, a, b, c, n);
+        out.push(`  facet normal ${fmtNum(n[0])} ${fmtNum(n[1])} ${fmtNum(n[2])}`);
+        out.push('    outer loop');
         for (let k = 0; k < 3; k++) {
-          const v = verts[t.verts[k]];
-          lines.push(`      vertex ${fmtNum(v[0] * scale)} ${fmtNum(v[1] * scale)} ${fmtNum(v[2] * scale)}`);
+          const v3 = 3 * (k === 0 ? a : k === 1 ? b : c);
+          out.push(`      vertex ${fmtNum(vx[v3] * scale)} ${fmtNum(vx[v3 + 1] * scale)} ${fmtNum(vx[v3 + 2] * scale)}`);
         }
-        lines.push('    endloop');
-        lines.push('  endfacet');
+        out.push('    endloop');
+        out.push('  endfacet');
       }
     }
-    lines.push('endsolid CAD_3D_PDF_Assembly', '');
-    return joinLarge(lines);
+    out.push('endsolid CAD_3D_PDF_Assembly');
+    out.push('');
+    return out.result();
   }
 
-  function buildWavefrontOBJ(parts, units = 'mm') {
-    const visibleParts = parts.filter((p) => p.visible);
+  function buildWavefrontOBJ(parts, units = 'mm', options = {}) {
+    const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
-    const lines = [
-      '# 3D PDF Geometry Extractor - Multi-Body CAD Mesh (.obj)',
-      `# Units: ${units}`,
-      ''
-    ];
+    const out = new TextSink(options.blob);
+    out.push('# 3D PDF Geometry Extractor - Multi-Body CAD Mesh (.obj)');
+    out.push(`# Units: ${units}`);
+    out.push('');
     let vOffset = 1;
     let nOffset = 1;
+    const n = [0, 0, 0];
     for (const p of visibleParts) {
-      if (!p.brep) computePartBRep(p);
-      lines.push(`o ${p.name}`);
-      lines.push(`g ${p.name}`);
-      for (const [x, y, z] of p.brep.weldedVerts) {
-        lines.push(`v ${fmtNum(x * scale)} ${fmtNum(y * scale)} ${fmtNum(z * scale)}`);
+      const { vx, tv, nt, nv } = p.brep;
+      out.push(`o ${p.name}`);
+      out.push(`g ${p.name}`);
+      for (let i = 0; i < nv; i++) {
+        out.push(`v ${fmtNum(vx[3 * i] * scale)} ${fmtNum(vx[3 * i + 1] * scale)} ${fmtNum(vx[3 * i + 2] * scale)}`);
       }
-      for (const t of p.brep.tris) {
-        lines.push(`vn ${fmtNum(t.normal[0])} ${fmtNum(t.normal[1])} ${fmtNum(t.normal[2])}`);
+      for (let t = 0; t < nt; t++) {
+        triNormalInto(vx, tv[3 * t], tv[3 * t + 1], tv[3 * t + 2], n);
+        out.push(`vn ${fmtNum(n[0])} ${fmtNum(n[1])} ${fmtNum(n[2])}`);
       }
-      for (let i = 0; i < p.brep.tris.length; i++) {
-        const [a, b, c] = p.brep.tris[i].verts;
-        const ni = nOffset + i;
-        lines.push(`f ${a + vOffset}//${ni} ${b + vOffset}//${ni} ${c + vOffset}//${ni}`);
+      for (let t = 0; t < nt; t++) {
+        const ni = nOffset + t;
+        out.push(`f ${tv[3 * t] + vOffset}//${ni} ${tv[3 * t + 1] + vOffset}//${ni} ${tv[3 * t + 2] + vOffset}//${ni}`);
       }
-      vOffset += p.brep.weldedVerts.length;
-      nOffset += p.brep.tris.length;
-      lines.push('');
+      vOffset += nv;
+      nOffset += nt;
+      out.push('');
     }
-    return joinLarge(lines);
+    return out.result();
   }
 
-  function buildIGESWireframe(parts, units = 'mm') {
-    const visibleParts = parts.filter((p) => p.visible);
+  function buildIGESWireframe(parts, units = 'mm', options = {}) {
+    const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
     const pad72 = (s) => s.slice(0, 72).padEnd(72, ' ');
     const line80 = (s, sec, seq) => `${pad72(s)}${sec}${String(seq).padStart(7, ' ')}`;
@@ -5640,32 +6051,112 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       line80('1H,,1H;,14H3D_PDF_CAD_ASM,14H3D_PDF_CAD.igs,10H3D_PDF_EXT,5H1.0.0,32,38,', 'G', 1),
       line80('6,308,15,14H3D_PDF_CAD_ASM,1.0,2,2HMM,1,0.01,13H261023.120000;', 'G', 2)
     ];
-    const dLines = [];
-    const pLines = [];
+    const dSink = new TextSink(options.blob), pSink = new TextSink(options.blob);
     let dSeq = 1, pSeq = 1;
 
     for (const p of visibleParts) {
-      if (!p.brep) computePartBRep(p);
-      const verts = p.brep.weldedVerts;
-      for (const [u, v] of p.brep.featureEdges) {
-        const p0 = verts[u], p1 = verts[v];
-        const pStr = `110,${(p0[0] * scale).toFixed(5)},${(p0[1] * scale).toFixed(5)},${(p0[2] * scale).toFixed(5)},${(p1[0] * scale).toFixed(5)},${(p1[1] * scale).toFixed(5)},${(p1[2] * scale).toFixed(5)};`;
+      const { vx, fev } = p.brep;
+      for (let e = 0; e < fev.length; e += 2) {
+        const u3 = 3 * fev[e], v3 = 3 * fev[e + 1];
+        const pStr = `110,${(vx[u3] * scale).toFixed(5)},${(vx[u3 + 1] * scale).toFixed(5)},${(vx[u3 + 2] * scale).toFixed(5)},${(vx[v3] * scale).toFixed(5)},${(vx[v3 + 1] * scale).toFixed(5)},${(vx[v3 + 2] * scale).toFixed(5)};`;
         const pStart = pSeq;
         const dIdx = dSeq;
-        pLines.push(`${pad72(pStr).slice(0, 64)}${String(dIdx).padStart(8, ' ')}P${String(pSeq++).padStart(7, ' ')}`);
-        dLines.push(line80(`     110${String(pStart).padStart(8, ' ')}       0       0       1       0       0       000000001`, 'D', dSeq++));
-        dLines.push(line80('     110       0       2       1       0                        LINE   1', 'D', dSeq++));
+        pSink.push(`${pad72(pStr).slice(0, 64)}${String(dIdx).padStart(8, ' ')}P${String(pSeq++).padStart(7, ' ')}`);
+        dSink.push(line80(`     110${String(pStart).padStart(8, ' ')}       0       0       1       0       0       000000001`, 'D', dSeq++));
+        dSink.push(line80('     110       0       2       1       0                        LINE   1', 'D', dSeq++));
       }
     }
 
     const tLine = line80(
-      `S${String(sLines.length).padStart(7, ' ')}G${String(gLines.length).padStart(7, ' ')}D${String(dLines.length).padStart(7, ' ')}P${String(pLines.length).padStart(7, ' ')}`,
+      `S${String(sLines.length).padStart(7, ' ')}G${String(gLines.length).padStart(7, ' ')}D${String(dSeq - 1).padStart(7, ' ')}P${String(pSeq - 1).padStart(7, ' ')}`,
       'T',
       1
     );
-
-    return [...sLines, ...gLines, ...dLines, ...pLines, tLine, ''].join('\n');
+    const out = new TextSink(options.blob);
+    for (const l of sLines) out.push(l);
+    for (const l of gLines) out.push(l);
+    out.append(dSink);
+    out.append(pSink);
+    out.push(tLine);
+    out.push('');
+    return out.result();
   }
+
+  // -------------------------------------------------------------------------
+  // Optional "reduce detail" (export) and decimated viewer preview: vertex clustering on a uniform
+  // grid over the part bbox. Triangles whose corners collapse into one cell are dropped; the
+  // representative vertex of a cell is the mean of its members. Result is a compact pseudo-part.
+  // -------------------------------------------------------------------------
+  function clusterDecimate(vx, tv, nt, grid) {
+    const nv = vx.length / 3;
+    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < nv; i++) {
+      const x = vx[3 * i], y = vx[3 * i + 1], z = vx[3 * i + 2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const ext = Math.max(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+    const cell = ext / Math.max(1, grid);
+    const cellMap = new Map();
+    const remap = new Int32Array(nv);
+    const acc = [];
+    for (let i = 0; i < nv; i++) {
+      const gx = Math.floor((vx[3 * i] - minX) / cell), gy = Math.floor((vx[3 * i + 1] - minY) / cell), gz = Math.floor((vx[3 * i + 2] - minZ) / cell);
+      const key = (gx * 4096 + gy) * 4096 + gz;
+      let c = cellMap.get(key);
+      if (c === undefined) { c = acc.length / 4; cellMap.set(key, c); acc.push(0, 0, 0, 0); }
+      acc[4 * c] += vx[3 * i]; acc[4 * c + 1] += vx[3 * i + 1]; acc[4 * c + 2] += vx[3 * i + 2]; acc[4 * c + 3]++;
+      remap[i] = c;
+    }
+    const nc = acc.length / 4;
+    const pos = new Float64Array(nc * 3);
+    for (let c = 0; c < nc; c++) { const k = acc[4 * c + 3]; pos[3 * c] = acc[4 * c] / k; pos[3 * c + 1] = acc[4 * c + 1] / k; pos[3 * c + 2] = acc[4 * c + 2] / k; }
+    const seen = new Set();
+    const idx = [];
+    for (let t = 0; t < nt; t++) {
+      const a = remap[tv[3 * t]], b = remap[tv[3 * t + 1]], c = remap[tv[3 * t + 2]];
+      if (a === b || b === c || a === c) continue;
+      // drop exact duplicates (same cell triple, same orientation)
+      const r = a < b ? (a < c ? 0 : 2) : (b < c ? 1 : 2);
+      const k0 = r === 0 ? a : r === 1 ? b : c, k1 = r === 0 ? b : r === 1 ? c : a, k2 = r === 0 ? c : r === 1 ? a : b;
+      const key = (k0 * 2097152 + k1) * 2097152 + k2;
+      if (nc < 2097152 && seen.has(key)) continue;
+      if (nc < 2097152) seen.add(key);
+      idx.push(a, b, c);
+    }
+    return { pos, idx: Uint32Array.from(idx), nt: idx.length / 3 };
+  }
+  // Decimate one compact part to ~ratio of its triangles (binary search on the grid resolution).
+  function decimateCompact(b, ratio) {
+    const target = Math.max(4, Math.floor(b.nt * ratio));
+    if (b.nt <= target) return null;
+    let lo = 2, hi = 2048, best = null;
+    for (let it = 0; it < 9 && lo <= hi; it++) {
+      const g = Math.floor((lo + hi) / 2);
+      const d = clusterDecimate(b.vx, b.tv, b.nt, g);
+      if (d.nt > target) hi = g - 1;
+      else { best = d; lo = g + 1; }
+    }
+    return best || clusterDecimate(b.vx, b.tv, b.nt, 2);
+  }
+  // Reduced-detail export copy of a part (cached per ratio on the part's brep).
+  function decimatedPart(part, ratio) {
+    const b = computePartBRep(part);
+    b._dec = b._dec || {};
+    if (b._dec[ratio]) return b._dec[ratio];
+    const d = decimateCompact(b, ratio);
+    let dp;
+    if (!d) dp = part;
+    else {
+      dp = { name: part.name, color: part.color, visible: true, analyticFeatures: [], pos: d.pos, idx: d.idx, brep: null };
+      const prev = fullCacheEnabled; fullCacheEnabled = false;
+      try { computePartBRep(dp); } finally { fullCacheEnabled = prev; }
+    }
+    b._dec[ratio] = dp;
+    return dp;
+  }
+
   // -------------------------------------------------------------------------
   // 9. Interactive 3D CAD Viewport Renderer (Shaded + Feature Edges + B-Rep Groups + X-Ray)
   // -------------------------------------------------------------------------
@@ -5679,8 +6170,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const list = visibleParts.length > 0 ? visibleParts : parts;
 
     for (const p of list) {
-      if (!p.brep) computePartBRep(p);
-      const b = p.brep;
+      const b = computePartBRep(p);
       if (b.bbox.min[0] < minX) minX = b.bbox.min[0];
       if (b.bbox.min[1] < minY) minY = b.bbox.min[1];
       if (b.bbox.min[2] < minZ) minZ = b.bbox.min[2];
@@ -5691,9 +6181,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       totalTris += b.tris.length;
       totalMergedFaces += b.mergedFaces.length;
       totalEdges += b.featureEdges.length;
-      for (const mf of b.mergedFaces) {
-        if (mf.loops.length > 1) totalHoles += mf.loops.length - 1;
-      }
+      totalHoles += b.holeCount;
       if (!b.isWatertight) allWatertight = false;
     }
 
@@ -5721,6 +6209,10 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     };
   }
 
+  const PREVIEW_MAX_TRIS = 200000;   // viewer draws a vertex-clustered preview above this
+  const PREVIEW_MAX_EDGES = 150000;
+  const INSPECTOR_MAX_TRIS = 200000; // XT/STEP inspector preview is skipped above this (use Export)
+  const BIG_MODEL_TRIS = 1000000;    // warning banner threshold
   function renderViewport() {
     const canvas = document.getElementById('viewportCanvas');
     if (!canvas) return;
@@ -5793,91 +6285,119 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     }
     ctx.stroke();
 
-    // 2. Collect triangles & feature edges across visible parts
-    const drawTris = [];
-    const drawEdges = [];
+    // 2. Collect triangles & feature edges across visible parts (typed buffers; huge models are drawn
+    //    from a decimated preview so the canvas stays interactive and memory stays bounded).
     const explodeRatio = (state.explodeFactor || 0) / 100;
-
+    const items = [];
+    let totalTris = 0;
     state.parts.forEach((part, pIdx) => {
       if (!part.visible) return;
-      if (!part.brep) computePartBRep(part);
-      const b = part.brep;
-      const verts = b.weldedVerts;
-
-      // Explode offset along Z + radial from assembly center
+      const b = computePartBRep(part);
+      totalTris += b.nt;
+      items.push({ part, pIdx, b });
+    });
+    const ratio = totalTris > PREVIEW_MAX_TRIS ? PREVIEW_MAX_TRIS / totalTris : 1;
+    state.previewRatio = ratio;
+    let nDraw = 0, nEdge = 0;
+    for (const it of items) {
+      let g = it.b;
+      if (ratio < 1) {
+        const key = Math.round(ratio * 1e4) / 1e4;
+        it.b._preview = it.b._preview || {};
+        if (!it.b._preview[key]) {
+          const d = decimateCompact(it.b, ratio);
+          it.b._preview[key] = d ? { vx: d.pos, tv: d.idx, nt: d.nt, nv: d.pos.length / 3, triFace: null, fev: null } : it.b;
+        }
+        g = it.b._preview[key];
+      }
+      it.g = g; nDraw += g.nt;
+      if (g.fev) nEdge += g.fev.length / 2;
+    }
+    const drawEdgesOn = nEdge <= PREVIEW_MAX_EDGES;
+    const triScr = new Float32Array(nDraw * 6);
+    const triDepth = new Float32Array(nDraw);
+    const triNrm = new Float32Array(nDraw * 3);
+    const triItem = new Uint32Array(nDraw);
+    const triFaceG = new Int32Array(nDraw);
+    const edgeScr = new Float32Array(drawEdgesOn ? nEdge * 4 : 0);
+    const edgeSel = new Uint8Array(drawEdgesOn ? nEdge : 0);
+    let ti = 0, ei = 0;
+    const nrm = [0, 0, 0];
+    items.forEach((it, itemIdx) => {
+      const { b, g, pIdx } = it;
       const pCenter = b.bbox.center;
       const exX = (pCenter[0] - bounds.center[0]) * explodeRatio * 0.9;
       const exY = (pCenter[1] - bounds.center[1]) * explodeRatio * 0.9;
       const exZ = (pIdx - (state.parts.length - 1) * 0.5) * 28 * explodeRatio;
-
-      const projVerts = verts.map(([x, y, z]) => projectPoint(x + exX, y + exY, z + exZ));
-
-      // Map triangle index -> merged B-Rep face index for 'brep-faces' mode
-      const triToFaceGroup = new Int32Array(b.tris.length);
-      b.mergedFaces.forEach((mf, mfIdx) => {
-        for (const tIdx of mf.tris) triToFaceGroup[tIdx] = mfIdx;
-      });
-
-      b.tris.forEach((t, tIdx) => {
-        const [i0, i1, i2] = t.verts;
-        const pv0 = projVerts[i0], pv1 = projVerts[i1], pv2 = projVerts[i2];
-        const depth = (pv0.depth + pv1.depth + pv2.depth) / 3;
-        drawTris.push({
-          pv0, pv1, pv2,
-          depth,
-          normal: t.normal,
-          partIdx: pIdx,
-          faceGroupIdx: triToFaceGroup[tIdx],
-          color: part.color,
-          selected: state.selectedPartIdx === pIdx
-        });
-      });
-
-      for (const [u, v] of b.featureEdges) {
-        const pu = projVerts[u], pv = projVerts[v];
-        drawEdges.push({
-          pu, pv,
-          depth: (pu.depth + pv.depth) * 0.5 - 0.15,
-          selected: state.selectedPartIdx === pIdx
-        });
+      const vx = g.vx, nv = vx.length / 3;
+      const pv = new Float32Array(nv * 3);
+      for (let i = 0; i < nv; i++) {
+        const q = projectPoint(vx[3 * i] + exX, vx[3 * i + 1] + exY, vx[3 * i + 2] + exZ);
+        pv[3 * i] = q.sx; pv[3 * i + 1] = q.sy; pv[3 * i + 2] = q.depth;
+      }
+      const tv = g.tv;
+      for (let t = 0; t < g.nt; t++, ti++) {
+        const a = tv[3 * t], bb = tv[3 * t + 1], c = tv[3 * t + 2];
+        triScr[6 * ti] = pv[3 * a]; triScr[6 * ti + 1] = pv[3 * a + 1];
+        triScr[6 * ti + 2] = pv[3 * bb]; triScr[6 * ti + 3] = pv[3 * bb + 1];
+        triScr[6 * ti + 4] = pv[3 * c]; triScr[6 * ti + 5] = pv[3 * c + 1];
+        triDepth[ti] = (pv[3 * a + 2] + pv[3 * bb + 2] + pv[3 * c + 2]) / 3;
+        triNormalInto(vx, a, bb, c, nrm);
+        triNrm[3 * ti] = nrm[0]; triNrm[3 * ti + 1] = nrm[1]; triNrm[3 * ti + 2] = nrm[2];
+        triItem[ti] = itemIdx;
+        triFaceG[ti] = g.triFace ? g.triFace[t] : 0;
+      }
+      if (drawEdgesOn && g.fev) {
+        const sel = state.selectedPartIdx === pIdx ? 1 : 0;
+        for (let e = 0; e < g.fev.length; e += 2, ei++) {
+          const u = g.fev[e], v = g.fev[e + 1];
+          edgeScr[4 * ei] = pv[3 * u]; edgeScr[4 * ei + 1] = pv[3 * u + 1];
+          edgeScr[4 * ei + 2] = pv[3 * v]; edgeScr[4 * ei + 3] = pv[3 * v + 1];
+          edgeSel[ei] = sel;
+        }
       }
     });
 
     // Painter's algorithm sort (back to front: higher y2 is further away in our camera convention)
-    drawTris.sort((a, b) => b.depth - a.depth);
+    const order = new Uint32Array(nDraw);
+    for (let i = 0; i < nDraw; i++) order[i] = i;
+    order.sort((x, y) => triDepth[y] - triDepth[x]);
 
     const renderMode = state.renderMode || 'shaded-edges';
+    const pathTri = (k) => {
+      ctx.beginPath();
+      ctx.moveTo(triScr[6 * k], triScr[6 * k + 1]);
+      ctx.lineTo(triScr[6 * k + 2], triScr[6 * k + 3]);
+      ctx.lineTo(triScr[6 * k + 4], triScr[6 * k + 5]);
+      ctx.closePath();
+    };
 
     if (renderMode !== 'wireframe') {
-      for (const dt of drawTris) {
-        const [rx, ry, rz] = rotateVec(dt.normal[0], dt.normal[1], dt.normal[2]);
+      for (let oi = 0; oi < nDraw; oi++) {
+        const k = order[oi];
+        const it = items[triItem[k]];
+        const [rx, ry, rz] = rotateVec(triNrm[3 * k], triNrm[3 * k + 1], triNrm[3 * k + 2]);
         // Two-point CAD studio lighting
         const keyLight = Math.max(0, rx * 0.45 - ry * 0.55 + rz * 0.70);
         const fillLight = Math.max(0, -rx * 0.40 + ry * 0.30 + rz * 0.35);
         const shade = 0.30 + 0.62 * keyLight + 0.22 * fillLight;
 
-        let baseRGB = dt.color;
+        let baseRGB = it.part.color;
         if (renderMode === 'brep-faces') {
-          const huePalette = PALETTE[(dt.faceGroupIdx + dt.partIdx * 2) % PALETTE.length];
-          baseRGB = huePalette;
+          baseRGB = PALETTE[(triFaceG[k] + it.pIdx * 2) % PALETTE.length];
         }
 
         let r = Math.min(255, Math.round(baseRGB[0] * 255 * shade));
         let g = Math.min(255, Math.round(baseRGB[1] * 255 * shade));
         let b = Math.min(255, Math.round(baseRGB[2] * 255 * shade));
 
-        if (dt.selected) {
+        if (state.selectedPartIdx === it.pIdx) {
           r = Math.min(255, r + 28);
           g = Math.min(255, g + 38);
           b = Math.min(255, b + 45);
         }
 
-        ctx.beginPath();
-        ctx.moveTo(dt.pv0.sx, dt.pv0.sy);
-        ctx.lineTo(dt.pv1.sx, dt.pv1.sy);
-        ctx.lineTo(dt.pv2.sx, dt.pv2.sy);
-        ctx.closePath();
-
+        pathTri(k);
         if (renderMode === 'xray') {
           ctx.fillStyle = `rgba(${r},${g},${b},0.34)`;
           ctx.fill();
@@ -5917,29 +6437,33 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     // Draw edges
     if (renderMode === 'wireframe') {
       ctx.lineWidth = 0.85;
-      for (const dt of drawTris) {
-        const [r, g, b] = dt.color.map((c) => Math.round(c * 255));
-        ctx.strokeStyle = dt.selected ? '#22d3ee' : `rgba(${r},${g},${b},0.78)`;
-        ctx.beginPath();
-        ctx.moveTo(dt.pv0.sx, dt.pv0.sy);
-        ctx.lineTo(dt.pv1.sx, dt.pv1.sy);
-        ctx.lineTo(dt.pv2.sx, dt.pv2.sy);
-        ctx.closePath();
+      for (let oi = 0; oi < nDraw; oi++) {
+        const k = order[oi];
+        const it = items[triItem[k]];
+        const [r, g, b] = it.part.color.map((c) => Math.round(c * 255));
+        ctx.strokeStyle = state.selectedPartIdx === it.pIdx ? '#22d3ee' : `rgba(${r},${g},${b},0.78)`;
+        pathTri(k);
         ctx.stroke();
       }
     } else if (renderMode === 'shaded-edges' || renderMode === 'brep-faces' || renderMode === 'xray') {
-      for (const ed of drawEdges) {
-        ctx.lineWidth = ed.selected ? 1.65 : 1.05;
-        ctx.strokeStyle = ed.selected
+      for (let e = 0; e < ei; e++) {
+        const selected = edgeSel[e] === 1;
+        ctx.lineWidth = selected ? 1.65 : 1.05;
+        ctx.strokeStyle = selected
           ? '#22d3ee'
           : renderMode === 'xray'
             ? 'rgba(148, 210, 255, 0.68)'
             : 'rgba(9, 14, 23, 0.82)';
         ctx.beginPath();
-        ctx.moveTo(ed.pu.sx, ed.pu.sy);
-        ctx.lineTo(ed.pv.sx, ed.pv.sy);
+        ctx.moveTo(edgeScr[4 * e], edgeScr[4 * e + 1]);
+        ctx.lineTo(edgeScr[4 * e + 2], edgeScr[4 * e + 3]);
         ctx.stroke();
       }
+    }
+    if (ratio < 1) {
+      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+      ctx.fillText(`Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)`, 12, h - 12);
     }
 
     // 3. Draw CAD XYZ orientation triad in bottom-right corner
@@ -6015,11 +6539,18 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
   }
 
   function refreshAllUI() {
-    for (const p of state.parts) {
-      if (!p.brep) computePartBRep(p);
-    }
+    compactParts(state.parts);
 
     const bounds = computeAssemblyBounds(state.parts);
+    const banner = document.getElementById('bigModelBanner');
+    if (banner) {
+      const big = bounds.totalTris > BIG_MODEL_TRIS;
+      banner.style.display = big ? '' : 'none';
+      if (big) {
+        banner.textContent = `Large model: ${bounds.totalTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
+          'exports stream part-by-part at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
+      }
+    }
     const unitScale = getScaleFromMM(state.units);
 
     // Document & stream badges
@@ -6191,6 +6722,16 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     if (!summaryEl || !codeEl) return;
 
     // Built lazily, only for the tab that is showing (huge models take seconds per exporter).
+    if (state.activeTab === 'xt' || state.activeTab === 'step') {
+      let nt = 0;
+      for (const p of state.parts) if (p.visible && p.brep) nt += p.brep.nt;
+      if (nt > INSPECTOR_MAX_TRIS) {
+        summaryEl.innerHTML = `<div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">${state.activeTab === 'xt' ? 'Parasolid XT' : 'STEP AP214'} preview skipped</div>` +
+          `<div class="entity-row"><span>Visible triangles</span><strong>${nt.toLocaleString()}</strong></div>`;
+        codeEl.textContent = `Model too large for an in-page text preview (> ${INSPECTOR_MAX_TRIS.toLocaleString()} tris). Use the Export buttons: the file is streamed part-by-part straight to disk.`;
+        return;
+      }
+    }
     if (state.activeTab === 'xt' && !state.cachedXT) {
       state.cachedXT = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName });
     }
@@ -6274,10 +6815,12 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     if (!st.parsed) {
       try {
         if (st.subtype === 'PRC') {
-          st.parsed = await parsePRCStream(st.rawBytes);
+          st.parsed = await parsePRCStream(st.rawBytes, { typed: true });
         } else {
           st.parsed = parseU3DStream(st.rawBytes);
         }
+        // weld + pack every part right away (typed arrays) so the raw per-corner data can be freed
+        compactParts(st.parsed.parts || []);
       } catch (err) {
         console.error(err);
         st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)] };
@@ -6288,8 +6831,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     state.parts = (st.parsed.parts || []).map((p, i) => ({
       ...p,
       color: p.color || PALETTE[i % PALETTE.length],
-      visible: true,
-      brep: null
+      visible: true
     }));
     state.selectedPartIdx = -1;
     state.cachedXT = null;
@@ -6330,6 +6872,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const blob = content instanceof Uint8Array
       ? new Blob([content], { type: mimeType })
       : new Blob(textChunks(content), { type: `${mimeType};charset=utf-8` });
+    content = null;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -6449,6 +6992,16 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
       });
     }
 
+    const detailSelect = document.getElementById('detailSelect');
+    if (detailSelect) {
+      detailSelect.addEventListener('change', (ev) => {
+        state.exportDetail = Number(ev.target.value) || 1;
+        state.cachedXT = null;
+        state.cachedSTEP = null;
+        refreshAllUI();
+      });
+    }
+
     // Drawer tabs
     document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -6542,7 +7095,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const btnExportXT = document.getElementById('btnExportXT');
     if (btnExportXT) {
       btnExportXT.addEventListener('click', () => {
-        const xt = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName });
+        const xt = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, blob: true });
         triggerDownload(xt, `${stemName()}.x_t`, 'text/plain');
       });
     }
@@ -6550,7 +7103,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const btnExportSTEP = document.getElementById('btnExportSTEP');
     if (btnExportSTEP) {
       btnExportSTEP.addEventListener('click', () => {
-        const stp = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units });
+        const stp = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, blob: true });
         triggerDownload(stp, `${stemName()}.stp`, 'application/step');
       });
     }
@@ -6566,7 +7119,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const btnExportSTLText = document.getElementById('btnExportSTLText');
     if (btnExportSTLText) {
       btnExportSTLText.addEventListener('click', () => {
-        const stlTxt = buildASCIISTL(state.parts, state.units);
+        const stlTxt = buildASCIISTL(state.parts, state.units, { blob: true });
         triggerDownload(stlTxt, `${stemName()}-ascii.stl`, 'text/plain');
       });
     }
@@ -6574,7 +7127,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const btnExportOBJ = document.getElementById('btnExportOBJ');
     if (btnExportOBJ) {
       btnExportOBJ.addEventListener('click', () => {
-        const obj = buildWavefrontOBJ(state.parts, state.units);
+        const obj = buildWavefrontOBJ(state.parts, state.units, { blob: true });
         triggerDownload(obj, `${stemName()}.obj`, 'text/plain');
       });
     }
@@ -6582,7 +7135,7 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
     const btnExportIGES = document.getElementById('btnExportIGES');
     if (btnExportIGES) {
       btnExportIGES.addEventListener('click', () => {
-        const igs = buildIGESWireframe(state.parts, state.units);
+        const igs = buildIGESWireframe(state.parts, state.units, { blob: true });
         triggerDownload(igs, `${stemName()}.igs`, 'text/plain');
       });
     }
@@ -6600,15 +7153,16 @@ return { parsePRC, extractPRCFromPDF, inflate, BitReader, _internal:{readSchema,
 
   // Expose programmatic API for automated verification & CAD testing
   window.CAD3DExtractor = { U3DBitStreamReader, U3DHistogram, U3D_CTX, U3D_AC_STATIC_FULL, parseU3DStream,
-    getState: () => state,
+    getState: () => state, computeAssemblyBounds,
     loadPDFBuffer,
     activateStream,
-    buildParasolidXT: () => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName }),
-    buildSTEPAP214: () => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units }),
-    buildBinarySTL: () => buildBinarySTL(state.parts, state.units),
-    buildASCIISTL: () => buildASCIISTL(state.parts, state.units),
-    buildWavefrontOBJ: () => buildWavefrontOBJ(state.parts, state.units),
-    buildIGESWireframe: () => buildIGESWireframe(state.parts, state.units)
+    // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
+    buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
+    buildSTEPAP214: (o = {}) => buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
+    buildBinarySTL: (o = {}) => buildBinarySTL(state.parts, state.units, o),
+    buildASCIISTL: (o = {}) => buildASCIISTL(state.parts, state.units, o),
+    buildWavefrontOBJ: (o = {}) => buildWavefrontOBJ(state.parts, state.units, o),
+    buildIGESWireframe: (o = {}) => buildIGESWireframe(state.parts, state.units, o)
   };
 
   window.addEventListener('DOMContentLoaded', () => {

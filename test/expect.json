@@ -140,13 +140,13 @@
   "streams": [
    [
     "U3D",
-    "none",
-    0
+    "U3D/RHAdobeMeshResource",
+    142104
    ],
    [
     "U3D",
-    "none",
-    0
+    "U3D/RHAdobeMeshResource",
+    142104
    ]
   ]
  },
