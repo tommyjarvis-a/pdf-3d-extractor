@@ -659,6 +659,14 @@ function cross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]
 function mul(a,b){ const m=new Array(16).fill(0); for(let i=0;i<4;i++) for(let j=0;j<4;j++){ let s=0; for(let k=0;k<4;k++) s+=a[i*4+k]*b[k*4+j]; m[i*4+j]=s; } return m; }
 function apply(m,p){ const x=p[0],y=p[1],z=p[2]; const w=m[12]*x+m[13]*y+m[14]*z+m[15]||1;
   return [(m[0]*x+m[1]*y+m[2]*z+m[3])/w,(m[4]*x+m[5]*y+m[6]*z+m[7])/w,(m[8]*x+m[9]*y+m[10]*z+m[11])/w]; }
+// typed output (opts.typed): flat Float64Array positions + Uint32Array triangle indices
+// (0xFFFFFFFF marks an invalid/missing index). Index arrays are shared between instances.
+function applyFlat(m,c){ const n=(c.length/3)|0, out=new Float64Array(n*3);
+  for(let i=0;i<n;i++){ const q=apply(m,[c[3*i],c[3*i+1],c[3*i+2]]); out[3*i]=q[0]; out[3*i+1]=q[1]; out[3*i+2]=q[2]; } return out; }
+function applyArr(P){ const out=new Float64Array(P.length*3); for(let i=0;i<P.length;i++){ const q=P[i]; out[3*i]=q[0]; out[3*i+1]=q[1]; out[3*i+2]=q[2]; } return out; }
+function packTris(tris,nv){ const out=new Uint32Array(tris.length*3);
+  for(let f=0;f<tris.length;f++){ const t=tris[f]; for(let k=0;k<3;k++){ const v=t?t[k]:undefined; out[3*f+k]=(Number.isInteger(v)&&v>=0&&v<nv)? v : 0xFFFFFFFF; } } return out; }
+function typedPart(p,pos,idx){ p.pos=pos; p.idx=idx; p.positions=null; p.faces={length:idx.length/3}; p.faceIndexPerTriangle=null; }
 function isIdentity(m){ const I=identity(); return m.every((v,i)=>Math.abs(v-I[i])<1e-12); }
 
 /* ---------------------------------------------------------------- container */
@@ -784,18 +792,22 @@ function assemble(hdr, fss, model, opts){
         if(!tess){ if(ri.type==='BrepModel' && ri.exact) exactPart(ri, RM, rst, item); return; }
         const visible=!!((ri.graphics?ri.graphics.behavior:1)&1);
         const label=pth.concat(pd.name&&pd.name!==po.name?[pd.name]:[]).concat([ri.name||(ri.type+'#'+ri.tessIndex)]).join('/');
-        const pos=[]; const c=tess.coordinates||[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]]));
+        const c=tess.coordinates||[]; const T=!!opts.typed;
+        const mkPos=()=>{ const pos=[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]])); return pos; };
         if(tess.kind==='compressed'){
           if(!tess.decoded){ try{ tess.decoded=decodeTess3dCompressed(tess, w=>warnings.push('tess #'+ri.tessIndex+': '+w)); }
             catch(e){ tess.decoded={coordinates:[],tris:[],faceOf:[],error:e.message}; warnings.push('tess #'+ri.tessIndex+' ('+label+'): '+e.message); } }
           const D=tess.decoded; if(!D.tris.length) return;
-          const cpos=[]; const cc=D.coordinates; for(let i=0;i<cc.length;i+=3) cpos.push(apply(RM,[cc[i],cc[i+1],cc[i+2]]));
+          const cc=D.coordinates; let cpos=null, cidx=null;
+          if(T){ cpos=applyFlat(RM,cc); cidx=D._idx||(D._idx=packTris(D.tris,(cc.length/3)|0)); }
+          else { cpos=[]; for(let i=0;i<cc.length;i+=3) cpos.push(apply(RM,[cc[i],cc[i+1],cc[i+2]])); }
           let col=resolveColor(fs.globals,rst); const la=tess.lineAttributes||[];
           const faceColors=[]; for(let f=0;f<tess.numFaces;f++){ const a=tess.multipleLineAttr? null : la[f]; const c2=a!=null? resolveColor(fs.globals,a-1):null; faceColors.push(c2?c2.rgb:null); }
           if(!col){ const f0=faceColors.find(Boolean); if(f0) col={rgb:f0,alpha:1}; }
           const p={name:uniq(label), positions:cpos, faces:D.tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:ri.tessIndex, riType:ri.type, faceIndexPerTriangle:D.faceOf, numTessFaces:tess.numFaces,
             faceColors: faceColors.some(Boolean)? faceColors : null, matrix:isIdentity(RM)?null:RM, compressedTess:true};
+          if(T) typedPart(p,cpos,cidx);
           item.partName=p.name; parts.push(p); return;
         }
         if(tess.kind==='3d'){
@@ -804,13 +816,14 @@ function assemble(hdr, fss, model, opts){
           if(!col){ // fall back to first face line attribute
             for(const f of tess.faces){ if(f.lineAttributes.length){ col=resolveColor(fs.globals,f.lineAttributes[0]-1); if(col) break; } } }
           const faceColors=tess.faces.map(f=>{ const cc=f.lineAttributes.length? resolveColor(fs.globals,f.lineAttributes[0]-1):null; return cc?cc.rgb:null; });
-          const p={name:uniq(label), positions:pos, faces:tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
+          const p={name:uniq(label), positions:T?null:mkPos(), faces:tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:ri.tessIndex, riType:ri.type, faceIndexPerTriangle:faceOf, numTessFaces:tess.faces.length,
             faceColors: faceColors.some(Boolean)? faceColors : null, matrix:isIdentity(RM)?null:RM};
+          if(T) typedPart(p,applyFlat(RM,c),packTris(tris,(c.length/3)|0));
           item.partName=p.name; parts.push(p);
         } else if(tess.kind==='wire'){
           const col=resolveColor(fs.globals,rst);
-          const w={name:uniq(label), positions:pos, polylines:wirePolylines(c,tess.wireIndexes), color:col?col.rgb:[0,0,0], visible, tessIndex:ri.tessIndex, riType:ri.type};
+          const w={name:uniq(label), positions:mkPos(), polylines:wirePolylines(c,tess.wireIndexes), color:col?col.rgb:[0,0,0], visible, tessIndex:ri.tessIndex, riType:ri.type};
           item.wireName=w.name; wires.push(w);
         }
       };
@@ -830,6 +843,7 @@ function assemble(hdr, fss, model, opts){
           const p={name:uniq(label), positions:m.positions.map(q=>apply(RM,q)), faces:m.tris, color:col?col.rgb:[0.7,0.7,0.7], opacity:col?col.alpha:1, visible,
             analyticFeatures:[], tessIndex:null, riType:ri.type, faceIndexPerTriangle:m.faceOf||null, numTessFaces:m.numFaces||0,
             faceColors:null, matrix:isIdentity(RM)?null:RM, source:'brep'};
+          if(opts.typed) typedPart(p,applyArr(p.positions),m._idx||(m._idx=packTris(m.tris,m.positions.length)));
           item.partName=p.name; parts.push(p); }
         const pl=m.edges&&m.edges.polylines; if(pl&&pl.length&&m.edges.positions){
           const w={name:uniq(label+' edges'), positions:m.edges.positions.map(q=>apply(RM,q)), polylines:pl, color:[0,0,0], visible, tessIndex:null, riType:ri.type, source:'brep'};
