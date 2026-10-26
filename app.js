@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.1
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.2
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,13 +16,15 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.5.1';
+  const APP_VERSION = '1.5.2';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
-  // Parasolid XT (.x_t) export is hidden from the UI pending an NX compatibility fix (NX reports the
-  // output as corrupt). The exporter (buildParasolidXT) is retained and stays on the programmatic API.
-  // For dev testing, append ?xt=1 to the page URL to bring back the export button and inspector tab.
-  const ENABLE_XT_EXPORT = false;
+  // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
+  // (SCH_3800173_37102), which Siemens NX imports (verified on screw.pdf). The UI always exports the
+  // merged B-Rep body, the mode tested in NX. ?xt=1 still forces the controls on for development.
+  const XT_WRITER_FORM = 'nx-37102';
+  const ENABLE_XT_EXPORT = XT_WRITER_FORM === 'nx-37102';
+  const XT_UI_BREP_MODE = 'merged';
   const XT_UI_ENABLED = ENABLE_XT_EXPORT || (() => {
     try {
       const loc = typeof window !== 'undefined' && window.location;
@@ -51,7 +53,7 @@
     brepMode: 'merged',   // 'merged' | 'faceted'
     renderMode: 'shaded-edges',
     explodeFactor: 0,
-    activeTab: 'step',   // 'xt' tab only exists with ?xt=1 (see ENABLE_XT_EXPORT)
+    activeTab: 'step',   // 'xt' tab exists only while XT_UI_ENABLED
     camera: {
       mode: 'free',        // 'free' (quaternion arcball, unclamped) | 'turntable' (Z-up, pitch clamped); persisted
       q: null,             // world->view quaternion [w,x,y,z] for 'free' mode
@@ -2074,7 +2076,6 @@
   // -------------------------------------------------------------------------
   const XT_NX_SCHEMA = 'SCH_3800173_37102';
   const XT_NX_KEY = XT_NX_SCHEMA + '_13006';
-  const XT_WRITER_FORM = 'nx-37102';
   const XT_NX_SCHEMA_DELTAS = {
     12: '36 CCCI7 lattice222 0 CCCI4 mesh1006 0 I8 polyline1008 0 CCCCCCCDI5 owner1040 0 CCCI16 boundary_lattice222 0 CCCI13 boundary_mesh1006 0 I17 boundary_polyline1008 0 CCCA16 index_map_offset0 0 1 dA9 index_map82 0 A17 node_id_index_map82 0 A20 schema_embedding_map82 0 A5 child12 0 A14 lowest_node_id0 0 1 dA16 mesh_offset_data206 0 Z',
     19: '9 CCCCCCI5 frame230 0 CA5 owner12 0 Z'
@@ -3735,7 +3736,7 @@
       }
     }
     if (state.activeTab === 'xt' && !state.cachedXT) {
-      state.cachedXT = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName });
+      state.cachedXT = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName });
       state.cachedXTStats = lastXTStats;
     }
     if (state.activeTab === 'step' && !state.cachedSTEP) {
@@ -3878,7 +3879,67 @@
   // -------------------------------------------------------------------------
   // 11. Event Listeners & Interactive Camera Controls
   // -------------------------------------------------------------------------
-  // Dev-only (?xt=1): re-create the Parasolid XT export button and inspector tab that were removed from index.html.
+  // Result message for Parasolid export: a small non-modal toast styled like the CAD export toast (cad-export-ui.css).
+  let xtToast = null, xtToastTimer = null;
+  function showExportResult(tone, title, lines) {
+    if (typeof document === 'undefined' || !document.body) return;
+    if (!xtToast) {
+      xtToast = document.createElement('section');
+      xtToast.className = 'cad-toast xt-toast';
+      xtToast.setAttribute('role', 'status');
+      xtToast.setAttribute('aria-live', 'polite');
+      xtToast.setAttribute('aria-labelledby', 'xtToastTitle');
+      xtToast.innerHTML = '<div class="cad-t-h"><span class="cad-t-ico" aria-hidden="true"></span><h2 class="cad-t-title" id="xtToastTitle"></h2>' +
+        '<button type="button" class="btn btn-sm cad-t-x" aria-label="Dismiss">\u00d7</button></div><div class="cad-t-msg"></div>';
+      xtToast.querySelector('.cad-t-x').addEventListener('click', () => { xtToast.hidden = true; });
+      xtToast.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); xtToast.hidden = true; } });
+      document.body.appendChild(xtToast);
+      document.addEventListener('pdf3d:cadexport', () => { xtToast.hidden = true; });   // the CAD toast uses the same corner
+    }
+    if (xtToastTimer) { clearTimeout(xtToastTimer); xtToastTimer = null; }
+    xtToast.dataset.state = 'done';
+    xtToast.dataset.tone = tone;
+    xtToast.querySelector('.cad-t-title').textContent = title;
+    const msg = xtToast.querySelector('.cad-t-msg');
+    msg.textContent = '';
+    for (const l of lines) { const p = document.createElement('p'); p.textContent = l; msg.appendChild(p); }
+    msg.hidden = !lines.length;
+    xtToast.hidden = false;
+    if (tone === 'ok') xtToastTimer = setTimeout(() => { if (xtToast && !xtToast.contains(document.activeElement)) xtToast.hidden = true; }, 10000);
+  }
+
+  // Parasolid (.x_t) export (Advanced button and Simple menu item): always the merged B-Rep body.
+  function exportParasolidXT() {
+    const filename = `${stemName()}.x_t`;
+    try {
+      const xt = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true });
+      const st = lastXTStats || { counts: {}, bodyKinds: [] };
+      const bodies = st.counts[12] || 0, faces = st.counts[14] || 0;
+      if (!bodies) {
+        showExportResult('warn', 'Parasolid export: nothing to save', ['No visible part has B-Rep faces. Show a part with geometry and try again.']);
+        return false;
+      }
+      triggerDownload(xt, filename, 'text/plain');
+      const kind = st.bodyKinds.every((k) => k === 1) ? (bodies === 1 ? 'solid body' : 'solid bodies')
+        : st.bodyKinds.every((k) => k === 3) ? (bodies === 1 ? 'sheet body' : 'sheet bodies') : (bodies === 1 ? 'body' : 'bodies');
+      showExportResult('ok', `Parasolid file saved: ${filename}`, [
+        `${bodies} ${kind}, ${faces.toLocaleString('en-US')} planar face${faces === 1 ? '' : 's'}.`,
+        `Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep, meters.`
+      ]);
+      return true;
+    } catch (e) {
+      console.error('Parasolid export failed', e);
+      const oom = e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
+      showExportResult('err', 'Parasolid export failed', [
+        oom ? 'The browser ran out of memory while writing the file. Hide some parts or use Reduce detail, then try again.'
+          : `Error: ${(e && e.message) || e}`,
+        'Nothing was saved.'
+      ]);
+      return false;
+    }
+  }
+
+  // Parasolid XT export button and inspector tab (created here, not in index.html, so they exist only while XT_UI_ENABLED).
   function injectXTControls() {
     if (!document.getElementById('btnExportXT')) {
       const stepBtn = document.getElementById('btnExportSTEP');
@@ -3886,8 +3947,8 @@
         const b = document.createElement('button');
         b.className = 'btn';
         b.id = 'btnExportXT';
-        b.title = 'DEV ONLY (?xt=1): ASCII Parasolid Transmit (.x_t) - known NX import issues';
-        b.textContent = 'Export Parasolid XT (.x_t) [dev]';
+        b.title = 'Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
+        b.textContent = 'Export Parasolid (.x_t)';
         stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
       }
     }
@@ -3897,7 +3958,7 @@
         const t = document.createElement('button');
         t.className = 'tab-btn';
         t.setAttribute('data-tab', 'xt');
-        t.textContent = 'Parasolid .x_t Inspector [dev]';
+        t.textContent = 'Parasolid .x_t Inspector';
         stepTab.parentNode.insertBefore(t, stepTab.nextSibling);
       }
     }
@@ -4139,10 +4200,7 @@
     // Export Buttons
     const btnExportXT = XT_UI_ENABLED ? document.getElementById('btnExportXT') : null;
     if (btnExportXT) {
-      btnExportXT.addEventListener('click', () => {
-        const xt = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, blob: true });
-        triggerDownload(xt, `${stemName()}.x_t`, 'text/plain');
-      });
+      btnExportXT.addEventListener('click', () => exportParasolidXT());
     }
 
     const btnExportSTEP = document.getElementById('btnExportSTEP');

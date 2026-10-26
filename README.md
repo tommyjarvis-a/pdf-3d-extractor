@@ -2,19 +2,18 @@
 
 Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECMA-363 & `/Subtype /PRC` ISO 14739-1) from 3D PDF files, reconstructs watertight 2-manifold B-Rep faces and analytic hole/boss features, and exports CAD-ready geometry:
 
+- **Parasolid XT (`.x_t`)** — Siemens NX format (schema `SCH_3800173_37102`, the form NX 2512 writes), one merged planar B-Rep body in meters; verified importing into NX. Simple: Export ▾ → Parasolid (.x_t); Advanced: Export Parasolid (.x_t).
 - **STEP AP214 (`.stp`)** — Recommended for Siemens NX. ISO 10303-21 `MANIFOLD_SOLID_BREP` / `CLOSED_SHELL` / `ADVANCED_FACE` with outer and inner `FACE_BOUND` hole loops.
 - **Binary & ASCII STL (`.stl`)** — Per-solid watertight triangle meshes.
 - **Wavefront OBJ (`.obj`)** — Multi-body named groups (`o` / `g`) with vertex normals.
 - **IGES 5.3 (`.igs`)** — Sharp feature-edge 3D CAD wireframe (`Entity 110`).
 - **Raw `.u3d` / `.prc` stream extraction** — Direct binary payload extraction from `/3D` and `/RichMedia` dictionaries.
 
-> **Parasolid XT (`.x_t`) export is temporarily disabled.** Siemens NX currently reports the generated `.x_t` as corrupt, so the export button and inspector tab are hidden until the NX import issues are fixed. Use **STEP AP214 (`.stp`)** for NX. The exporter code is retained (`buildParasolidXT` in `app.js`, gated by `ENABLE_XT_EXPORT`); append `?xt=1` to the page URL to re-enable it for development testing only.
-
 ## Usage
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.5.1 decodes
+## What 1.5.2 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|

@@ -1,17 +1,28 @@
 # Changelog
 
-## Unreleased
+## 1.5.2 — 2026-10-25
+
+### Added
+- **Parasolid (.x_t) export is back**, in both modes: a **Parasolid (.x_t)** item in Simple's Export ▾ menu and the
+  **Export Parasolid (.x_t)** button plus the **Parasolid .x_t Inspector** tab in Advanced. No `?xt=1` needed.
+  - Shown only while the writer is the NX form (`PDF3D.capabilities.parasolid`, a new flag for export UI wiring).
+  - Always exports one merged planar B-Rep body, the mode verified in NX. The **Body type** setting still applies to STEP only.
+  - Every export shows a result message, e.g. "Parasolid file saved: screw.x_t" with "1 solid body, 44,724 planar faces",
+    or says why nothing was saved (no visible geometry, out of memory, other error).
 
 ### Changed
-- **Parasolid XT (.x_t) writer now emits the Siemens NX 2512 form** (`buildParasolidXT` in `app.js`): schema
+- **The .x_t file is now in the Siemens NX format and imports into NX** (`buildParasolidXT` in `app.js`): schema
   `SCH_3800173_37102` (key `SCH_3800173_37102_13006`) with inline BODY/REGION schema deltas, NX header keys
   (`APPL=NX`, `KEY=<part>`, `USFLD_SIZE=0`), strict token spacing, Python-style reals, nodes in index order and
   80-column CRLF lines. This is a port of the QA rewriter `xt-rewrite.py --nx-embedded`: the browser output needs no
   post-processing. The old `SCH_1200000_12006` output was rejected by NX.
-  - screw.pdf exports byte-identical to the file verified in NX (41,222,574 bytes, 1 solid body, 44,724 planar faces).
-  - *merged-assembly* now writes one merged body (the ASSEMBLY/INSTANCE layouts of schema 37102 are not known).
-- New flag `PDF3D.capabilities.parasolid` (true while the writer is the NX form) for export UI wiring.
-  Parasolid export stays hidden in the UI (`?xt=1`); the XT inspector reads node counts from the writer.
+  - Verified in NX: screw.pdf exports byte-identical to the file Steven imported (41,222,574 bytes, 1 solid body,
+    44,724 planar faces); `xt-check` CLEAN on screw, head_test and the bundled sample.
+  - The API's *merged-assembly* mode now writes one merged body (the ASSEMBLY/INSTANCE layouts of schema 37102 are not known).
+  - The XT inspector reads node counts from the writer (the stream is wrapped at 80 columns).
+
+### Known issues
+- The *sheet-unsewn* and *faceted* XT modes (API only) are not tested in NX; `xt-check` reports their open sheet edges.
 
 ## 1.5.1 — 2026-10-25
 

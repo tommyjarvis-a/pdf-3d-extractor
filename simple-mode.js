@@ -662,8 +662,10 @@
   function syncExportMenu() {
     ui.exportItems.textContent = '';
     const list = EXPORTS.slice();
-    const xt = $('btnExportXT');   // dev-only (?xt=1); include only when the original is itself shown
-    if (xt && isOwnShown(xt)) list.push(['btnExportXT', 'Parasolid XT [dev]', '.x_t', 'sm-mi--dev']);
+    // Parasolid: only when the app writes the NX form (PDF3D.capabilities.parasolid) and its Advanced button exists.
+    const caps = (window.PDF3D && window.PDF3D.capabilities) || {};
+    const xt = $('btnExportXT');
+    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t']);
     for (const [id, label, ext, cls] of list) {
       const orig = $(id);
       if (!orig || !isOwnShown(orig)) continue;
