@@ -230,9 +230,10 @@
   // menu item that proxies to an original control and closes the menu
   function menuItem(label, opts) {
     const o = opts || {};
-    const b = h('button', { type: 'button', class: 'sm-mi' + (o.cls ? ' ' + o.cls : ''), role: o.role || 'menuitem', title: o.title || null },
+    const lab = h('span', { class: 'sm-mi-label', text: label });
+    const b = h('button', { type: 'button', class: 'sm-mi' + (o.sub ? ' sm-mi--sub' : '') + (o.cls ? ' ' + o.cls : ''), role: o.role || 'menuitem', title: o.title || null },
       o.check != null ? h('span', { class: 'sm-mi-check', 'aria-hidden': 'true' }) : null,
-      h('span', { class: 'sm-mi-label', text: label }),
+      o.sub ? h('span', { class: 'sm-mi-text' }, lab, h('span', { class: 'sm-mi-sub', text: o.sub })) : lab,
       o.ext ? h('span', { class: 'sm-mi-ext', text: o.ext }) : null);
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -665,11 +666,11 @@
     // Parasolid: only when the app writes the NX form (PDF3D.capabilities.parasolid) and its Advanced button exists.
     const caps = (window.PDF3D && window.PDF3D.capabilities) || {};
     const xt = $('btnExportXT');
-    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t']);
-    for (const [id, label, ext, cls] of list) {
+    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t', '', 'Faceted solid, flat triangles']);
+    for (const [id, label, ext, cls, sub] of list) {
       const orig = $(id);
       if (!orig || !isOwnShown(orig)) continue;
-      const it = menuItem(label, { ext, cls, title: orig.title || null, action: () => { const o = $(id); if (o) o.click(); } });
+      const it = menuItem(label, { ext, cls, sub, title: orig.title || null, action: () => { const o = $(id); if (o) o.click(); } });
       it.disabled = !!orig.disabled;
       it.dataset.smExport = id;
       ui.exportItems.append(it);

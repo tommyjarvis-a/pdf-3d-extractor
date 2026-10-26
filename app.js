@@ -3924,7 +3924,7 @@
         : st.bodyKinds.every((k) => k === 3) ? (bodies === 1 ? 'sheet body' : 'sheet bodies') : (bodies === 1 ? 'body' : 'bodies');
       showExportResult('ok', `Parasolid file saved: ${filename}`, [
         `${bodies} ${kind}, ${faces.toLocaleString('en-US')} planar face${faces === 1 ? '' : 's'}.`,
-        `Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep, meters.`
+        `Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep. Stored in meters (Parasolid standard), opens at true size in NX.`
       ]);
       return true;
     } catch (e) {
@@ -3947,7 +3947,7 @@
         const b = document.createElement('button');
         b.className = 'btn';
         b.id = 'btnExportXT';
-        b.title = 'Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
+        b.title = 'Faceted solid, flat triangles. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
         b.textContent = 'Export Parasolid (.x_t)';
         stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
       }
