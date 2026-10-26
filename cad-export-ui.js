@@ -42,9 +42,15 @@
       line: 'The surface-fitting kernel couldn\u2019t be downloaded. You may be offline, or a firewall, proxy or browser extension blocked it. Try again once you\u2019re connected.' },
     worker_failed: { title: 'Surface fitting couldn\u2019t start',
       line: 'The browser blocked the surface-fitting worker (offline, or a browser or site security setting). Reload the page and try again.' },
+    offline: { title: 'You\u2019re offline',
+      line: 'The surface-fitting kernel needs an internet connection the first time. Reconnect and try again.' },
     out_of_memory: { title: 'Ran out of memory',
       line: 'The browser ran out of memory while fitting surfaces. Select fewer parts and try again.' }
   };
+  function engineFailKey(code) {
+    if ((code === 'worker_failed' || code === 'kernel_download') && typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline';
+    return code;
+  }
   const TYPE_NAMES = {
     plane: ['plane', 'planes'], cylinder: ['cylinder', 'cylinders'], cone: ['cone', 'cones'], sphere: ['sphere', 'spheres'],
     torus: ['torus', 'tori'], revolution: ['surface of revolution', 'surfaces of revolution'], bspline: ['B-spline surface', 'B-spline surfaces'], nurbs: ['B-spline surface', 'B-spline surfaces'], other: ['other', 'other']
@@ -316,7 +322,16 @@
     if (tgt) tgt.focus({ preventScroll: true });
   }
   function fmtTime(ms) { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
-  function announce(t) { ui.tLive.textContent = ''; setTimeout(() => { ui.tLive.textContent = t; }, 30); }
+  // Announcements are queued 30 ms apart so screen readers notice repeats. Once a run's result is announced
+  // (final), any start/progress text still in flight is dropped so it can't replace the result.
+  let annSeq = 0, annFinal = -1;
+  function announce(t, final) {
+    if (!final && !run) return;          // stray start/progress text after the run ended
+    const n = ++annSeq;
+    if (final) annFinal = n;
+    ui.tLive.textContent = '';
+    setTimeout(() => { if (annFinal > n) return; ui.tLive.textContent = t; }, 30);
+  }
 
   function showProgress(pre, sel) {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
@@ -424,7 +439,7 @@
     ui.tSave.hidden = !last.blob;
     ui.tOk.hidden = out.status === 'cancelled';
     ui.tClose.hidden = false;
-    announce(out.title + '. ' + out.lines.join(' '));
+    announce(out.title + '. ' + out.lines.join(' '), true);
     if (hadFocus) (ui.tOk.hidden ? ui.tClose : ui.tOk).focus({ preventScroll: true });
     if (out.download) download(res.blob, res.filename);
     if (out.status === 'cancelled') hideTimer = setTimeout(() => { if (!focusInToast()) dismiss(false); }, 4000);
@@ -476,7 +491,7 @@
         return { status: 'shell', tone: 'warn', title: 'Surfaces exported, not a closed solid', lines, details, download: has };
       }
       case 'mesh_only': {
-        const why = ENGINE_FAIL[res.reasonCode];
+        const why = ENGINE_FAIL[engineFailKey(res.reasonCode)];
         if (why) {
           return { status: 'mesh_only', tone: 'warn', title: has ? why.title + ': mesh body exported' : why.title, download: has, details,
             lines: [why.line, has ? 'The STEP contains the mesh body only (triangles), no fitted surfaces.' : 'Nothing was exported.'] };
@@ -486,7 +501,7 @@
             has ? 'The STEP contains the mesh body only (triangles), no fitted surfaces.' : 'Nothing was exported.'] };
       }
       case 'skipped': {
-        const why = ENGINE_FAIL[res.reasonCode];
+        const why = ENGINE_FAIL[engineFailKey(res.reasonCode)];
         if (why) {   // e.g. Fitted solid only + the engine could not run: nothing to fall back to
           return { status: 'skipped', tone: 'warn', title: why.title, download: false, details: [],
             lines: [why.line, 'Nothing was exported. The mesh exports (STEP, STL, OBJ) still work.'] };
@@ -535,6 +550,8 @@
     start: () => start(null),
     cancel,
     get running() { return !!run; },
+    describe: (res, err) => describe(res, err, 0),   // shared wording for export-flow.js
+    normResult,
     get fittedOnly() { return fittedOnly; },
     set fittedOnly(v) { setFittedOnly(v); }
   };

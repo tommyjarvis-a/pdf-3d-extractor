@@ -3,7 +3,7 @@
  * Loads the PRC decoder + fitting code with importScripts and the vendored opencascade.js (LGPL-2.1) with dynamic import().
  *
  * in : {cmd:'run', prc:ArrayBuffer, partIdx:[i..] (index into parsePRC(...).parts.filter(p => p.faces.length) = app parts),
- *       names:[..], kernelBytes}
+ *       names:[..], kernelBytes, solidsOnly (only closed solids go into fittedStep; open shells are left out)}
  * out: {type:'progress', stage, pct (0..1 within the worker's share), done, total, bytes, totalBytes, label}
  *      {type:'done', fittedStep:ArrayBuffer|null, byType (face count per STEP surface type)|null, parts:[{idx, status, reason, summary}], timings, wasmHeapPeak}
  *      {type:'error', message}
@@ -95,7 +95,7 @@ self.onmessage = async (ev) => {
       heap();
       if (res.cancelled) { self.postMessage({ type: 'cancelled' }); return; }
       parts.push({ idx: i, status: res.status, reason: res.reason, summary: { ...res.summary, check: res.check || null, tris: tris[s] } });
-      if (res.shape) bodies.push([res.shape, res.summary.name + '_fitted']);
+      if (res.shape && (!m.solidsOnly || res.status === 'solid')) bodies.push([res.shape, res.summary.name + '_fitted']);
       base += span;
     }
     post({ stage: 'write', pct: 0.97, label: 'Writing fitted surfaces…' }, true);

@@ -2,7 +2,7 @@
 
 Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECMA-363 & `/Subtype /PRC` ISO 14739-1) from 3D PDF files, reconstructs watertight 2-manifold B-Rep faces and analytic hole/boss features, and exports CAD-ready geometry:
 
-- **Parasolid XT (`.x_t`)** — Siemens NX format (schema `SCH_3800173_37102`, the form NX 2512 writes), one merged planar B-Rep body in meters; verified importing into NX. Simple: Export ▾ → Parasolid (.x_t); Advanced: Export Parasolid (.x_t).
+- **Parasolid XT (`.x_t`)** — Siemens NX format (schema `SCH_3800173_37102`, the form NX 2512 writes), one merged planar B-Rep body in meters; verified importing into NX. Simple: Export → Parasolid; Advanced: Export Parasolid (.x_t).
 - **STEP AP214 (`.stp`)** — Recommended for Siemens NX. ISO 10303-21 `MANIFOLD_SOLID_BREP` / `CLOSED_SHELL` / `ADVANCED_FACE` with outer and inner `FACE_BOUND` hole loops.
 - **Binary & ASCII STL (`.stl`)** — Per-solid watertight triangle meshes.
 - **Wavefront OBJ (`.obj`)** — Multi-body named groups (`o` / `g`) with vertex normals.
@@ -13,7 +13,7 @@ Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECM
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.5.3 decodes
+## What 1.6.0 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|
@@ -60,6 +60,34 @@ Example (VEA file with the RHAdobe decoder unavailable):
 Simple mode does not show `message`. It renders its own load card from `reasonCode` (plus `format`/`detail` for
 `UNSUPPORTED_MESH`): amber "This 3D model can't be read yet", neutral "No 3D model in this PDF", or amber
 "Couldn't read this 3D model". For `DECODE_ERROR` the error text goes only to `console.warn`.
+
+## Export in Simple mode (1.6.0 alpha)
+
+Simple mode has one **Export** button (`export-flow.js` / `export-flow.css`, by Designer): pick a format, set its
+options, then **Save**. Advanced mode keeps its export bar unchanged.
+
+- **Formats:** STEP, STL (binary or ASCII), OBJ, IGES, raw stream, and Parasolid (only while `PDF3D.capabilities.parasolid`; always one merged body).
+- **STEP body:** *Fitted solid* (surfaces fitted by the CAD kernel, served pages only), *Mesh*, or *Both*.
+  With *Fitted solid*, each part that closes into a solid is written as a fitted solid. Every other part (open shell,
+  no clean fit, no face data) is either written as a mesh body named `<part>_mesh` in the same file
+  (**Save mesh STEP instead**, the default) or left out (**Leave unfitted parts out**).
+- **Saving:** Chrome and Edge open the system Save dialog first; cancelling it does nothing. Safari and Firefox show a
+  file-name field and save to the Downloads folder.
+- **Parasolid:** listed as "Faceted solid, flat faces"; one merged faceted body, no body or mode choice.
+- **Result card:** every export ends with a card: saved, partly fitted (one line per part), fell back to mesh, nothing saved, cancelled or failed.
+  A Parasolid sheet body or open model gets an amber "Parasolid sheet body exported (open model)" card; a model with no
+  faces gets "Nothing to export" and no file is saved.
+- A selected part (Parts list) limits the export to that part.
+- The fitted kernel needs the multi-file app served over http(s); in `file://` pages and the single-file build the card says it is unavailable.
+
+All formats go through `PDF3D.exportFormat(format, opts)` in `app.js`, which calls the same writers as the Advanced
+buttons; STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical to the Advanced buttons' files:
+
+```js
+const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', partIds: null, signal, onProgress });
+// r = { blob, filename, status, reasonCode, reason, summary: { parts: [{ index, name, status, faces, reasonCode, written: 'solid'|'mesh'|'omitted' }] } }
+// exportFormat('xt') summary adds: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges }
+```
 
 ## Known limitations
 

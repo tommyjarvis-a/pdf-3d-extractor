@@ -7,7 +7,8 @@ const ROOT = path.resolve(__dirname, '..');
 const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 // One pass over the original markup, so tag-like text inside inlined files (e.g. the integration notes in
 // simple-mode.js / *.css header comments) is never re-matched.
-const TAG = /<script src="([^"?]+)(?:\?[^"]*)?"><\/script>|<link rel="stylesheet" href="([^"?]+)(?:\?[^"]*)?" \/>/g;
+// (a `defer` attribute is dropped: the inlined scripts sit at the end of <body>, after the markup they use)
+const TAG = /<script src="([^"?]+)(?:\?[^"]*)?"(?: defer)?><\/script>|<link rel="stylesheet" href="([^"?]+)(?:\?[^"]*)?" \/>/g;
 let n = 0;
 const html = src.replace(TAG, (m, js, css) => {
   n++;

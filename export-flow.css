@@ -1,0 +1,122 @@
+/* export-flow.css — single "Export" button + format popover + persistent result card (pairs with export-flow.js).
+ * Uses the app tokens and the Simple-mode popover look (.sm-pop / .sm-pop-h / .sm-sep / .sm-check from simple-mode.css). */
+
+/* SIMPLE MODE ONLY: the new button replaces the Simple split button + menu. Advanced mode is not touched
+ * (its export bar, .cad-adv group and CAD toast stay exactly as they are). */
+body.xf-on.sm-simple .sm-topbar .sm-split, body.xf-on.sm-simple #smMenuExport { display: none !important; }
+body:not(.sm-simple) .xf-btn, body:not(.sm-simple) .xf-pop { display: none !important; }
+.xf-btn { gap: 7px; }
+.xf-btn .xf-caret { font-size: 9px; opacity: .85; }
+.xf-btn[aria-expanded="true"] .xf-caret { transform: rotate(180deg); }
+.xf-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+
+/* popover */
+.xf-pop { --sm-radius: 10px; --sm-glass: rgba(15, 22, 35, 0.95); width: 320px; padding: 6px; }
+[hidden].xf-pop, .xf-pop [hidden], [hidden].xf-result, .xf-result [hidden] { display: none !important; }
+.xf-list { display: grid; gap: 1px; }
+.xf-fmt {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-0); text-align: left; cursor: pointer; font: 500 12.5px var(--sans);
+}
+.xf-fmt:hover { background: var(--bg-3); }
+.xf-fmt:focus { outline: none; }
+.xf-fmt:focus-visible { background: var(--bg-2); outline: 2px solid var(--cyan); outline-offset: -2px; box-shadow: 0 0 0 4px rgba(34, 211, 238, .18); }
+.xf-fmt[aria-checked="true"] { background: var(--cyan-dim); }
+.xf-fmt[aria-checked="true"] .xf-fmt-l { color: var(--cyan); }
+.xf-dot { width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border-hi); background: var(--bg-0); }
+.xf-fmt[aria-checked="true"] .xf-dot { border-color: var(--cyan); background: radial-gradient(circle, var(--cyan) 0 3.5px, var(--bg-0) 4.5px); }
+.xf-fmt-t { display: grid; gap: 1px; min-width: 0; }
+.xf-fmt-l { font-weight: 600; }
+.xf-fmt-s { font-size: 10.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.xf-opts { display: grid; gap: 2px; padding-bottom: 2px; }
+.xf-field { display: grid; gap: 4px; padding: 5px 10px 6px; }
+.xf-field > span { font-size: 11.5px; color: var(--text-1); font-weight: 600; }
+.xf-field .select-ctrl { width: 100%; font-size: 11.5px; }
+.xf-hint { font-size: 10.5px; color: var(--text-2); }
+.xf-seg-row { display: flex; padding: 2px; gap: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-0); }
+.xf-radio { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+.xf-radio input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.xf-radio-l { width: 100%; text-align: center; padding: 5px 6px; border-radius: 6px; font: 600 11.5px var(--sans); color: var(--text-2); }
+.xf-radio:hover .xf-radio-l { color: var(--text-0); }
+.xf-radio input:checked + .xf-radio-l { background: var(--cyan-dim); color: var(--cyan); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .45); }
+.xf-radio input:focus-visible + .xf-radio-l { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.xf-check { margin: 0 0 2px; }
+.xf-note { margin: 2px 10px 4px; font-size: 10.5px; line-height: 1.4; color: var(--text-2); }
+.xf-note--warn { color: var(--amber); }
+
+.xf-name { padding-bottom: 2px; }
+.xf-name-box { display: flex; align-items: stretch; border: 1px solid var(--border-hi); border-radius: 6px; background: var(--bg-0); overflow: hidden; }
+.xf-name-box:focus-within { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34, 211, 238, .18); }
+.xf-name-in { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text-0); font: 500 12px var(--mono); padding: 6px 8px; outline: none; }
+.xf-name-ext { padding: 6px 8px 6px 0; color: var(--text-2); font: 500 12px var(--mono); }
+.xf-name .xf-note { margin-top: 0; }
+.xf-foot { display: flex; justify-content: flex-end; padding: 4px 4px 2px; }
+.xf-go { min-width: 110px; justify-content: center; }
+.xf-go:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* two long choices: let the segments wrap to two lines instead of clipping */
+.xf-seg--wrap .xf-radio-l { white-space: normal; line-height: 1.25; padding: 6px 6px; }
+.xf-seg--wrap .xf-seg-row { align-items: stretch; }
+.xf-seg--wrap .xf-radio { justify-content: stretch; }
+.xf-seg--wrap .xf-radio-l { display: flex; align-items: center; justify-content: center; height: 100%; box-sizing: border-box; }
+
+/* persistent result card */
+.xf-result {
+  position: fixed; right: 16px; bottom: 16px; z-index: 85; width: min(380px, calc(100vw - 24px));
+  display: flex; gap: 10px; align-items: flex-start; padding: 12px 12px 12px 14px;
+  background: rgba(15, 22, 35, 0.96); backdrop-filter: blur(10px); color: var(--text-0); font: 13px/1.45 var(--sans);
+  border: 1px solid var(--border-hi); border-left: 3px solid var(--cyan); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .35);
+}
+.xf-result:focus { outline: none; }
+.xf-result:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple stays readable after switching */
+.xf-r-ico { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; font: 700 11px var(--sans); color: #03101d; background: var(--cyan); }
+.xf-result[data-tone="ok"] { border-left-color: var(--emerald); }
+.xf-result[data-tone="ok"] .xf-r-ico { background: var(--emerald); }
+.xf-result[data-tone="ok"] .xf-r-ico::before { content: "\2713"; }
+.xf-result[data-tone="warn"] { border-left-color: var(--amber); }
+.xf-result[data-tone="warn"] .xf-r-ico { background: var(--amber); }
+.xf-result[data-tone="warn"] .xf-r-ico::before { content: "!"; }
+.xf-result[data-tone="err"] { border-left-color: var(--rose); }
+.xf-result[data-tone="err"] .xf-r-ico { background: var(--rose); color: #fff; }
+.xf-result[data-tone="err"] .xf-r-ico::before { content: "\00d7"; }
+.xf-result[data-tone="muted"] { border-left-color: var(--text-2); }
+.xf-result[data-tone="muted"] .xf-r-ico { background: var(--text-2); }
+.xf-result[data-tone="muted"] .xf-r-ico::before { content: "\2013"; }
+.xf-result[data-tone="busy"] .xf-r-ico { background: transparent; border: 2px solid var(--cyan-dim); border-top-color: var(--cyan); animation: xf-spin .9s linear infinite; }
+@keyframes xf-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .xf-result[data-tone="busy"] .xf-r-ico { animation: none; } }
+.xf-r-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.xf-r-title { font-weight: 700; font-size: 13px; }
+.xf-r-body p { margin: 0; color: var(--text-1); font-size: 12px; }
+.xf-r-file { font: 500 11px var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
+.xf-r-bar { height: 4px; margin-top: 5px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.xf-r-bar > span { display: block; height: 100%; width: 30%; background: var(--cyan); border-radius: 2px; transition: width .2s; }
+.xf-r-bar:not([aria-valuenow]) > span { animation: xf-indet 1.2s ease-in-out infinite; }
+@keyframes xf-indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+.xf-r-act { display: flex; gap: 6px; align-items: center; }
+.xf-r-close { min-width: 28px; justify-content: center; font-size: 15px; line-height: 1; padding: 3px 7px; }
+/* per-part list */
+.xf-parts { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; max-height: 40vh; overflow: auto; }
+.xf-part { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; padding: 4px 8px; border-radius: 6px; background: var(--bg-2); border-left: 2px solid var(--border-hi); font-size: 11.5px; }
+.xf-part[hidden] { display: none; }
+.xf-part[data-written="solid"] { border-left-color: var(--emerald); }
+.xf-part[data-written="mesh"] { border-left-color: var(--amber); }
+.xf-part[data-written="omitted"] { border-left-color: var(--rose); }
+.xf-part-n { font-weight: 600; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xf-part-w { color: var(--text-1); font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
+.xf-part[data-written="omitted"] .xf-part-w { color: var(--rose); }
+.xf-part-r { grid-column: 1 / -1; color: var(--text-2); font-size: 10.5px; }
+.xf-more { justify-self: start; margin-top: 2px; padding: 2px 0; border: 0; background: none; color: var(--cyan); font: 600 11.5px var(--sans); cursor: pointer; }
+.xf-more:hover { text-decoration: underline; }
+.xf-more:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 3px; }
+.xf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .xf-pop { width: calc(100vw - 16px); }
+  .xf-fmt, .xf-radio-l, .xf-go, .xf-name-in, .xf-pop select { min-height: 40px; }
+  .xf-r-close, .xf-r-cancel { min-width: 40px; min-height: 40px; }
+  .xf-result { right: 12px; left: 12px; width: auto; bottom: 12px; }
+}

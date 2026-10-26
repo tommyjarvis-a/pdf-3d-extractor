@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.3
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.5.3';
+  const APP_VERSION = '1.6.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -4253,6 +4253,144 @@
   // form (SCH_3800173_37102_13006) that Siemens NX imports.
   const PDF3D_NS = (window.PDF3D = window.PDF3D || {});
   PDF3D_NS.capabilities = Object.assign(PDF3D_NS.capabilities || {}, { parasolid: XT_WRITER_FORM === 'nx-37102', parasolidSchema: XT_NX_SCHEMA });
+
+  // ---------------------------------------------------------------------------------------------
+  // PDF3D.exportFormat(format, opts) -> Promise<{ blob, filename, status, reasonCode, reason, summary }>
+  // One entry point for every format, used by the Simple Export menu (export-flow.js). It calls the
+  // same writers as the Advanced buttons with the same arguments, so a mesh-format file is byte-identical
+  // to the button's file for the same settings; no button is clicked.
+  //   format: 'step' | 'stl' | 'obj' | 'iges' | 'raw' | 'xt'
+  //   opts:   { body: 'mesh'|'fitted'|'both' (STEP), onNoFit: 'mesh'|'omit' (STEP fitted), units, detail,
+  //             brepMode, partIds (null = all visible parts), encoding: 'binary'|'ascii' (STL), signal, onProgress }
+  //   summary.parts = [{ index, name, status: solid|shell|mesh_only|skipped, faces, reasonCode, reason, written: solid|mesh|omitted }]
+  // STEP 'fitted': a part is written as a fitted solid only when it closes into a solid; open shells, unfitted and
+  // skipped parts get their mesh body (<name>_mesh, same file) with onNoFit 'mesh' (default) or are left out with
+  // 'omit'. No part written -> blob null. xt is offered only while capabilities.parasolid and is always merged.
+  const EXPORT_FORMATS = ['step', 'stl', 'obj', 'iges', 'raw', 'xt'];
+  const exportBlob = (content, mimeType) => (content instanceof Uint8Array
+    ? new Blob([content], { type: mimeType })
+    : new Blob(textChunks(content), { type: `${mimeType};charset=utf-8` }));   // same Blob as triggerDownload
+  function exportSelection(partIds) {
+    // parts = the array handed to the writers (null: state.parts itself, as the Advanced buttons pass it);
+    // chosen[k] = the part for ids[k]
+    if (partIds == null) { const ids = state.parts.map((p, i) => i).filter((i) => state.parts[i].visible); return { ids, parts: state.parts, chosen: ids.map((i) => state.parts[i]) }; }
+    const ids = [...new Set([].concat(partIds))].filter((i) => Number.isInteger(i) && state.parts[i]);
+    // an explicitly chosen part is exported even while hidden (the writers export visible parts only)
+    const parts = ids.map((i) => { const p = state.parts[i]; return p.visible ? p : Object.assign(Object.create(Object.getPrototypeOf(p)), p, { visible: true }); });
+    return { ids, parts, chosen: parts };
+  }
+  const exportCancelled = () => ({ blob: null, filename: null, status: 'cancelled', reason: 'Cancelled by user', reasonCode: 'cancelled', summary: null });
+  const exportSkipped = (reasonCode, reason) => ({ blob: null, filename: null, status: 'skipped', reasonCode, reason, summary: { parts: [] } });
+  const meshPartsSummary = (sel) => sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: null, reasonCode: null, reason: null, written: 'mesh' }));
+
+  async function exportFormat(format, opts) {
+    const o = opts || {}; const fmt = String(format || '').toLowerCase(); const signal = o.signal;
+    if (!EXPORT_FORMATS.includes(fmt)) throw new Error(`Unknown export format: ${format}`);
+    if (signal && signal.aborted) return exportCancelled();
+    const stem = stemName();
+    const units = o.units || state.units;
+    const detail = o.detail != null && o.detail !== '' ? (Number(o.detail) || 1) : (state.exportDetail || 1);
+    const progress = (p) => { if (typeof o.onProgress === 'function') { try { o.onProgress(p); } catch (e) { /* UI callback */ } } };
+
+    if (fmt === 'raw') {
+      const st = state.streams[state.activeStreamIdx];
+      if (!st || !st.rawBytes) return exportSkipped('no_parts', 'Open a 3D PDF first');
+      const ext = st.subtype === 'PRC' ? 'prc' : 'u3d';
+      return { blob: exportBlob(st.rawBytes, 'application/octet-stream'), filename: `${stem}.${ext}`, status: 'ok', reasonCode: null, reason: null, summary: { parts: [] } };
+    }
+    if (fmt === 'step' && (o.body === 'fitted' || o.body === 'both')) return exportStepFitted(o, stem, progress);
+
+    const sel = exportSelection(o.partIds);
+    if (!sel.ids.length) { const r = exportSkipped('no_parts', 'No visible part to export');
+      if (fmt === 'xt') r.summary = { parts: [], bodies: 0, faces: 0 };   // card: "Nothing to export"
+      return r; }
+    const wo = { detail };   // writers read state.exportDetail when detail is omitted; passing it gives the same value
+    let content, filename, mime;
+    if (fmt === 'xt') {
+      if (!(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return exportSkipped('unavailable', 'Parasolid export is not available in this version');
+      content = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, ...wo });
+      const st = lastXTStats || { counts: {}, bodyKinds: [] };
+      const bodies = st.counts[12] || 0, faces = st.counts[14] || 0;
+      const parts = meshPartsSummary(sel);
+      // summary.faces 0 -> the card says "Nothing to export"; bodyType 'sheet' / openEdges > 0 / sewn false -> "open model".
+      // The writer's own fields win when it reports them; otherwise they come from the body records it wrote
+      // (body_type 1 = solid, 3 = sheet) and the parts' unmatched half-edges (a solid body has none).
+      const bodyType = st.bodyType || (bodies && st.bodyKinds.length && st.bodyKinds.every((k) => k === 1) ? 'solid' : bodies ? 'sheet' : null);
+      const openEdges = st.openEdges != null ? st.openEdges
+        : bodyType === 'solid' ? 0 : sel.chosen.reduce((a, p) => a + ((p.brep && p.brep.unmatchedHalfEdges) || 0), 0);
+      const sewn = st.sewn != null ? st.sewn : XT_UI_BREP_MODE === 'merged';
+      const xs = { parts, bodies, faces, bodyType, sewn, openEdges, schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
+      if (!bodies || !faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
+      progress({ stage: 'write', pct: 100, label: 'Done' });
+      return { blob: exportBlob(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
+    }
+    if (fmt === 'step') { content = buildSTEPAP214(sel.parts, { brepMode: o.brepMode || state.brepMode, units, blob: true, ...wo }); filename = `${stem}.stp`; mime = 'application/step'; }
+    else if (fmt === 'stl' && o.encoding === 'ascii') { content = buildASCIISTL(sel.parts, units, { blob: true, ...wo }); filename = `${stem}-ascii.stl`; mime = 'text/plain'; }
+    else if (fmt === 'stl') { content = buildBinarySTL(sel.parts, units, wo); filename = `${stem}.stl`; mime = 'application/sla'; }
+    else if (fmt === 'obj') { content = buildWavefrontOBJ(sel.parts, units, { blob: true, ...wo }); filename = `${stem}.obj`; mime = 'text/plain'; }
+    else { content = buildIGESWireframe(sel.parts, units, { blob: true, ...wo }); filename = `${stem}.igs`; mime = 'text/plain'; }
+    if (signal && signal.aborted) return exportCancelled();
+    progress({ stage: 'write', pct: 100, label: 'Done' });
+    return { blob: exportBlob(content, mime), filename, status: 'ok', reasonCode: null, reason: null, summary: { parts: meshPartsSummary(sel) } };
+  }
+
+  // STEP with fitted surfaces (recon/cad-export.js) + per-part bookkeeping
+  async function exportStepFitted(o, stem, progress) {
+    const cad = PDF3D_NS.exportCadSurfaces;
+    if (typeof cad !== 'function') return { ...exportSkipped('unavailable', 'Fitted CAD surfaces are not available in this build'), summary: null };
+    const fittedOnly = o.body === 'fitted'; const omit = fittedOnly && o.onNoFit === 'omit'; const signal = o.signal;
+    const r = await cad(o.partIds == null ? null : o.partIds, { fittedOnly, solidsOnly: fittedOnly, onProgress: progress, signal });
+    if (!r || r.status === 'cancelled') return r || exportCancelled();
+    // preflight refusals (unavailable here, nothing to export, model too large): whole-file result, no per-part list
+    if (r.status === 'skipped' && /^(unavailable|no_parts|too_large)$/.test(r.reasonCode || '')) return r;
+    const s = r.summary || {}; const sel = exportSelection(o.partIds);
+    // no per-part list (not the bundled engine): keep its whole-file result as it is
+    if (!(Array.isArray(s.parts) && s.parts.length) && r.blob) {
+      const one = sel.ids.length === 1;
+      const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: r.status, faces: one ? (+s.faces || 0) : undefined,
+        reasonCode: r.status === 'solid' ? null : (r.reasonCode || null), written: r.status === 'solid' ? 'solid' : 'mesh' }));
+      return { ...r, summary: { ...s, parts } };
+    }
+    const byIdx = new Map((s.parts || []).map((p) => [p.index, p]));
+    const engineCode = /^(kernel_download|offline|worker_failed|out_of_memory|error|fit_limit|no_face_data)$/.test(r.reasonCode || '') ? r.reasonCode : null;
+    const parts = sel.ids.map((i, k) => {
+      const wp = byIdx.get(i); const status = wp ? wp.status : 'mesh_only';
+      const reasonCode = status === 'solid' ? null : status === 'shell' ? 'open_shell' : (wp ? 'no_fit' : (engineCode || 'no_fit'));
+      // fitted: only closed solids are fitted output. both: solids and open shells are fitted, every part also has a mesh body
+      const fitted = status === 'solid';
+      const written = fitted ? 'solid' : (omit ? 'omitted' : 'mesh');
+      return { index: i, name: wp ? wp.name : sel.chosen[k].name, status, faces: wp ? wp.faces : 0, reasonCode,
+        reason: wp ? (wp.reason || null) : null, tris: wp ? wp.tris : undefined, check: wp ? wp.check : undefined, written };
+    });
+    const solids = parts.filter((p) => p.written === 'solid');
+    const summary = { ...s, parts, faces: fittedOnly ? solids.reduce((a, p) => a + (+p.faces || 0), 0) : s.faces };
+    const cleanReason = r.reason ? String(r.reason).replace(/\. Fitted-only export:.*$/, '') : null;
+    if (!fittedOnly) return { ...r, summary };   // 'both': the engine already wrote fitted bodies + every mesh body
+
+    const filename = `${stem}.stp`;
+    const left = parts.filter((p) => p.written === 'mesh');
+    if (!solids.length && !left.length) {
+      return { blob: null, filename: null, status: 'skipped', reasonCode: engineCode || 'no_fit', reason: cleanReason, summary };
+    }
+    let blob = r.blob || null;
+    if (left.length) {
+      if (signal && signal.aborted) return exportCancelled();
+      progress({ stage: 'write', pct: 99, label: 'Writing mesh bodies…' });
+      await new Promise((res) => setTimeout(res, 0));
+      const meshParts = left.map((p) => { const ap = state.parts[p.index]; return Object.assign(Object.create(Object.getPrototypeOf(ap)), ap, { name: `${p.name}_mesh`, visible: true }); });
+      const meshText = buildSTEPAP214(meshParts, { units: 'mm', brepMode: 'merged', detail: 1 });   // same mesh body as the 'both' file
+      const fittedText = blob ? await blob.text() : null;
+      if (signal && signal.aborted) return exportCancelled();
+      const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
+      blob = new Blob(chunks, { type: 'application/step' });
+    }
+    progress({ stage: 'write', pct: 100, label: 'Done', bytes: blob.size, totalBytes: blob.size });
+    const status = solids.length === parts.length ? 'solid' : solids.length ? 'partial' : 'mesh_only';
+    return { blob, filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
+      reasonCode: status === 'solid' ? null : (engineCode || (parts.some((p) => p.status === 'shell') ? 'open_shell' : 'no_fit')),
+      reason: status === 'solid' ? null : cleanReason, summary };
+  }
+  PDF3D_NS.exportFormat = exportFormat;
 
   window.addEventListener('DOMContentLoaded', () => {
     initEvents();

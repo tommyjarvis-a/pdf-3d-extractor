@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.6.0 (alpha) — 2026-10-25
+
+Alpha: the new Simple-mode Export menu is ready for testing, and its wording and options may still change.
+
+### Added
+- **One Export button in Simple mode** (Designer's `export-flow.js` / `export-flow.css`). It replaces the Simple Export
+  split button and Export ▾ menu: pick a format (STEP, STL, OBJ, IGES, raw stream, Parasolid), its options, then **Save**.
+  Advanced mode is unchanged.
+  - **STEP body:** *Fitted solid*, *Mesh* or *Both*. With *Fitted solid*, parts that close into a solid are written as
+    fitted solids. Every other part is saved as a mesh body named `<part>_mesh` in the same file (default), or left out
+    with **Leave unfitted parts out**.
+  - **Save dialog:** Chrome and Edge ask where to save before the export runs (cancel = nothing happens). Safari and
+    Firefox show a file-name field and save to Downloads.
+  - **Parasolid:** listed as *Faceted solid, flat faces*, with no body or mode choice (one merged faceted body).
+  - **Result card after every export:** saved, partly fitted (one line per part with its reason), fell back to the mesh
+    STEP, nothing saved, cancelled, or failed. A Parasolid file that is a sheet body or has open edges gets an amber
+    "Parasolid sheet body exported (open model)" card. If there are no faces, the card says "Nothing to export" and no
+    file is saved (in Chrome, the empty file the save dialog made is deleted).
+- **`PDF3D.exportFormat(format, opts)`** (`app.js`): one entry point for every export format, returning
+  `{blob, filename, status, reasonCode, summary.parts[].written}`. For Parasolid, the summary also has `faces`, `bodies`,
+  `bodyType` (`solid`/`sheet`), `sewn` and `openEdges`. It calls the same writers as the Advanced buttons
+  (no hidden button clicks), so STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical to theirs.
+- **Fitted-only CAD export can leave open shells out** (`exportCadSurfaces(..., {fittedOnly: true, solidsOnly: true})`,
+  `recon/cad-worker.js`): only closed solids are written as fitted bodies. The default is unchanged.
+
+### Changed
+- `cad-export-ui.js` from Designer: when the browser is offline, a failed kernel download or worker now reads
+  "You’re offline" with a reconnect hint, and a late progress update can no longer replace the screen-reader
+  announcement of the result. Its result wording is shared with the Export card (`PDF3DCadExportUI.describe`).
+
+### Known issues
+- Fitted surfaces need the multi-file app served over http(s); `file://` pages and the single-file build say they are unavailable.
 ## 1.5.3 — 2026-11-01
 
 ### Fixed

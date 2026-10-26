@@ -100,6 +100,8 @@
 
   async function exportCadSurfaces(partIds, opts) {
     const o = opts || {}; const fittedOnly = !!o.fittedOnly; const signal = o.signal;
+    // solidsOnly (fitted-only): write only closed solids as fitted bodies; open shells count as not fitted (PDF3D.exportFormat)
+    const solidsOnly = fittedOnly && !!o.solidsOnly;
     const onProgress = typeof o.onProgress === 'function' ? o.onProgress : () => {};
     const emit = (p) => { try { onProgress(p); } catch (e) { setTimeout(() => { throw e; }); } };
     const T0 = performance.now(); const timings = {};
@@ -115,13 +117,13 @@
     try {
       let wres = null, workerErr = null;
       if (sel.mode === 'fit') {
-        wres = await runWorker(sel, emit, signal);
+        wres = await runWorker(sel, emit, signal, solidsOnly);
         if (wres === 'cancelled') return cancelled();
         if (wres && wres.error) { workerErr = wres; wres = null; }
       }
       if (signal && signal.aborted) return cancelled();
       // per-part outcome -> overall status
-      const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || p.status === 'shell');
+      const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || (!solidsOnly && p.status === 'shell'));
       let status, reason = null, reasonCode = null;
       let cause = null;
       if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only'; }
@@ -189,7 +191,7 @@
       wasmHeapPeak: (wres && wres.wasmHeapPeak) || 0 };
   }
 
-  function runWorker(sel, emit, signal) {
+  function runWorker(sel, emit, signal, solidsOnly) {
     return new Promise((resolve) => {
       let w; try { w = new Worker(WORKER_URL); } catch (e) { resolve({ error: true, worker: true, message: String(e && e.message || e) }); return; }
       let done = false; let lastPct = 0; let heapPeak = 0; let kernelLoaded = false;
@@ -205,7 +207,7 @@
         else if (m.type === 'error') finish({ error: true, message: m.message, stage: m.stage, oom: !!m.oom, wasmHeapPeak: m.wasmHeapPeak }); };
       w.onerror = (e) => { e.preventDefault && e.preventDefault(); finish({ error: true, worker: true, message: (e && e.message) || 'worker error', oom: /memory/i.test((e && e.message) || '') }); };
       const prc = sel.stream.rawBytes.slice().buffer;  // copy: the app keeps its bytes
-      w.postMessage({ cmd: 'run', cacheName: CACHE_NAME, prc, partIdx: sel.ids, names: sel.parts.map((p) => p.name) }, [prc]);
+      w.postMessage({ cmd: 'run', cacheName: CACHE_NAME, prc, partIdx: sel.ids, names: sel.parts.map((p) => p.name), solidsOnly: !!solidsOnly }, [prc]);
       emit({ stage: 'kernel', pct: 0, label: kernelCached() ? 'Starting CAD kernel…' : 'Loading CAD kernel (' + (KERNEL_BYTES / 1e6).toFixed(1) + ' MB)…', bytes: 0, totalBytes: KERNEL_BYTES });
     });
   }
