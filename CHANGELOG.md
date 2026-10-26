@@ -42,6 +42,10 @@
 
 ### Known issues
 - The *sheet-unsewn* and *faceted* XT modes (API only) are not tested in NX; `xt-check` reports their open sheet edges.
+- Open models (any open edges) export by default as a Parasolid **sheet body**; this form has not yet been tested in NX.
+- Chrome: very large Parasolid downloads (roughly above 300–600 MB, a browser limit on blob downloads) can be cancelled
+  at 0 bytes while the app still shows success. Normal parts (e.g. the 41 MB screw) are unaffected. Fixed in 1.6.0.
+- One zero-length line (zero tangent) is written for a degenerate edge in r07, an open sheet model (1 of 1.6 million lines).
 
 ## 1.5.1 — 2026-10-25
 
