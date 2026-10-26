@@ -4308,19 +4308,26 @@
     let content, filename, mime;
     if (fmt === 'xt') {
       if (!(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return exportSkipped('unavailable', 'Parasolid export is not available in this version');
-      content = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, ...wo });
-      const st = lastXTStats || { counts: {}, bodyKinds: [] };
-      const bodies = st.counts[12] || 0, faces = st.counts[14] || 0;
+      // Same call as the Advanced button (exportParasolidXT); the writer fills `st` with its own summary.
+      const st = {};
+      try {
+        content = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, stats: st, ...wo, ...(o.maxBytes != null ? { maxBytes: o.maxBytes } : {}) });
+      } catch (e) {
+        const tooLarge = e && e.code === 'XT_TOO_LARGE';
+        const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
+        if (!tooLarge && !oom) throw e;   // the flow shows "Parasolid export failed" with the message
+        const eb = tooLarge && e.estimatedBytes; const gb = eb ? (eb >= 1e9 ? (eb / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(eb / 1e6)) + ' MB') : null;
+        return { blob: null, filename: null, status: 'error', reasonCode: tooLarge ? 'XT_TOO_LARGE' : 'out_of_memory',   // Designer's card keys on 'XT_TOO_LARGE'
+          reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some parts or use Reduce detail, then try again`
+            : 'The browser ran out of memory while writing the Parasolid file. Hide some parts or use Reduce detail, then try again',
+          summary: { parts: [], estimatedBytes: (e && e.estimatedBytes) || null } };
+      }
       const parts = meshPartsSummary(sel);
-      // summary.faces 0 -> the card says "Nothing to export"; bodyType 'sheet' / openEdges > 0 / sewn false -> "open model".
-      // The writer's own fields win when it reports them; otherwise they come from the body records it wrote
-      // (body_type 1 = solid, 3 = sheet) and the parts' unmatched half-edges (a solid body has none).
-      const bodyType = st.bodyType || (bodies && st.bodyKinds.length && st.bodyKinds.every((k) => k === 1) ? 'solid' : bodies ? 'sheet' : null);
-      const openEdges = st.openEdges != null ? st.openEdges
-        : bodyType === 'solid' ? 0 : sel.chosen.reduce((a, p) => a + ((p.brep && p.brep.unmatchedHalfEdges) || 0), 0);
-      const sewn = st.sewn != null ? st.sewn : XT_UI_BREP_MODE === 'merged';
-      const xs = { parts, bodies, faces, bodyType, sewn, openEdges, schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
-      if (!bodies || !faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
+      // Card keys: faces 0 -> "Nothing to export"; bodyType 'sheet' / openEdges > 0 / sewn false -> amber open-model card.
+      const xs = { parts, faces: st.faces || 0, bodies: st.bodies || 0, bodyType: st.bodyType || null, sewn: st.sewn !== false, openEdges: st.openEdges || 0,
+        viewerFaces: st.viewerFaces, splitFaces: st.splitFaces, estimatedBytes: st.estimatedBytes,
+        schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
+      if (!xs.faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
       progress({ stage: 'write', pct: 100, label: 'Done' });
       return { blob: exportBlob(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
     }

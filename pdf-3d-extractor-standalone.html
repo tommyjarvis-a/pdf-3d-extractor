@@ -87,6 +87,8 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    min-width: 0;      /* 1.6.0: a long select option (B-Rep Mode) no longer widens the page on phones */
+    max-width: 100%;
   }
 
   /* Export Bar */
@@ -1515,6 +1517,10 @@ body:not(.sm-simple) .xf-btn, body:not(.sm-simple) .xf-pop { display: none !impo
 .xf-radio:hover .xf-radio-l { color: var(--text-0); }
 .xf-radio input:checked + .xf-radio-l { background: var(--cyan-dim); color: var(--cyan); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .45); }
 .xf-radio input:focus-visible + .xf-radio-l { outline: 2px solid var(--cyan); outline-offset: 1px; }
+/* capabilities.cadSurfaces === false: Fitted / Both dimmed and inert, still focusable */
+.xf-radio--off, .xf-radio--off input { cursor: not-allowed; }
+.xf-radio--off .xf-radio-l, .xf-radio--off:hover .xf-radio-l { opacity: .45; color: var(--text-2); }
+.xf-hint--off { display: block; margin-top: 3px; color: var(--text-2); opacity: .85; }
 .xf-check { margin: 0 0 2px; }
 .xf-note { margin: 2px 10px 4px; font-size: 10.5px; line-height: 1.4; color: var(--text-2); }
 .xf-note--warn { color: var(--amber); }
@@ -1623,7 +1629,7 @@ body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple s
         <option value="m">meter (1000 mm)</option>
       </select>
       <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
-      <select class="select-ctrl" id="brepModeSelect" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
+      <select class="select-ctrl" id="brepModeSelect" style="max-width:100%" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
         <option value="merged" selected>Merged Planar B-Rep (Auto Solid / Sheet)</option>
         <option value="sheet-unsewn">Open Sheet Surfaces (NX House/Deck Recovery)</option>
         <option value="merged-assembly">Multi-Body Assembly (STEP only; Parasolid always writes merged)</option>
@@ -9244,19 +9250,26 @@ void main() { gl_FragColor = uRGBA; }`;
     let content, filename, mime;
     if (fmt === 'xt') {
       if (!(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return exportSkipped('unavailable', 'Parasolid export is not available in this version');
-      content = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, ...wo });
-      const st = lastXTStats || { counts: {}, bodyKinds: [] };
-      const bodies = st.counts[12] || 0, faces = st.counts[14] || 0;
+      // Same call as the Advanced button (exportParasolidXT); the writer fills `st` with its own summary.
+      const st = {};
+      try {
+        content = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, stats: st, ...wo, ...(o.maxBytes != null ? { maxBytes: o.maxBytes } : {}) });
+      } catch (e) {
+        const tooLarge = e && e.code === 'XT_TOO_LARGE';
+        const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
+        if (!tooLarge && !oom) throw e;   // the flow shows "Parasolid export failed" with the message
+        const eb = tooLarge && e.estimatedBytes; const gb = eb ? (eb >= 1e9 ? (eb / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(eb / 1e6)) + ' MB') : null;
+        return { blob: null, filename: null, status: 'error', reasonCode: tooLarge ? 'XT_TOO_LARGE' : 'out_of_memory',   // Designer's card keys on 'XT_TOO_LARGE'
+          reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some parts or use Reduce detail, then try again`
+            : 'The browser ran out of memory while writing the Parasolid file. Hide some parts or use Reduce detail, then try again',
+          summary: { parts: [], estimatedBytes: (e && e.estimatedBytes) || null } };
+      }
       const parts = meshPartsSummary(sel);
-      // summary.faces 0 -> the card says "Nothing to export"; bodyType 'sheet' / openEdges > 0 / sewn false -> "open model".
-      // The writer's own fields win when it reports them; otherwise they come from the body records it wrote
-      // (body_type 1 = solid, 3 = sheet) and the parts' unmatched half-edges (a solid body has none).
-      const bodyType = st.bodyType || (bodies && st.bodyKinds.length && st.bodyKinds.every((k) => k === 1) ? 'solid' : bodies ? 'sheet' : null);
-      const openEdges = st.openEdges != null ? st.openEdges
-        : bodyType === 'solid' ? 0 : sel.chosen.reduce((a, p) => a + ((p.brep && p.brep.unmatchedHalfEdges) || 0), 0);
-      const sewn = st.sewn != null ? st.sewn : XT_UI_BREP_MODE === 'merged';
-      const xs = { parts, bodies, faces, bodyType, sewn, openEdges, schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
-      if (!bodies || !faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
+      // Card keys: faces 0 -> "Nothing to export"; bodyType 'sheet' / openEdges > 0 / sewn false -> amber open-model card.
+      const xs = { parts, faces: st.faces || 0, bodies: st.bodies || 0, bodyType: st.bodyType || null, sewn: st.sewn !== false, openEdges: st.openEdges || 0,
+        viewerFaces: st.viewerFaces, splitFaces: st.splitFaces, estimatedBytes: st.estimatedBytes,
+        schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
+      if (!xs.faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
       progress({ stage: 'write', pct: 100, label: 'Done' });
       return { blob: exportBlob(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
     }
@@ -9471,6 +9484,18 @@ void main() { gl_FragColor = uRGBA; }`;
     if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') return 'This browser does not support Web Workers / WebAssembly';
     return null;
   };
+  // PDF3D.capabilities.cadSurfaces / cadSurfacesReason (1.6.0, read by export-flow.js each time the popover opens):
+  // 'single_file' (inlined build; checked first, serving that file over http does not add the kernel files),
+  // 'file_url' (page opened from a local file), 'kernel_download' (the last run could not download the kernel or start the
+  // worker - cleared after a later successful run or when the browser comes back online - or no Worker / WebAssembly at all).
+  // Only these three codes are used (Designer's card maps exactly these).
+  let kernelFailed = false;
+  const capReason = () => (!SRC ? 'single_file' : location.protocol === 'file:' ? 'file_url'
+    : (kernelFailed || typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') ? 'kernel_download' : null);
+  const updateCaps = () => {
+    const r = capReason(); const c = (NS.capabilities = NS.capabilities || {});
+    c.cadSurfaces = !r; c.cadSurfacesReason = r;
+  };
   const appState = () => { try { return window.CAD3DExtractor && window.CAD3DExtractor.getState(); } catch (e) { return null; } };
   // kernelCached: a real check of the Cache Storage entry the worker writes after a successful kernel load (CACHE_NAME / the
   // wasm URL; no network request). The preflight is synchronous, so it reads the last probe result; the probe re-runs on load,
@@ -9566,7 +9591,9 @@ void main() { gl_FragColor = uRGBA; }`;
       const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || (!solidsOnly && p.status === 'shell'));
       let status, reason = null, reasonCode = null;
       let cause = null;
-      if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only'; }
+      if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only';
+        if (fe.code === 'kernel_download' || fe.code === 'worker_failed') { kernelFailed = true; updateCaps(); } }
+      else if (sel.mode === 'fit' && kernelFailed) { kernelFailed = false; updateCaps(); }
       else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
       else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
@@ -9658,6 +9685,8 @@ void main() { gl_FragColor = uRGBA; }`;
     NS.canExportCadSurfaces = canExportCadSurfaces;
     NS.exportCadSurfaces = exportCadSurfaces;
     NS.cadSurfaceLimits = LIMITS;
+    updateCaps();
+    window.addEventListener('online', () => { if (kernelFailed) { kernelFailed = false; updateCaps(); } });
   }
 })();
 
@@ -11077,6 +11106,8 @@ void main() { gl_FragColor = uRGBA; }`;
  *       no body/mode choice; exportFormat('xt', opts) always gets brepMode: 'merged'.
  *       Result keys (summary.<k>, else top-level <k>): faces === 0 → amber "Nothing to export", no file;
  *       bodyType === 'sheet' || openEdges > 0 || sewn === false → amber "Parasolid sheet body exported (open model)".
+ *       No blob + reasonCode XT_TOO_LARGE (estimated output > 8 GB) → amber "Model too large to export" (own text only, the
+ *       engine's reason is not appended). Reason codes are matched case-insensitively; xt_too_large = too_large.
  *   PDF3D.exportFormat(format, opts)       → Promise<{ blob, filename, status, reasonCode, summary }>
  *       preferred writer when present (format: step|stl|obj|iges|raw|xt). For STEP, opts = { body: 'fitted'|'mesh'|'both',
  *       onNoFit: 'mesh'|'omit', fittedOnly (= body==='fitted'), partIds, units, detail, brepMode, encoding, signal, onProgress }
@@ -11129,6 +11160,15 @@ void main() { gl_FragColor = uRGBA; }`;
   const caps = () => (NS().capabilities || {});
   const hasCad = () => typeof NS().exportCadSurfaces === 'function';
   const hasHook = () => typeof NS().exportFormat === 'function';
+  // capabilities.cadSurfaces === false (1.6.0): Fitted / Both shown but inert, STEP body is Mesh for now (saved pref kept).
+  // Absent / undefined = previous behavior. Read live, so it is re-checked every time the popover opens.
+  const cadOff = () => caps().cadSurfaces === false;
+  const CAD_REASON = {
+    file_url: 'Fitting needs the page opened from a web address, not a local file.',
+    single_file: 'Fitting isn\u2019t included in the single-file version.',
+    kernel_download: 'The CAD kernel couldn\u2019t download. Check your connection and try again.'
+  };
+  const cadReason = () => CAD_REASON[caps().cadSurfacesReason] || 'Surface fitting isn\u2019t available here.';
   function available(f) {
     if (f.cap) return caps()[f.cap] === true && (hasHook() || !!$(f.btn));     // capability flag AND a writer
     return hasHook() || !!$(f.btn);
@@ -11168,10 +11208,16 @@ void main() { gl_FragColor = uRGBA; }`;
   const ui = {};
   let open = false, running = null, lastTrigger = null, ptrInside = false;
 
-  function radio(name, value, label, hint, checked, onchange) {
+  function radio(name, value, label, hint, checked, onchange, off) {
     const inp = h('input', { type: 'radio', name, value, checked: !!checked });
-    inp.addEventListener('change', () => { if (inp.checked) onchange(value); });
-    return h('label', { class: 'xf-radio' }, inp, h('span', { class: 'xf-radio-l', text: label }), hint ? h('small', { text: hint }) : null);
+    if (off) {
+      // inert but still focusable: aria-disabled (not disabled), and clicks / arrow-key selection are cancelled
+      inp.setAttribute('aria-disabled', 'true');
+      if (off.describedBy) inp.setAttribute('aria-describedby', off.describedBy);
+      inp.addEventListener('click', (ev) => { ev.preventDefault(); });
+    }
+    inp.addEventListener('change', () => { if (inp.checked && !off) onchange(value); });
+    return h('label', { class: 'xf-radio' + (off ? ' xf-radio--off' : '') }, inp, h('span', { class: 'xf-radio-l', text: label }), hint ? h('small', { text: hint }) : null);
   }
   function proxySelect(origId, label) {
     const o = $(origId);
@@ -11341,14 +11387,19 @@ void main() { gl_FragColor = uRGBA; }`;
       const cad = hasCad() || hasHook();
       const p = prefs.step;
       if (!cad) p.body = 'mesh';
+      const off = cad && cadOff();                         // fitting unavailable: Mesh for now, prefs.step.body untouched
+      const body = off ? 'mesh' : p.body;
       if (cad) {
+        const pick = (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); };
+        const dis = off ? { describedBy: 'xfCadReason' } : null;
         add(h('div', { class: 'xf-field xf-seg', role: 'radiogroup', 'aria-label': 'Body' }, h('span', { text: 'Body' }),
           h('div', { class: 'xf-seg-row' },
-            radio('xfBody', 'fitted', 'Fitted solid', null, p.body === 'fitted', (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); }),
-            radio('xfBody', 'mesh', 'Mesh', null, p.body === 'mesh', (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); }),
-            radio('xfBody', 'both', 'Both', null, p.body === 'both', (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); })),
-          h('small', { class: 'xf-hint', 'data-xf': 'body-hint', text: BODY_HINT[p.body] })));
-        if (p.body === 'fitted') {
+            radio('xfBody', 'fitted', 'Fitted solid', null, body === 'fitted', pick, dis),
+            radio('xfBody', 'mesh', 'Mesh', null, body === 'mesh', off ? () => {} : pick),
+            radio('xfBody', 'both', 'Both', null, body === 'both', pick, dis)),
+          h('small', { class: 'xf-hint', 'data-xf': 'body-hint', text: BODY_HINT[body] }),
+          off ? h('small', { class: 'xf-hint xf-hint--off', id: 'xfCadReason', 'data-xf': 'cad-reason', text: cadReason() }) : null));
+        if (body === 'fitted') {
           add(h('div', { class: 'xf-field xf-seg xf-seg--wrap', role: 'radiogroup', 'aria-label': 'If a face can\u2019t be fitted', 'data-xf': 'on-no-fit' },
             h('span', { text: 'If a face can\u2019t be fitted' }),
             h('div', { class: 'xf-seg-row' },
@@ -11356,10 +11407,10 @@ void main() { gl_FragColor = uRGBA; }`;
               radio('xfNoFit', 'omit', 'Leave unfitted parts out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
         }
       }
-      if (p.body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
+      if (body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
       add(proxySelect('unitSelect', 'Units'));
-      if (p.body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
-      const pre = cad && p.body !== 'mesh' ? preflight() : null;
+      if (body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
+      const pre = cad && body !== 'mesh' ? preflight() : null;
       if (pre && pre.estimate && pre.estimate.kernelCached === false) add(h('p', { class: 'xf-note', text: 'First fitted export downloads the CAD kernel (' + mb(pre.estimate.kernelBytes || 13719175) + ' MB).' }));
       if (pre && pre.ok === false && pre.message) add(h('p', { class: 'xf-note xf-note--warn', text: pre.message }));
     } else if (f.id === 'stl') {
@@ -11469,7 +11520,7 @@ void main() { gl_FragColor = uRGBA; }`;
   function optsFor(f) {
     const o = { units: ($('unitSelect') || {}).value, detail: ($('detailSelect') || {}).value, brepMode: ($('brepModeSelect') || {}).value, partIds: sel() };
     if (f.id === 'step') {
-      const body = (hasCad() || hasHook()) ? prefs.step.body : 'mesh';
+      const body = (hasCad() || hasHook()) && !cadOff() ? prefs.step.body : 'mesh';
       Object.assign(o, { body, onNoFit: prefs.step.onNoFit === 'omit' ? 'omit' : 'mesh', fittedOnly: body === 'fitted' });
     }
     if (f.id === 'stl') o.encoding = prefs.stl.enc;
@@ -11493,7 +11544,7 @@ void main() { gl_FragColor = uRGBA; }`;
       const parts = partsOf(r);
       const noFile = !r.blob;
       // nothing fitted (or the engine could not run) → the whole mesh STEP, so the user always gets a file
-      if (noFile && !/^(too_large|no_parts|unavailable)$/.test(r.reasonCode || '')) {
+      if (noFile && !/^(too_large|no_parts|unavailable)$/.test(normCode(r.reasonCode) || '')) {
         const m = hasHook() ? await NS().exportFormat('step', Object.assign({}, o, { body: 'mesh', fittedOnly: false, signal: run.ctrl.signal })) : await capture('btnExportSTEP');
         if (!m || !m.blob) return r;
         if (parts) for (const p of parts) if (p.written !== 'solid') p.written = 'mesh';
@@ -11630,7 +11681,10 @@ void main() { gl_FragColor = uRGBA; }`;
     too_large: 'the model is too large to fit in the browser'
   };
   const ENGINE = /^(kernel_download|offline|worker_failed|out_of_memory)$/;
-  function codeOf(c) { return c && ENGINE.test(c) && navigator.onLine === false ? 'offline' : c; }
+  // reason codes are compared case-insensitively; 1.5.2 Parasolid writer's XT_TOO_LARGE (> 8 GB estimate) = too_large
+  const CODE_ALIAS = { xt_too_large: 'too_large' };
+  function normCode(c) { if (c == null || c === '') return c; const k = String(c).trim().toLowerCase(); return CODE_ALIAS[k] || k; }
+  function codeOf(c) { c = normCode(c); return c && ENGINE.test(c) && navigator.onLine === false ? 'offline' : c; }
   function reasonText(code, reason, status) {
     const c = codeOf(code);
     if (c && REASONS[c] && (ENGINE.test(c) || !reason)) return REASONS[c];
@@ -11647,6 +11701,9 @@ void main() { gl_FragColor = uRGBA; }`;
     return p.written === 'mesh' ? { kind: 'mesh', name: p.name, what: 'Mesh', body: p.name + '_mesh', why } : { kind: 'omitted', name: p.name, what: 'Left out', why };
   }
 
+  const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
+  const XT_UNITS = 'Stored in meters, opens at true size in NX.';
+
   function describe(f, o, res, err) {
     const label = f.id === 'stl' ? 'STL (' + (o.encoding === 'ascii' ? 'ASCII' : 'binary') + ')' : f.label;
     if (err) return { tone: 'err', status: 'error', title: label + ' export failed', lines: [String((err && err.message) || err), 'Nothing was saved.'] };
@@ -11657,17 +11714,22 @@ void main() { gl_FragColor = uRGBA; }`;
       if (f.id === 'xt') {
         // Parasolid result checks (summary first, then the top-level result): summary.faces, summary.bodyType, summary.openEdges, summary.sewn
         const s = res.summary || {}, g = (k) => (s[k] != null ? s[k] : res[k]);
+        // XT_TOO_LARGE (estimated output > 8 GB): own wording only; the engine's reason text also says "Nothing was saved"
+        if (!blob && normCode(res.reasonCode) === 'too_large') {
+          return { tone: 'warn', status: 'too_large', title: 'Model too large to export',
+            lines: ['This model is too large for the browser to write as Parasolid' + (+g('estimatedBytes') > 0 ? ' (about ' + fmtGB(+g('estimatedBytes')) + ').' : '.'), 'Nothing was saved. Try hiding some parts, or export STEP or STL instead.'] };
+        }
         if (g('faces') != null && +g('faces') === 0) {
           return { tone: 'warn', status: 'empty', title: 'Nothing to export', lines: ['The model has no faces to write.', 'No file was saved.'] };
         }
         if (blob && (g('bodyType') === 'sheet' || +g('openEdges') > 0 || g('sewn') === false)) {
           return { tone: 'warn', status: 'sheet', blob, title: 'Parasolid sheet body exported (open model)',
-            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.'] };
+            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.', XT_UNITS] };
         }
       }
       if (!blob) return { tone: 'err', status: res.status || 'error', title: 'Nothing exported', lines: [cap(reasonText(res.reasonCode, res.reason)) || 'The exporter returned no file.', 'Nothing was saved.'] };
       const what = f.id === 'step' ? 'Mesh STEP' : f.id === 'xt' ? 'Parasolid (one faceted body)' : label;
-      return { tone: 'ok', status: 'ok', title: what + ' exported', lines: [], blob };
+      return { tone: 'ok', status: 'ok', title: what + ' exported', lines: f.id === 'xt' ? [XT_UNITS] : [], blob };
     }
     if (res.status === 'cancelled') return { tone: 'muted', status: 'cancelled', title: 'Export cancelled', lines: ['Nothing was saved.'] };
     const blob = res.blob || null;

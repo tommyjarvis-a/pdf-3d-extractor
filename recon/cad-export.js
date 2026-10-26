@@ -31,6 +31,18 @@
     if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') return 'This browser does not support Web Workers / WebAssembly';
     return null;
   };
+  // PDF3D.capabilities.cadSurfaces / cadSurfacesReason (1.6.0, read by export-flow.js each time the popover opens):
+  // 'single_file' (inlined build; checked first, serving that file over http does not add the kernel files),
+  // 'file_url' (page opened from a local file), 'kernel_download' (the last run could not download the kernel or start the
+  // worker - cleared after a later successful run or when the browser comes back online - or no Worker / WebAssembly at all).
+  // Only these three codes are used (Designer's card maps exactly these).
+  let kernelFailed = false;
+  const capReason = () => (!SRC ? 'single_file' : location.protocol === 'file:' ? 'file_url'
+    : (kernelFailed || typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') ? 'kernel_download' : null);
+  const updateCaps = () => {
+    const r = capReason(); const c = (NS.capabilities = NS.capabilities || {});
+    c.cadSurfaces = !r; c.cadSurfacesReason = r;
+  };
   const appState = () => { try { return window.CAD3DExtractor && window.CAD3DExtractor.getState(); } catch (e) { return null; } };
   // kernelCached: a real check of the Cache Storage entry the worker writes after a successful kernel load (CACHE_NAME / the
   // wasm URL; no network request). The preflight is synchronous, so it reads the last probe result; the probe re-runs on load,
@@ -126,7 +138,9 @@
       const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || (!solidsOnly && p.status === 'shell'));
       let status, reason = null, reasonCode = null;
       let cause = null;
-      if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only'; }
+      if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only';
+        if (fe.code === 'kernel_download' || fe.code === 'worker_failed') { kernelFailed = true; updateCaps(); } }
+      else if (sel.mode === 'fit' && kernelFailed) { kernelFailed = false; updateCaps(); }
       else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
       else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
@@ -218,5 +232,7 @@
     NS.canExportCadSurfaces = canExportCadSurfaces;
     NS.exportCadSurfaces = exportCadSurfaces;
     NS.cadSurfaceLimits = LIMITS;
+    updateCaps();
+    window.addEventListener('online', () => { if (kernelFailed) { kernelFailed = false; updateCaps(); } });
   }
 })();

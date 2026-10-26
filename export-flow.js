@@ -10,6 +10,8 @@
  *       no body/mode choice; exportFormat('xt', opts) always gets brepMode: 'merged'.
  *       Result keys (summary.<k>, else top-level <k>): faces === 0 → amber "Nothing to export", no file;
  *       bodyType === 'sheet' || openEdges > 0 || sewn === false → amber "Parasolid sheet body exported (open model)".
+ *       No blob + reasonCode XT_TOO_LARGE (estimated output > 8 GB) → amber "Model too large to export" (own text only, the
+ *       engine's reason is not appended). Reason codes are matched case-insensitively; xt_too_large = too_large.
  *   PDF3D.exportFormat(format, opts)       → Promise<{ blob, filename, status, reasonCode, summary }>
  *       preferred writer when present (format: step|stl|obj|iges|raw|xt). For STEP, opts = { body: 'fitted'|'mesh'|'both',
  *       onNoFit: 'mesh'|'omit', fittedOnly (= body==='fitted'), partIds, units, detail, brepMode, encoding, signal, onProgress }
@@ -62,6 +64,15 @@
   const caps = () => (NS().capabilities || {});
   const hasCad = () => typeof NS().exportCadSurfaces === 'function';
   const hasHook = () => typeof NS().exportFormat === 'function';
+  // capabilities.cadSurfaces === false (1.6.0): Fitted / Both shown but inert, STEP body is Mesh for now (saved pref kept).
+  // Absent / undefined = previous behavior. Read live, so it is re-checked every time the popover opens.
+  const cadOff = () => caps().cadSurfaces === false;
+  const CAD_REASON = {
+    file_url: 'Fitting needs the page opened from a web address, not a local file.',
+    single_file: 'Fitting isn\u2019t included in the single-file version.',
+    kernel_download: 'The CAD kernel couldn\u2019t download. Check your connection and try again.'
+  };
+  const cadReason = () => CAD_REASON[caps().cadSurfacesReason] || 'Surface fitting isn\u2019t available here.';
   function available(f) {
     if (f.cap) return caps()[f.cap] === true && (hasHook() || !!$(f.btn));     // capability flag AND a writer
     return hasHook() || !!$(f.btn);
@@ -101,10 +112,16 @@
   const ui = {};
   let open = false, running = null, lastTrigger = null, ptrInside = false;
 
-  function radio(name, value, label, hint, checked, onchange) {
+  function radio(name, value, label, hint, checked, onchange, off) {
     const inp = h('input', { type: 'radio', name, value, checked: !!checked });
-    inp.addEventListener('change', () => { if (inp.checked) onchange(value); });
-    return h('label', { class: 'xf-radio' }, inp, h('span', { class: 'xf-radio-l', text: label }), hint ? h('small', { text: hint }) : null);
+    if (off) {
+      // inert but still focusable: aria-disabled (not disabled), and clicks / arrow-key selection are cancelled
+      inp.setAttribute('aria-disabled', 'true');
+      if (off.describedBy) inp.setAttribute('aria-describedby', off.describedBy);
+      inp.addEventListener('click', (ev) => { ev.preventDefault(); });
+    }
+    inp.addEventListener('change', () => { if (inp.checked && !off) onchange(value); });
+    return h('label', { class: 'xf-radio' + (off ? ' xf-radio--off' : '') }, inp, h('span', { class: 'xf-radio-l', text: label }), hint ? h('small', { text: hint }) : null);
   }
   function proxySelect(origId, label) {
     const o = $(origId);
@@ -274,14 +291,19 @@
       const cad = hasCad() || hasHook();
       const p = prefs.step;
       if (!cad) p.body = 'mesh';
+      const off = cad && cadOff();                         // fitting unavailable: Mesh for now, prefs.step.body untouched
+      const body = off ? 'mesh' : p.body;
       if (cad) {
+        const pick = (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); };
+        const dis = off ? { describedBy: 'xfCadReason' } : null;
         add(h('div', { class: 'xf-field xf-seg', role: 'radiogroup', 'aria-label': 'Body' }, h('span', { text: 'Body' }),
           h('div', { class: 'xf-seg-row' },
-            radio('xfBody', 'fitted', 'Fitted solid', null, p.body === 'fitted', (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); }),
-            radio('xfBody', 'mesh', 'Mesh', null, p.body === 'mesh', (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); }),
-            radio('xfBody', 'both', 'Both', null, p.body === 'both', (v) => { p.body = v; save(); rerender('input[name="xfBody"][value="' + v + '"]'); })),
-          h('small', { class: 'xf-hint', 'data-xf': 'body-hint', text: BODY_HINT[p.body] })));
-        if (p.body === 'fitted') {
+            radio('xfBody', 'fitted', 'Fitted solid', null, body === 'fitted', pick, dis),
+            radio('xfBody', 'mesh', 'Mesh', null, body === 'mesh', off ? () => {} : pick),
+            radio('xfBody', 'both', 'Both', null, body === 'both', pick, dis)),
+          h('small', { class: 'xf-hint', 'data-xf': 'body-hint', text: BODY_HINT[body] }),
+          off ? h('small', { class: 'xf-hint xf-hint--off', id: 'xfCadReason', 'data-xf': 'cad-reason', text: cadReason() }) : null));
+        if (body === 'fitted') {
           add(h('div', { class: 'xf-field xf-seg xf-seg--wrap', role: 'radiogroup', 'aria-label': 'If a face can\u2019t be fitted', 'data-xf': 'on-no-fit' },
             h('span', { text: 'If a face can\u2019t be fitted' }),
             h('div', { class: 'xf-seg-row' },
@@ -289,10 +311,10 @@
               radio('xfNoFit', 'omit', 'Leave unfitted parts out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
         }
       }
-      if (p.body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
+      if (body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
       add(proxySelect('unitSelect', 'Units'));
-      if (p.body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
-      const pre = cad && p.body !== 'mesh' ? preflight() : null;
+      if (body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
+      const pre = cad && body !== 'mesh' ? preflight() : null;
       if (pre && pre.estimate && pre.estimate.kernelCached === false) add(h('p', { class: 'xf-note', text: 'First fitted export downloads the CAD kernel (' + mb(pre.estimate.kernelBytes || 13719175) + ' MB).' }));
       if (pre && pre.ok === false && pre.message) add(h('p', { class: 'xf-note xf-note--warn', text: pre.message }));
     } else if (f.id === 'stl') {
@@ -402,7 +424,7 @@
   function optsFor(f) {
     const o = { units: ($('unitSelect') || {}).value, detail: ($('detailSelect') || {}).value, brepMode: ($('brepModeSelect') || {}).value, partIds: sel() };
     if (f.id === 'step') {
-      const body = (hasCad() || hasHook()) ? prefs.step.body : 'mesh';
+      const body = (hasCad() || hasHook()) && !cadOff() ? prefs.step.body : 'mesh';
       Object.assign(o, { body, onNoFit: prefs.step.onNoFit === 'omit' ? 'omit' : 'mesh', fittedOnly: body === 'fitted' });
     }
     if (f.id === 'stl') o.encoding = prefs.stl.enc;
@@ -426,7 +448,7 @@
       const parts = partsOf(r);
       const noFile = !r.blob;
       // nothing fitted (or the engine could not run) → the whole mesh STEP, so the user always gets a file
-      if (noFile && !/^(too_large|no_parts|unavailable)$/.test(r.reasonCode || '')) {
+      if (noFile && !/^(too_large|no_parts|unavailable)$/.test(normCode(r.reasonCode) || '')) {
         const m = hasHook() ? await NS().exportFormat('step', Object.assign({}, o, { body: 'mesh', fittedOnly: false, signal: run.ctrl.signal })) : await capture('btnExportSTEP');
         if (!m || !m.blob) return r;
         if (parts) for (const p of parts) if (p.written !== 'solid') p.written = 'mesh';
@@ -563,7 +585,10 @@
     too_large: 'the model is too large to fit in the browser'
   };
   const ENGINE = /^(kernel_download|offline|worker_failed|out_of_memory)$/;
-  function codeOf(c) { return c && ENGINE.test(c) && navigator.onLine === false ? 'offline' : c; }
+  // reason codes are compared case-insensitively; 1.5.2 Parasolid writer's XT_TOO_LARGE (> 8 GB estimate) = too_large
+  const CODE_ALIAS = { xt_too_large: 'too_large' };
+  function normCode(c) { if (c == null || c === '') return c; const k = String(c).trim().toLowerCase(); return CODE_ALIAS[k] || k; }
+  function codeOf(c) { c = normCode(c); return c && ENGINE.test(c) && navigator.onLine === false ? 'offline' : c; }
   function reasonText(code, reason, status) {
     const c = codeOf(code);
     if (c && REASONS[c] && (ENGINE.test(c) || !reason)) return REASONS[c];
@@ -580,6 +605,9 @@
     return p.written === 'mesh' ? { kind: 'mesh', name: p.name, what: 'Mesh', body: p.name + '_mesh', why } : { kind: 'omitted', name: p.name, what: 'Left out', why };
   }
 
+  const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
+  const XT_UNITS = 'Stored in meters, opens at true size in NX.';
+
   function describe(f, o, res, err) {
     const label = f.id === 'stl' ? 'STL (' + (o.encoding === 'ascii' ? 'ASCII' : 'binary') + ')' : f.label;
     if (err) return { tone: 'err', status: 'error', title: label + ' export failed', lines: [String((err && err.message) || err), 'Nothing was saved.'] };
@@ -590,17 +618,22 @@
       if (f.id === 'xt') {
         // Parasolid result checks (summary first, then the top-level result): summary.faces, summary.bodyType, summary.openEdges, summary.sewn
         const s = res.summary || {}, g = (k) => (s[k] != null ? s[k] : res[k]);
+        // XT_TOO_LARGE (estimated output > 8 GB): own wording only; the engine's reason text also says "Nothing was saved"
+        if (!blob && normCode(res.reasonCode) === 'too_large') {
+          return { tone: 'warn', status: 'too_large', title: 'Model too large to export',
+            lines: ['This model is too large for the browser to write as Parasolid' + (+g('estimatedBytes') > 0 ? ' (about ' + fmtGB(+g('estimatedBytes')) + ').' : '.'), 'Nothing was saved. Try hiding some parts, or export STEP or STL instead.'] };
+        }
         if (g('faces') != null && +g('faces') === 0) {
           return { tone: 'warn', status: 'empty', title: 'Nothing to export', lines: ['The model has no faces to write.', 'No file was saved.'] };
         }
         if (blob && (g('bodyType') === 'sheet' || +g('openEdges') > 0 || g('sewn') === false)) {
           return { tone: 'warn', status: 'sheet', blob, title: 'Parasolid sheet body exported (open model)',
-            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.'] };
+            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.', XT_UNITS] };
         }
       }
       if (!blob) return { tone: 'err', status: res.status || 'error', title: 'Nothing exported', lines: [cap(reasonText(res.reasonCode, res.reason)) || 'The exporter returned no file.', 'Nothing was saved.'] };
       const what = f.id === 'step' ? 'Mesh STEP' : f.id === 'xt' ? 'Parasolid (one faceted body)' : label;
-      return { tone: 'ok', status: 'ok', title: what + ' exported', lines: [], blob };
+      return { tone: 'ok', status: 'ok', title: what + ' exported', lines: f.id === 'xt' ? [XT_UNITS] : [], blob };
     }
     if (res.status === 'cancelled') return { tone: 'muted', status: 'cancelled', title: 'Export cancelled', lines: ['Nothing was saved.'] };
     const blob = res.blob || null;

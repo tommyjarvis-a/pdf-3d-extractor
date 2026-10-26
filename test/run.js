@@ -24,10 +24,10 @@ function loadApp() {
   const el = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'length' ? 0 : el()), apply: () => el(), set: () => true });
   const document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => el(), addEventListener: noop, body: el(), documentElement: el() };
   const window = { addEventListener: noop, removeEventListener: noop, devicePixelRatio: 1, innerWidth: 1280, innerHeight: 800, requestAnimationFrame: () => 0, alert: (m) => { window.__alerts.push(m); }, __alerts: [],
-    matchMedia: () => ({ matches: false, media: '', addEventListener: noop, removeEventListener: noop, addListener: noop, removeListener: noop }) };
+    matchMedia: () => ({ matches: false, media: '', addEventListener: noop, removeEventListener: noop, addListener: noop, removeListener: noop }) };   // simple-mode.js / export-flow.js read media queries at load
   const ctx = { window, self: window, document, console, setTimeout, clearTimeout, TextDecoder, TextEncoder, Blob: typeof Blob !== 'undefined' ? Blob : undefined,
     DecompressionStream: typeof DecompressionStream !== 'undefined' ? DecompressionStream : undefined, Response: typeof Response !== 'undefined' ? Response : undefined,
-    URL, atob, btoa, performance, crypto: globalThis.crypto, alert: window.alert, requestAnimationFrame: () => 0 };
+    URL, atob, btoa, performance, crypto: globalThis.crypto, alert: window.alert, matchMedia: window.matchMedia, requestAnimationFrame: () => 0 };
   ctx.globalThis = ctx; vm.createContext(ctx);
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const scripts = [...html.matchAll(/<script[^>]+src="([^"?]+)/g)].map((m) => m[1]);

@@ -17,11 +17,19 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   - **Result card after every export:** saved, partly fitted (one line per part with its reason), fell back to the mesh
     STEP, nothing saved, cancelled, or failed. A Parasolid file that is a sheet body or has open edges gets an amber
     "Parasolid sheet body exported (open model)" card. If there are no faces, the card says "Nothing to export" and no
-    file is saved (in Chrome, the empty file the save dialog made is deleted).
+    file is saved (in Chrome, the empty file the save dialog made is deleted). A Parasolid file too large to write
+    gets an amber "Model too large to export" card showing the estimated size (the empty save-dialog file is deleted). Parasolid cards add "Stored in meters,
+    opens at true size in NX."
 - **`PDF3D.exportFormat(format, opts)`** (`app.js`): one entry point for every export format, returning
   `{blob, filename, status, reasonCode, summary.parts[].written}`. For Parasolid, the summary also has `faces`, `bodies`,
-  `bodyType` (`solid`/`sheet`), `sewn` and `openEdges`. It calls the same writers as the Advanced buttons
+  `bodyType` (`solid`/`sheet`), `sewn` and `openEdges`, taken from the 1.5.2 writer's stats. A model too large for the
+  Parasolid writer returns `status: 'error'`, `reasonCode: 'XT_TOO_LARGE'`, no file and `summary.estimatedBytes`. It calls the same writers as the Advanced buttons
   (no hidden button clicks), so STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical to theirs.
+- **`PDF3D.capabilities.cadSurfaces`** (bool) and **`cadSurfacesReason`** (`recon/cad-export.js`): false with
+  `single_file` in the single-file build, `file_url` on a `file://` page, and `kernel_download` after the CAD kernel
+  fails to download or its worker fails to start (true again after the next successful run or when the browser comes back
+  online) or when the browser has no Web Workers / WebAssembly. True otherwise (reason `null`). The Export menu dims
+  *Fitted solid* and *Both* and shows the reason when it is false.
 - **Fitted-only CAD export can leave open shells out** (`exportCadSurfaces(..., {fittedOnly: true, solidsOnly: true})`,
   `recon/cad-worker.js`): only closed solids are written as fitted bodies. The default is unchanged.
 
@@ -29,6 +37,10 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
 - `cad-export-ui.js` from Designer: when the browser is offline, a failed kernel download or worker now reads
   "You’re offline" with a reconnect hint, and a late progress update can no longer replace the screen-reader
   announcement of the result. Its result wording is shared with the Export card (`PDF3DCadExportUI.describe`).
+
+### Fixed
+- Advanced mode on phones (390 px): the longer B-Rep Mode option text from 1.5.2 no longer makes the page scroll sideways.
+- `test/run.js` loads the app again (its fake window now has `matchMedia`, which `simple-mode.js` reads at load).
 
 ### Known issues
 - Fitted surfaces need the multi-file app served over http(s); `file://` pages and the single-file build say they are unavailable.

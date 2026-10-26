@@ -87,6 +87,8 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    min-width: 0;      /* 1.6.0: a long select option (B-Rep Mode) no longer widens the page on phones */
+    max-width: 100%;
   }
 
   /* Export Bar */
@@ -730,7 +732,7 @@
         <option value="m">meter (1000 mm)</option>
       </select>
       <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
-      <select class="select-ctrl" id="brepModeSelect" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
+      <select class="select-ctrl" id="brepModeSelect" style="max-width:100%" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
         <option value="merged" selected>Merged Planar B-Rep (Auto Solid / Sheet)</option>
         <option value="sheet-unsewn">Open Sheet Surfaces (NX House/Deck Recovery)</option>
         <option value="merged-assembly">Multi-Body Assembly (STEP only; Parasolid always writes merged)</option>
