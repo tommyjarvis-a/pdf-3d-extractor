@@ -666,7 +666,7 @@
     // Parasolid: only when the app writes the NX form (PDF3D.capabilities.parasolid) and its Advanced button exists.
     const caps = (window.PDF3D && window.PDF3D.capabilities) || {};
     const xt = $('btnExportXT');
-    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t', '', 'Faceted solid, flat triangles']);
+    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t', '', 'Faceted solid, flat faces']);
     for (const [id, label, ext, cls, sub] of list) {
       const orig = $(id);
       if (!orig || !isOwnShown(orig)) continue;

@@ -7,8 +7,19 @@
   **Export Parasolid (.x_t)** button plus the **Parasolid .x_t Inspector** tab in Advanced. No `?xt=1` needed.
   - Shown only while the writer is the NX form (`PDF3D.capabilities.parasolid`, a new flag for export UI wiring).
   - Always exports one merged planar B-Rep body, the mode verified in NX. The **Body type** setting still applies to STEP only.
-  - Every export shows a result message, e.g. "Parasolid file saved: screw.x_t" with "1 solid body, 44,724 planar faces",
-    or says why nothing was saved (no visible geometry, out of memory, other error).
+  - Every export shows a result message, e.g. "Parasolid file saved: screw.x_t" with "1 solid body, 44,724 flat faces",
+    or says why nothing was saved (no visible geometry, model too large, out of memory, other error).
+    - When the count differs from the viewer, the message says why: on screw, "The viewer shows 44,682 faces: 42 of them
+      are not exactly flat, so they were saved as 84 flat triangles" (each bends 14 to 90 nm, over the 4 nm flat limit).
+    - Open models (not closed, e.g. g06 to g09, r03, r04) still export, as a sheet body. The title is **"Parasolid sheet
+      body exported (open model)"**, followed by "This part isn't closed, so it was saved as surfaces, not a solid. This
+      form hasn't been tested in NX."
+    - With every part hidden, no file is saved and the message reads "Parasolid export: nothing to save".
+  - Menu sub-line and button tooltip: **Faceted solid, flat faces**. The Advanced **B-Rep Mode** tooltip and its
+    *Multi-Body Assembly* option now say they apply to STEP only: Parasolid always writes one merged body.
+  - `buildParasolidXT` reports a summary for the UI (`options.stats`, or `CAD3DExtractor.getLastXTStats()`):
+    `faces` (FACE nodes written), `bodies`, `bodyType` (`'solid'` / `'sheet'`), `sewn`, `openEdges`, plus `viewerFaces`,
+    `splitFaces`, `splitTris`, `estimatedBytes` and the node `counts`.
 
 ### Changed
 - **The .x_t file is now in the Siemens NX format and imports into NX** (`buildParasolidXT` in `app.js`): schema
@@ -20,6 +31,14 @@
     44,724 planar faces); `xt-check` CLEAN on screw, head_test and the bundled sample.
   - The API's *merged-assembly* mode now writes one merged body (the ASSEMBLY/INSTANCE layouts of schema 37102 are not known).
   - The XT inspector reads node counts from the writer (the stream is wrapped at 80 columns).
+  - The writer streams: a counting pass plans each part's node indices, then each part is expanded and written in
+    index order before the next one, so memory holds one part's topology plus a small text buffer. All 25 corpus files
+    export under a 4 GB heap (r13, the largest, writes 3.96 GB). Peak memory is at or below 1.5.1 on most files
+    (screw 393 MB, was 459 MB; r09 779 MB, was 1,261 MB; r11 587 MB, was 1,599 MB). It is higher on r07 (2.2 GB vs 1.9 GB)
+    and on r13, where the 4 GB file itself is held in Blob memory outside the JS heap until it is saved. The first 1.5.2
+    builds held every record of the body at once and ran out of memory on r05, r07, r08, r10, r13 and r17.
+  - A size guard runs before anything is written: when the estimated file (92 bytes per node) is over 8 GB, the export stops with
+    "Parasolid export: model too large" (error code `XT_TOO_LARGE`) and suggests hiding parts or Reduce detail.
 
 ### Known issues
 - The *sheet-unsewn* and *faceted* XT modes (API only) are not tested in NX; `xt-check` reports their open sheet edges.

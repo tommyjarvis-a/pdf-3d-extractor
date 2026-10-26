@@ -729,10 +729,10 @@
         <option value="m">meter (1000 mm)</option>
       </select>
       <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
-      <select class="select-ctrl" id="brepModeSelect" title="Choose Solid/Sheet B-Rep mode for Siemens NX import">
+      <select class="select-ctrl" id="brepModeSelect" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
         <option value="merged" selected>Merged Planar B-Rep (Auto Solid / Sheet)</option>
         <option value="sheet-unsewn">Open Sheet Surfaces (NX House/Deck Recovery)</option>
-        <option value="merged-assembly">Multi-Body Assembly (10 ASSEMBLY + Instances)</option>
+        <option value="merged-assembly">Multi-Body Assembly (STEP only; Parasolid always writes merged)</option>
         <option value="faceted">Triangulated Faceted Sheet B-Rep (1:1 Mesh)</option>
       </select>
       <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Reduce detail:</label>

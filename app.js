@@ -1967,7 +1967,8 @@
   //      - Closed 2-Manifold Solid Bodies (body_type = 1)
   //      - Open / Architectural Sheet Bodies (body_type = 3) with Dummy Fins &
   //        Exact Plane-Projected Vertices (ideal for House / Deck / Landscaping recovery)
-  //      - Multi-Body Assembly (10 ASSEMBLY + 11 INSTANCE) or Single Combined Body
+  //    Always writes one merged body (Body type / Multi-Body Assembly apply to STEP only). Streams per part:
+  //    see planBody / writePart below.
   // -------------------------------------------------------------------------
   function getScaleFromMM(units) {
     if (units === 'cm') return 0.1;
@@ -2081,6 +2082,11 @@
     19: '9 CCCCCCI5 frame230 0 CA5 owner12 0 Z'
   };
   let lastXTStats = null;
+  // Refuse (before writing anything) a Parasolid file estimated above this size, so the user gets the
+  // "too large" message instead of a crashed tab. The text goes out in small Blob parts (kept outside the
+  // JS heap, disk-backed in Chromium), so the limit is set by the Blob store, not by the heap; the largest
+  // corpus file (r13, ~4 GB) stays below it.
+  const XT_MAX_EST_BYTES = 8e9;
 
   // Header KEY: the part name (file name without extension), restricted to safe characters.
   function xtKeyName(fileName) {
@@ -2126,13 +2132,16 @@
       return (XT_NX_SCHEMA_DELTAS[type] || '255') + (XT_NX_SCHEMA_DELTAS[type] ? '' : ' ');
     }
     write(s) { this.buf += s; if (this.buf.length >= 65536) this._drain(); }
+    // Wrapped lines go to the sink as one '\n'-joined block per drain (~64 KiB), not one string per line.
     _drain() {
       const b = this.buf; let k = 0;
+      const lines = [];
       while (b.length - k > 80) {  // more text follows, so the line may give its trailing spaces to the next one
         let n = 80;
         while (b.charCodeAt(k + n - 1) === 32) n--;
-        this.sink.push(b.slice(k, k + n) + '\r'); k += n;
+        lines.push(b.slice(k, k + n) + '\r'); k += n;
       }
+      if (lines.length) this.sink.push(lines.join('\n'));
       this.buf = b.slice(k);
     }
     end() { this._drain(); if (this.buf.length) this.sink.push(this.buf + '\r'); this.buf = ''; }
@@ -2166,9 +2175,6 @@
     xs.write(xtNxStreamPrefix());
     const xtStats = { schema: XT_NX_SCHEMA, counts: {}, bodyKinds: [] };
 
-    let nextIdx = 1;
-    const allocIdx = () => nextIdx++;
-
     // Compute dynamic size box (res_size >= 1000) so large architectural models in ft/m never exceed size box
     let maxCoordAbsM = 1.0;
     for (const p of visibleParts) {
@@ -2181,7 +2187,9 @@
     const resSize = Math.max(1000, Math.ceil((maxCoordAbsM * 2.5) / 1000) * 1000);
 
     // Helper: check if a part's sourceFaces form a strict 2-manifold closed solid within Parasolid 1e-8 m plane tolerance
+    let lastSplit = { faces: 0, tris: 0 };   // merged faces getValidSolidFaces had to write as triangles
     function getValidSolidFaces(part, B) {
+      lastSplit = { faces: 0, tris: 0 };
       if (forceSheet || !part.brep.isWatertight) return null;
       const verts = B.weldedVerts;
       const candidateFaces = [];
@@ -2204,6 +2212,7 @@
         if ((maxDevM <= 4e-9 && !hasSelfRepeat) || !mf.tris || mf.tris.length === 0) {
           candidateFaces.push({ normal: n, loops: mf.loops });
         } else {
+          lastSplit.faces++; lastSplit.tris += mf.tris.length;
           for (const tIdx of mf.tris) {
             const t = B.tris[tIdx];
             candidateFaces.push({ normal: normalizeVec3(t.normal), loops: [t.verts] });
@@ -2231,424 +2240,359 @@
       return candidateFaces;
     }
 
-    // Emit one Parasolid 12 BODY record + all topological/geometric children, one part at a time.
-    // Returns false (nothing written) if solid mode was requested and a part is not a valid solid.
-    function emitBody(bodyIdx, refInstanceIdx, bodyParts, isSolidBody) {
-      let nodeIdCounter = 1;
-      const allocNodeId = () => nodeIdCounter++;
-      // Records are collected per body and written in index order (as NX does), each as
-      // '<type> <index> <fields>' in strict XT token form (see xtF / XTNxStream).
-      const recs = [];
-      const put = (idx, type, fields) => { recs[idx - bodyIdx] = type + ' ' + idx + ' ' + fields; };
-      const edgeC = new XTChain(put, 16), vertC = new XTChain(put, 18), planeC = new XTChain(put, 50), lineC = new XTChain(put, 30), pointC = new XTChain(put, 29);
-      const shellC = new XTChain(put, 13);
-      let vertexEntities, edgeEntities, faceEntities, loopEntities, finEntities, planeEntities;
-      const resetPart = () => { vertexEntities = []; edgeEntities = []; faceEntities = []; loopEntities = []; finEntities = []; planeEntities = []; };
-      const flushPart = () => {
-        for (const f of faceEntities) {
-          put(f.fIdx, 14, `${f.nodeIdF} 0 ?${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} +0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx} `);
-        }
-        for (const lp of loopEntities) put(lp.lpIdx, 15, `${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx} `);
-        for (const fn of finEntities) {
-          put(fn.fnIdx, 17, `0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`);
-        }
-        for (const e of edgeEntities) {
-          const primaryFin = e.posFin ? e.posFin.fnIdx : (e.negFin ? e.negFin.fnIdx : 0);
-          const s0 = `${e.nodeIdE} 0 ?${primaryFin} `, s1 = ` ${e.lIdx} 0 0 ${bodyIdx} `;
-          edgeC.push(e.eIdx, (prevE, nextE) => s0 + prevE + ' ' + nextE + s1);
-        }
-        for (const v of vertexEntities) {
-          const s0 = `${v.nodeIdV} 0 ${v.firstFinIdx} `, s1 = ` ${v.pIdx} ?${bodyIdx} `;
-          vertC.push(v.vIdx, (prevV, nextV) => s0 + prevV + ' ' + nextV + s1);
-        }
-        for (const s of planeEntities) {
-          const [px, py, pz] = s.pOrig;
-          const [nx, ny, nz] = s.normal;
-          const [ux, uy, uz] = s.uAxis;
-          const s0 = `${s.nodeIdS} 0 ${s.fIdx} `;
-          const s1 = ` 0 +${xtF(px)}${xtF(py)}${xtF(pz)}${xtF(nx)}${xtF(ny)}${xtF(nz)}${xtF(ux)}${xtF(uy)}${xtF(uz)}`;
-          planeC.push(s.surfIdx, (prevS, nextS) => s0 + nextS + ' ' + prevS + s1);
-        }
-        for (const e of edgeEntities) {
-          const [px, py, pz] = e.originM;
-          const [dx, dy, dz] = e.dir;
-          const s0 = `${e.nodeIdL} 0 ${e.eIdx} `;
-          const s1 = ` 0 +${xtF(px)}${xtF(py)}${xtF(pz)}${xtF(dx)}${xtF(dy)}${xtF(dz)}`;
-          lineC.push(e.lIdx, (prevL, nextL) => s0 + nextL + ' ' + prevL + s1);
-        }
-        for (const v of vertexEntities) {
-          const [x, y, z] = v.xyzM;
-          const s0 = `${v.nodeIdP} 0 ${v.vIdx} `, s1 = ` ${xtF(x)}${xtF(y)}${xtF(z)}`;
-          pointC.push(v.pIdx, (prevP, nextP) => s0 + nextP + ' ' + prevP + s1);
-        }
-        resetPart();
-      };
-      resetPart();
+    // Streaming writer. NX writes nodes in index order, but many fields point forward (next face/edge/vertex,
+    // first fin at a vertex, ...). Pass 1 (planBody) counts, per part, how many indices / node ids the part
+    // takes and where its first node of each chained type lands. Pass 2 then expands one part at a time and
+    // writes all of that part's records, in index order, before the next part is expanded, so memory stays
+    // at one part's topology plus a bounded text buffer (the 1.5.1 writer's footprint), never the whole body.
+    const XT_EST_BYTES_PER_NODE = 92;   // calibrated: output bytes per XT index is 59 (sample) .. 83 (g06) .. 92 (screw)
+    const CHAIN_TYPES = ['shell', 'edge', 'vert', 'plane', 'line', 'point'];
+    let planCache = null;              // { part, B, faces } of the last part planned (reused by pass 2 for 1-part models)
+    function partFaces(part, B, solid) {
+      if (solid) {
+        if (planCache && planCache.part === part && planCache.solid) return planCache.faces;
+        return getValidSolidFaces(part, B);
+      }
+      const src = useMerged ? B.mergedFaces : B.tris.map((t) => ({ normal: t.normal, loops: [t.verts] }));
+      return src;
+    }
+    function partBRep(part) { return planCache && planCache.part === part ? planCache.B : getFullBRep(part); }
 
-      const regVoidIdx = allocIdx();
-      const regVoidNodeId = allocNodeId();
-      let bodyShellPtr = 0;
+    function planBody(solid) {
+      const plan = { solid, parts: [], nIdx: 0, nNode: 0, faces: 0, edges: 0, mergedFaces: 0, splitFaces: 0, splitInto: 0 };
+      let idx = 3;  // #1 BODY, #2 void REGION
+      for (const part of visibleParts) {
+        planCache = null;
+        const B = getFullBRep(part);
+        const faces = partFaces(part, B, solid);
+        if (!faces) return null;
+        const info = { start: idx, nIdx: 0, nNode: 0, faces: 0, first: {} };
+        for (const t of CHAIN_TYPES) info.first[t] = 0;
+        if (solid) {
+          let L = 0, fins = 0, V = 0;
+          const seen = new Uint8Array(Math.max(1, B.weldedVerts.length));
+          for (const sf of faces) for (const lp of sf.loops) {
+            L++; fins += lp.length;
+            for (const v of lp) if (!seen[v]) { seen[v] = 1; V++; }
+          }
+          const E = fins / 2, F = faces.length;
+          info.nIdx = 3 + 2 * F + L + fins + 2 * V + 2 * E;
+          info.nNode = 3 + 2 * F + L + 2 * V + 2 * E;
+          info.faces = F; plan.edges += E;
+          if (F) Object.assign(info.first, { plane: idx + 4, vert: idx + 5, point: idx + 6, edge: idx + 10, line: idx + 11 });
+          // viewer face count vs written faces: non-flat merged faces are written as their triangles
+          plan.mergedFaces += useMerged ? B.mergedFaces.length : B.tris.length;
+          if (!(planCache && planCache.part === part)) { plan.splitFaces += lastSplit.faces; plan.splitInto += lastSplit.tris; }
+        } else {
+          let firstLoopLen = 0, F = 0, nIdx = 0, nNode = 0, E = 0;
+          for (const sf of faces) {
+            let nl = 0;
+            for (const lp of sf.loops) {
+              if (!lp || lp.length < 3) continue;
+              if (!F && !nl) firstLoopLen = lp.length;
+              nl++; nIdx += 1 + 6 * lp.length; nNode += 1 + 4 * lp.length; E += lp.length;
+            }
+            if (!nl) continue;
+            F++; nIdx += 3; nNode += 3;
+          }
+          info.nIdx = nIdx; info.nNode = nNode; info.faces = F; plan.edges += E;
+          if (F) Object.assign(info.first, { shell: idx, plane: idx + 2, vert: idx + 4, point: idx + 5, edge: idx + 6 + 2 * firstLoopLen, line: idx + 7 + 2 * firstLoopLen });
+          plan.mergedFaces += useMerged ? B.mergedFaces.length : B.tris.length;
+        }
+        planCache = { part, B, faces, solid };
+        idx += info.nIdx; plan.nIdx += info.nIdx; plan.nNode += info.nNode; plan.faces += info.faces;
+        plan.parts.push(info);
+      }
+      if (planCache && visibleParts[0] !== planCache.part) planCache = null;  // only reusable when pass 2 starts with it
+      // next[t] of part k: first node of type t in a later part (0 = end of chain)
+      const after = {};
+      for (const t of CHAIN_TYPES) after[t] = 0;
+      for (let k = plan.parts.length - 1; k >= 0; k--) {
+        const info = plan.parts[k];
+        info.next = Object.assign({}, after);
+        for (const t of CHAIN_TYPES) if (info.first[t]) after[t] = info.first[t];
+      }
+      plan.first = after;
+      return plan;
+    }
+
+    const solidPossible = !forceSheet && visibleParts.length > 0 && visibleParts.every((p) => p.brep.isWatertight);
+    let plan = solidPossible ? planBody(true) : null;
+    const isSolidBody = !!plan;
+    if (!plan) plan = planBody(false);
+
+    // Guard: refuse up front (nothing written) when the file would be too large to save.
+    const estBytes = plan.nIdx * XT_EST_BYTES_PER_NODE;
+    const maxBytes = options.maxBytes != null ? options.maxBytes : XT_MAX_EST_BYTES;
+    if (estBytes > maxBytes) {
+      planCache = null;
+      const err = new RangeError(`Parasolid file would be about ${(estBytes / 1e9).toFixed(1)} GB (limit ${(maxBytes / 1e9).toFixed(1)} GB)`);
+      err.code = 'XT_TOO_LARGE'; err.estimatedBytes = estBytes;
+      throw err;
+    }
+
+    const bodyIdx = 1, regVoidIdx = 2;
+    const bodyTypeCode = isSolidBody ? 1 : 3;
+    const countType = (t) => { xtStats.counts[t] = (xtStats.counts[t] || 0) + 1; };
+    const rec = (type, idx, fields) => { countType(type); xs.write(type + ' ' + xs.schemaBlob(type) + idx + ' ' + fields); };  // schema blob sits between type and index
+
+    // 12 = BODY in the NX 37102 layout (36 fields; fields new since 13006 are null pointers / 0).
+    //   max_local_id annotations attribute_lists lattice construction_surfaces/curves/points mesh polyline key_ref
+    //   size_precision linear_precision instances next_body previous_body storage_state owner body_kind geometry_state
+    //   legacy_shell boundary_lattice boundary_surfaces/curves/points boundary_mesh boundary_polyline region_head
+    //   edge_head vertex_head index_map_offset index_map node_id_index_map schema_embedding_map child lowest_node_id
+    //   mesh_offset_data
+    const highestNodeId = 2 + plan.nNode;
+    const firstPart = plan.parts[0];
+    const bodyShellPtr = isSolidBody ? (firstPart ? firstPart.start + 2 : 0) : plan.first.shell;
+    rec(12, bodyIdx, `${highestNodeId} 0 0 0 0 0 0 0 0 0 ${xtF(resSize)}${xtF(1e-8)}0 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} 0 ${plan.first.plane} ${plan.first.line} ${plan.first.point} 0 0 ${regVoidIdx} ${plan.first.edge} ${plan.first.vert} 0 0 0 0 0 0 0 `);
+    if (isSolidBody) rec(19, regVoidIdx, `1 0 ${bodyIdx} ${firstPart ? firstPart.start : 0} 0 ${firstPart ? firstPart.start + 1 : 0} 0 V0 `);
+    else rec(19, regVoidIdx, `1 0 ${bodyIdx} 0 0 ${plan.first.shell} 0 V0 `);
+
+    let nextIdx = 3, nodeIdCounter = 2;
+    const allocIdx = () => nextIdx++;
+    const allocNodeId = () => nodeIdCounter++;
+    const last = {};
+    for (const t of CHAIN_TYPES) last[t] = 0;
+
+    // Write one part's records in index order. Entity lists are each in ascending index order.
+    const K_FACE = 1, K_LOOP = 2, K_FIN = 3, K_EDGE = 4, K_VERT = 5, K_PLANE = 6, K_LINE = 7, K_POINT = 8, K_SHELL = 9, K_LUMP = 10;
+    function writePart(info, ents) {
+      const n = info.nIdx, base = info.start;
+      const kind = new Uint8Array(n), ref = new Int32Array(n);
+      const mark = (list, k, key) => { for (let i = 0; i < list.length; i++) { const j = list[i][key] - base; kind[j] = k; ref[j] = i; } };
+      mark(ents.faces, K_FACE, 'fIdx'); mark(ents.loops, K_LOOP, 'lpIdx'); mark(ents.fins, K_FIN, 'fnIdx');
+      mark(ents.edges, K_EDGE, 'eIdx'); mark(ents.edges, K_LINE, 'lIdx');
+      mark(ents.verts, K_VERT, 'vIdx'); mark(ents.verts, K_POINT, 'pIdx');
+      mark(ents.planes, K_PLANE, 'surfIdx'); mark(ents.shells, K_SHELL, 'shIdx');
+      if (isSolidBody) { kind[0] = K_LUMP; kind[1] = K_LUMP; kind[2] = K_LUMP; }
+      // chain neighbours: previous part's last node / next part's first node at the ends
+      const prevOf = (list, i, key, t) => (i > 0 ? list[i - 1][key] : last[t]);
+      const nextOf = (list, i, key, t) => (i + 1 < list.length ? list[i + 1][key] : info.next[t]);
+      for (let j = 0; j < n; j++) {
+        const i = ref[j], idx = base + j;
+        switch (kind[j]) {
+          case K_FACE: { const f = ents.faces[i];
+            rec(14, idx, `${f.nodeIdF} 0 ?${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} +0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx} `); break; }
+          case K_LOOP: { const lp = ents.loops[i]; rec(15, idx, `${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx} `); break; }
+          case K_FIN: { const fn = ents.fins[i];
+            rec(17, idx, `0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`); break; }
+          case K_EDGE: { const e = ents.edges[i];
+            const primaryFin = e.posFin ? e.posFin.fnIdx : (e.negFin ? e.negFin.fnIdx : 0);
+            rec(16, idx, `${e.nodeIdE} 0 ?${primaryFin} ${prevOf(ents.edges, i, 'eIdx', 'edge')} ${nextOf(ents.edges, i, 'eIdx', 'edge')} ${e.lIdx} 0 0 ${bodyIdx} `); break; }
+          case K_LINE: { const e = ents.edges[i];
+            const [px, py, pz] = e.originM, [dx, dy, dz] = e.dir;
+            rec(30, idx, `${e.nodeIdL} 0 ${e.eIdx} ${nextOf(ents.edges, i, 'lIdx', 'line')} ${prevOf(ents.edges, i, 'lIdx', 'line')} 0 +${xtF(px)}${xtF(py)}${xtF(pz)}${xtF(dx)}${xtF(dy)}${xtF(dz)}`); break; }
+          case K_VERT: { const v = ents.verts[i];
+            rec(18, idx, `${v.nodeIdV} 0 ${v.firstFinIdx} ${prevOf(ents.verts, i, 'vIdx', 'vert')} ${nextOf(ents.verts, i, 'vIdx', 'vert')} ${v.pIdx} ?${bodyIdx} `); break; }
+          case K_POINT: { const v = ents.verts[i];
+            const [x, y, z] = v.xyzM;
+            rec(29, idx, `${v.nodeIdP} 0 ${v.vIdx} ${nextOf(ents.verts, i, 'pIdx', 'point')} ${prevOf(ents.verts, i, 'pIdx', 'point')} ${xtF(x)}${xtF(y)}${xtF(z)}`); break; }
+          case K_PLANE: { const s = ents.planes[i];
+            const [px, py, pz] = s.pOrig, [nx, ny, nz] = s.normal, [ux, uy, uz] = s.uAxis;
+            rec(50, idx, `${s.nodeIdS} 0 ${s.fIdx} ${nextOf(ents.planes, i, 'surfIdx', 'plane')} ${prevOf(ents.planes, i, 'surfIdx', 'plane')} 0 +${xtF(px)}${xtF(py)}${xtF(pz)}${xtF(nx)}${xtF(ny)}${xtF(nz)}${xtF(ux)}${xtF(uy)}${xtF(uz)}`); break; }
+          case K_SHELL: { const sh = ents.shells[i];
+            rec(13, idx, `${sh.shNodeId} 0 ${bodyIdx} ${nextOf(ents.shells, i, 'shIdx', 'shell')} ${sh.fIdx} 0 0 ${regVoidIdx} ${sh.fIdx} `); break; }
+          case K_LUMP: { const L = ents.lump;
+            if (j === 0) rec(19, idx, `${L.regSolidNodeId} 0 ${bodyIdx} ${L.nextStart} ${L.prevReg} ${base + 2} 0 S0 `);
+            else if (j === 1) rec(13, idx, `${L.shellVoidNodeId} 0 0 ${L.nextStart ? L.nextStart + 1 : 0} 0 0 0 ${regVoidIdx} ${L.firstFaceIdx} `);
+            else rec(13, idx, `${L.shellSolidNodeId} 0 ${bodyIdx} 0 ${L.firstFaceIdx} 0 0 ${base} 0 `);
+            break; }
+          default: throw new Error('XT writer: no node planned at index ' + idx);
+        }
+      }
+      for (const [t, list, key] of [['shell', ents.shells, 'shIdx'], ['edge', ents.edges, 'eIdx'], ['line', ents.edges, 'lIdx'],
+        ['vert', ents.verts, 'vIdx'], ['point', ents.verts, 'pIdx'], ['plane', ents.planes, 'surfIdx']]) {
+        if (list.length) last[t] = list[list.length - 1][key];
+      }
+    }
+
+    for (let pPos = 0; pPos < visibleParts.length; pPos++) {
+      const part = visibleParts[pPos], info = plan.parts[pPos];
+      const B = partBRep(part);
+      const sourceFaces = partFaces(part, B, isSolidBody);
+      planCache = null;
+      const verts = B.weldedVerts;
+      const ents = { faces: [], loops: [], fins: [], edges: [], verts: [], planes: [], shells: [], lump: null };
+      if (nextIdx !== info.start) throw new Error('XT writer: index plan mismatch');
 
       if (isSolidBody) {
-        // Closed 2-Manifold Solid Body (body_type = 1) with K >= 1 disjoint solid lumps
-        const lumpInfos = [];
-        for (let pPos = 0; pPos < bodyParts.length; pPos++) {
-          const part = bodyParts[pPos];
-          const B = getFullBRep(part);
-          const sourceFaces = getValidSolidFaces(part, B);
-          if (!sourceFaces) return false;
-          const verts = B.weldedVerts;
+        // Closed 2-Manifold Solid Body (body_type = 1): one solid REGION + void/solid SHELL pair per part (lump)
+        const regSolidIdx = allocIdx(), regSolidNodeId = allocNodeId();
+        const shellVoidIdx = allocIdx(), shellVoidNodeId = allocNodeId();
+        const shellSolidIdx = allocIdx(), shellSolidNodeId = allocNodeId();
 
-          const regSolidIdx = allocIdx();
-          const regSolidNodeId = allocNodeId();
-          const shellVoidIdx = allocIdx();
-          const shellVoidNodeId = allocNodeId();
-          const shellSolidIdx = allocIdx();
-          const shellSolidNodeId = allocNodeId();
-
-          // Allocate VERTEX & POINT ONLY for vertices actually used by sourceFaces (preventing fin=0 orphan vertices!)
-          const localVertMap = new Map();
-          const getOrCreateVert = (rawVIdx) => {
-            let vEnt = localVertMap.get(rawVIdx);
-            if (!vEnt) {
-              const xyz = verts[rawVIdx];
-              vEnt = {
-                vIdx: allocIdx(),
-                pIdx: allocIdx(),
-                nodeIdV: allocNodeId(),
-                nodeIdP: allocNodeId(),
-                xyzM: [xyz[0] * scaleM, xyz[1] * scaleM, xyz[2] * scaleM],
-                firstFinIdx: 0
-              };
-              localVertMap.set(rawVIdx, vEnt);
-              vertexEntities.push(vEnt);
-            }
-            return vEnt;
-          };
-
-          const NV = Math.max(1, verts.length);
-          const localEdgeMap = new Map();
-          const getOrCreateEdge = (uRaw, vRaw) => {
-            const minRaw = Math.min(uRaw, vRaw), maxRaw = Math.max(uRaw, vRaw);
-            const key = minRaw * NV + maxRaw;
-            let e = localEdgeMap.get(key);
-            if (!e) {
-              const vMinEnt = getOrCreateVert(minRaw);
-              const vMaxEnt = getOrCreateVert(maxRaw);
-              const p0 = vMinEnt.xyzM;
-              const p1 = vMaxEnt.xyzM;
-              const dir = normalizeVec3([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
-              e = {
-                eIdx: allocIdx(),
-                lIdx: allocIdx(),
-                nodeIdE: allocNodeId(),
-                nodeIdL: allocNodeId(),
-                uRaw: minRaw,
-                vRaw: maxRaw,
-                originM: p0,
-                dir,
-                posFin: null,
-                negFin: null
-              };
-              localEdgeMap.set(key, e);
-              edgeEntities.push(e);
-            }
-            return e;
-          };
-
-          const lumpFaces = [];
-          for (const sf of sourceFaces) {
-            const fIdx = allocIdx();
-            const surfIdx = allocIdx();
-            const nodeIdF = allocNodeId();
-            const nodeIdS = allocNodeId();
-
-            const firstVEnt = getOrCreateVert(sf.loops[0][0]);
-            const pOrig = firstVEnt.xyzM;
-            const normal = normalizeVec3(sf.normal);
-            const uAxis = orthoBasis(normal);
-
-            const faceLoops = [];
-            for (const loopVerts of sf.loops) {
-              if (loopVerts.length < 3) continue;
-              const lpIdx = allocIdx();
-              const nodeIdLp = allocNodeId();
-              const loopFins = [];
-
-              for (let k = 0; k < loopVerts.length; k++) {
-                const uRaw = loopVerts[k];
-                const vRaw = loopVerts[(k + 1) % loopVerts.length];
-                const vEndEnt = getOrCreateVert(vRaw);
-                const edge = getOrCreateEdge(uRaw, vRaw);
-                const sense = uRaw === edge.uRaw ? '+' : '-';
-                const fnIdx = allocIdx();
-                const finObj = {
-                  fnIdx,
-                  lpIdx,
-                  fwdFin: 0,
-                  bwdFin: 0,
-                  fwdVxIdx: vEndEnt.vIdx,
-                  vxEntity: vEndEnt,
-                  nextAtVx: 0,
-                  otherFin: 0,
-                  edge,
-                  sense
-                };
-                if (sense === '+') edge.posFin = finObj;
-                else edge.negFin = finObj;
-                loopFins.push(finObj);
-                finEntities.push(finObj);
-              }
-
-              for (let k = 0; k < loopFins.length; k++) {
-                loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
-                loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
-                const vx = loopFins[k].vxEntity;
-                loopFins[k].nextAtVx = vx.firstFinIdx;
-                vx.firstFinIdx = loopFins[k].fnIdx;
-              }
-
-              const lpObj = { lpIdx, nodeIdLp, firstFinIdx: loopFins[0].fnIdx, fIdx, nextLoopIdx: 0 };
-              faceLoops.push(lpObj);
-              loopEntities.push(lpObj);
-            }
-
-            for (let k = 0; k < faceLoops.length - 1; k++) {
-              faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
-            }
-
-            const fObj = {
-              fIdx,
-              nodeIdF,
-              firstLoopIdx: faceLoops[0].lpIdx,
-              backShellIdx: shellSolidIdx,
-              frontShellIdx: shellVoidIdx,
-              surfIdx,
-              nextF: 0,
-              prevF: 0
-            };
-            lumpFaces.push(fObj);
-            faceEntities.push(fObj);
-            planeEntities.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
+        // Allocate VERTEX & POINT ONLY for vertices actually used by sourceFaces (preventing fin=0 orphan vertices!)
+        const localVertMap = new Map();
+        const getOrCreateVert = (rawVIdx) => {
+          let vEnt = localVertMap.get(rawVIdx);
+          if (!vEnt) {
+            const xyz = verts[rawVIdx];
+            vEnt = { vIdx: allocIdx(), pIdx: allocIdx(), nodeIdV: allocNodeId(), nodeIdP: allocNodeId(),
+              xyzM: [xyz[0] * scaleM, xyz[1] * scaleM, xyz[2] * scaleM], firstFinIdx: 0 };
+            localVertMap.set(rawVIdx, vEnt);
+            ents.verts.push(vEnt);
           }
-
-          for (let i = 0; i < lumpFaces.length; i++) {
-            lumpFaces[i].nextF = i + 1 < lumpFaces.length ? lumpFaces[i + 1].fIdx : 0;
-            lumpFaces[i].prevF = i > 0 ? lumpFaces[i - 1].fIdx : 0;
+          return vEnt;
+        };
+        const NV = Math.max(1, verts.length);
+        const localEdgeMap = new Map();
+        const getOrCreateEdge = (uRaw, vRaw) => {
+          const minRaw = Math.min(uRaw, vRaw), maxRaw = Math.max(uRaw, vRaw);
+          const key = minRaw * NV + maxRaw;
+          let e = localEdgeMap.get(key);
+          if (!e) {
+            const p0 = getOrCreateVert(minRaw).xyzM, p1 = getOrCreateVert(maxRaw).xyzM;
+            const dir = normalizeVec3([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
+            e = { eIdx: allocIdx(), lIdx: allocIdx(), nodeIdE: allocNodeId(), nodeIdL: allocNodeId(), uRaw: minRaw, vRaw: maxRaw, originM: p0, dir, posFin: null, negFin: null };
+            localEdgeMap.set(key, e);
+            ents.edges.push(e);
           }
+          return e;
+        };
 
-          lumpInfos.push({
-            regSolidIdx,
-            regSolidNodeId,
-            shellVoidIdx,
-            shellVoidNodeId,
-            shellSolidIdx,
-            shellSolidNodeId,
-            firstFaceIdx: lumpFaces.length > 0 ? lumpFaces[0].fIdx : 0
-          });
-
-          // Link 2-fin rings on this lump's edges (edges never span parts)
-          for (const e of edgeEntities) {
-            if (e.posFin && e.negFin) {
-              e.posFin.otherFin = e.negFin.fnIdx;
-              e.negFin.otherFin = e.posFin.fnIdx;
+        const lumpFaces = ents.faces;
+        for (const sf of sourceFaces) {
+          const fIdx = allocIdx(), surfIdx = allocIdx();
+          const nodeIdF = allocNodeId(), nodeIdS = allocNodeId();
+          const pOrig = getOrCreateVert(sf.loops[0][0]).xyzM;
+          const normal = normalizeVec3(sf.normal);
+          const uAxis = orthoBasis(normal);
+          const faceLoops = [];
+          for (const loopVerts of sf.loops) {
+            if (loopVerts.length < 3) continue;
+            const lpIdx = allocIdx(), nodeIdLp = allocNodeId();
+            const loopFins = [];
+            for (let k = 0; k < loopVerts.length; k++) {
+              const uRaw = loopVerts[k], vRaw = loopVerts[(k + 1) % loopVerts.length];
+              const vEndEnt = getOrCreateVert(vRaw);
+              const edge = getOrCreateEdge(uRaw, vRaw);
+              const sense = uRaw === edge.uRaw ? '+' : '-';
+              const finObj = { fnIdx: allocIdx(), lpIdx, fwdFin: 0, bwdFin: 0, fwdVxIdx: vEndEnt.vIdx, vxEntity: vEndEnt, nextAtVx: 0, otherFin: 0, edge, sense };
+              if (sense === '+') edge.posFin = finObj; else edge.negFin = finObj;
+              loopFins.push(finObj);
+              ents.fins.push(finObj);
             }
+            for (let k = 0; k < loopFins.length; k++) {
+              loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
+              loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
+              const vx = loopFins[k].vxEntity;
+              loopFins[k].nextAtVx = vx.firstFinIdx;
+              vx.firstFinIdx = loopFins[k].fnIdx;
+            }
+            const lpObj = { lpIdx, nodeIdLp, firstFinIdx: loopFins[0].fnIdx, fIdx, nextLoopIdx: 0 };
+            faceLoops.push(lpObj);
+            ents.loops.push(lpObj);
           }
-          flushPart();
+          for (let k = 0; k < faceLoops.length - 1; k++) faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
+          lumpFaces.push({ fIdx, nodeIdF, firstLoopIdx: faceLoops[0].lpIdx, backShellIdx: shellSolidIdx, frontShellIdx: shellVoidIdx, surfIdx, nextF: 0, prevF: 0 });
+          ents.planes.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
         }
-
-        // Build Void Region + Solid Regions and Void Shells + Solid Shells
-        const firstVoidShellIdx = lumpInfos.length > 0 ? lumpInfos[0].shellVoidIdx : 0;
-        const firstSolidRegIdx = lumpInfos.length > 0 ? lumpInfos[0].regSolidIdx : 0;
-        put(regVoidIdx, 19, `${regVoidNodeId} 0 ${bodyIdx} ${firstSolidRegIdx} 0 ${firstVoidShellIdx} 0 V0 `);
-
-        for (let i = 0; i < lumpInfos.length; i++) {
-          const L = lumpInfos[i];
-          const nextReg = i + 1 < lumpInfos.length ? lumpInfos[i + 1].regSolidIdx : 0;
-          const prevReg = i === 0 ? regVoidIdx : lumpInfos[i - 1].regSolidIdx;
-          put(L.regSolidIdx, 19, `${L.regSolidNodeId} 0 ${bodyIdx} ${nextReg} ${prevReg} ${L.shellSolidIdx} 0 S0 `);
-
-          const nextVoidSh = i + 1 < lumpInfos.length ? lumpInfos[i + 1].shellVoidIdx : 0;
-          put(L.shellVoidIdx, 13, `${L.shellVoidNodeId} 0 0 ${nextVoidSh} 0 0 0 ${regVoidIdx} ${L.firstFaceIdx} `);
-          put(L.shellSolidIdx, 13, `${L.shellSolidNodeId} 0 ${bodyIdx} 0 ${L.firstFaceIdx} 0 0 ${L.regSolidIdx} 0 `);
+        for (let i = 0; i < lumpFaces.length; i++) {
+          lumpFaces[i].nextF = i + 1 < lumpFaces.length ? lumpFaces[i + 1].fIdx : 0;
+          lumpFaces[i].prevF = i > 0 ? lumpFaces[i - 1].fIdx : 0;
         }
-        bodyShellPtr = lumpInfos.length >= 1 ? lumpInfos[0].shellSolidIdx : 0;
+        // Link 2-fin rings on this lump's edges (edges never span parts)
+        for (const e of ents.edges) {
+          if (e.posFin && e.negFin) { e.posFin.otherFin = e.negFin.fnIdx; e.negFin.otherFin = e.posFin.fnIdx; }
+        }
+        const nextInfo = plan.parts[pPos + 1];
+        ents.lump = { regSolidNodeId, shellVoidNodeId, shellSolidNodeId, firstFaceIdx: lumpFaces.length ? lumpFaces[0].fIdx : 0,
+          nextStart: nextInfo ? nextInfo.start : 0, prevReg: pPos === 0 ? regVoidIdx : plan.parts[pPos - 1].start };
+        if (regSolidIdx !== info.start) throw new Error('XT writer: index plan mismatch');
       } else {
         // Open / Architectural Sheet Body (body_type = 3)
         // Each merged planar B-Rep face (with outer + hole loops) is emitted as a connected 13 SHELL
         // in regVoidIdx with exact plane-projected loop vertices and a [posFin (+), dummy negFin (-)] pair per edge.
-        for (const part of bodyParts) {
-          const B = getFullBRep(part);
-          const verts = B.weldedVerts;
-          const sourceFaces = useMerged
-            ? B.mergedFaces.map((mf) => ({ normal: mf.normal, loops: mf.loops }))
-            : B.tris.map((t) => ({ normal: t.normal, loops: [t.verts] }));
-
-          for (const sf of sourceFaces) {
-            const validLoops = sf.loops.filter((lp) => lp && lp.length >= 3);
-            if (validLoops.length === 0) continue;
-
-            const shIdx = allocIdx();
-            const shNodeId = allocNodeId();
-            const fIdx = allocIdx();
-            const surfIdx = allocIdx();
-            const nodeIdF = allocNodeId();
-            const nodeIdS = allocNodeId();
-
-            const normal = normalizeVec3(sf.normal);
-            const uAxis = orthoBasis(normal);
-            const rawOrig = verts[validLoops[0][0]];
-            const pOrig = [rawOrig[0] * scaleM, rawOrig[1] * scaleM, rawOrig[2] * scaleM];
-
-            const faceLoops = [];
-            for (const loopVerts of validLoops) {
-              const lpIdx = allocIdx();
-              const nodeIdLp = allocNodeId();
-
-              // Create dedicated loop vertices projected orthogonally onto the exact 50 PLANE (deviation < 1e-16 m)
-              const lpVertEnts = loopVerts.map((vRawIdx) => {
-                const raw = verts[vRawIdx];
-                const px = raw[0] * scaleM, py = raw[1] * scaleM, pz = raw[2] * scaleM;
-                const dist = (px - pOrig[0]) * normal[0] + (py - pOrig[1]) * normal[1] + (pz - pOrig[2]) * normal[2];
-                const vEnt = {
-                  vIdx: allocIdx(),
-                  pIdx: allocIdx(),
-                  nodeIdV: allocNodeId(),
-                  nodeIdP: allocNodeId(),
-                  xyzM: [px - dist * normal[0], py - dist * normal[1], pz - dist * normal[2]],
-                  firstFinIdx: 0
-                };
-                vertexEntities.push(vEnt);
-                return vEnt;
-              });
-
-              const loopFins = [];
-              for (let k = 0; k < lpVertEnts.length; k++) {
-                const vStartEnt = lpVertEnts[k];
-                const vEndEnt = lpVertEnts[(k + 1) % lpVertEnts.length];
-                const p0 = vStartEnt.xyzM;
-                const p1 = vEndEnt.xyzM;
-                // Project edge direction into plane and normalize for < 1e-16 orthogonality with plane normal
-                let dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
-                const nDot = dx * normal[0] + dy * normal[1] + dz * normal[2];
-                const dir = normalizeVec3([dx - nDot * normal[0], dy - nDot * normal[1], dz - nDot * normal[2]]);
-
-                const posFnIdx = allocIdx();
-                const dummyNegFnIdx = allocIdx();
-                const edge = {
-                  eIdx: allocIdx(),
-                  lIdx: allocIdx(),
-                  nodeIdE: allocNodeId(),
-                  nodeIdL: allocNodeId(),
-                  originM: p0,
-                  dir,
-                  posFin: null,
-                  negFin: null
-                };
-                edgeEntities.push(edge);
-
-                // Real '+' fin along loop edge (vStart -> vEnd, points to vEnd)
-                const posFin = {
-                  fnIdx: posFnIdx, lpIdx, fwdFin: 0, bwdFin: 0, fwdVxIdx: vEndEnt.vIdx, vxEntity: vEndEnt,
-                  nextAtVx: 0, otherFin: dummyNegFnIdx, edge, sense: '+'
-                };
-                // Dummy '-' fin on open boundary edge (vEnd -> vStart, points to vStart, loop/fwd/bwd = 0)
-                // Per Parasolid XT Spec 5.3.9.1 & 5.3.9.2, dummy fin provides the start vertex of the edge
-                const dummyNegFin = {
-                  fnIdx: dummyNegFnIdx, lpIdx: 0, fwdFin: 0, bwdFin: 0, fwdVxIdx: vStartEnt.vIdx, vxEntity: vStartEnt,
-                  nextAtVx: 0, otherFin: posFnIdx, edge, sense: '-'
-                };
-
-                edge.posFin = posFin;
-                edge.negFin = dummyNegFin;
-                loopFins.push(posFin);
-                finEntities.push(posFin, dummyNegFin);
-
-                // Link dummy '-' fin into vStart's vertex fin chain
-                dummyNegFin.nextAtVx = vStartEnt.firstFinIdx;
-                vStartEnt.firstFinIdx = dummyNegFin.fnIdx;
-              }
-
-              for (let k = 0; k < loopFins.length; k++) {
-                loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
-                loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
-                const vx = loopFins[k].vxEntity;
-                loopFins[k].nextAtVx = vx.firstFinIdx;
-                vx.firstFinIdx = loopFins[k].fnIdx;
-              }
-
-              const lpObj = { lpIdx, nodeIdLp, firstFinIdx: loopFins[0].fnIdx, fIdx, nextLoopIdx: 0 };
-              faceLoops.push(lpObj);
-              loopEntities.push(lpObj);
-            }
-
-            for (let k = 0; k < faceLoops.length - 1; k++) {
-              faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
-            }
-
-            faceEntities.push({
-              fIdx, nodeIdF, firstLoopIdx: faceLoops[0].lpIdx, backShellIdx: shIdx, frontShellIdx: shIdx, surfIdx, nextF: 0, prevF: 0
+        for (const sf of sourceFaces) {
+          const validLoops = sf.loops.filter((lp) => lp && lp.length >= 3);
+          if (validLoops.length === 0) continue;
+          const shIdx = allocIdx(), shNodeId = allocNodeId();
+          const fIdx = allocIdx(), surfIdx = allocIdx();
+          const nodeIdF = allocNodeId(), nodeIdS = allocNodeId();
+          const normal = normalizeVec3(sf.normal);
+          const uAxis = orthoBasis(normal);
+          const rawOrig = verts[validLoops[0][0]];
+          const pOrig = [rawOrig[0] * scaleM, rawOrig[1] * scaleM, rawOrig[2] * scaleM];
+          const faceLoops = [];
+          for (const loopVerts of validLoops) {
+            const lpIdx = allocIdx(), nodeIdLp = allocNodeId();
+            // Create dedicated loop vertices projected orthogonally onto the exact 50 PLANE (deviation < 1e-16 m)
+            const lpVertEnts = loopVerts.map((vRawIdx) => {
+              const raw = verts[vRawIdx];
+              const px = raw[0] * scaleM, py = raw[1] * scaleM, pz = raw[2] * scaleM;
+              const dist = (px - pOrig[0]) * normal[0] + (py - pOrig[1]) * normal[1] + (pz - pOrig[2]) * normal[2];
+              const vEnt = { vIdx: allocIdx(), pIdx: allocIdx(), nodeIdV: allocNodeId(), nodeIdP: allocNodeId(),
+                xyzM: [px - dist * normal[0], py - dist * normal[1], pz - dist * normal[2]], firstFinIdx: 0 };
+              ents.verts.push(vEnt);
+              return vEnt;
             });
-            planeEntities.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
-
-            const sfIdx = fIdx;
-            shellC.push(shIdx, (prevSh, nextSh) => `${shNodeId} 0 ${bodyIdx} ${nextSh} ${sfIdx} 0 0 ${regVoidIdx} ${sfIdx} `);
+            const loopFins = [];
+            for (let k = 0; k < lpVertEnts.length; k++) {
+              const vStartEnt = lpVertEnts[k], vEndEnt = lpVertEnts[(k + 1) % lpVertEnts.length];
+              const p0 = vStartEnt.xyzM, p1 = vEndEnt.xyzM;
+              // Project edge direction into plane and normalize for < 1e-16 orthogonality with plane normal
+              const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+              const nDot = dx * normal[0] + dy * normal[1] + dz * normal[2];
+              const dir = normalizeVec3([dx - nDot * normal[0], dy - nDot * normal[1], dz - nDot * normal[2]]);
+              const posFnIdx = allocIdx(), dummyNegFnIdx = allocIdx();
+              const edge = { eIdx: allocIdx(), lIdx: allocIdx(), nodeIdE: allocNodeId(), nodeIdL: allocNodeId(), originM: p0, dir, posFin: null, negFin: null };
+              ents.edges.push(edge);
+              // Real '+' fin along loop edge (vStart -> vEnd, points to vEnd)
+              const posFin = { fnIdx: posFnIdx, lpIdx, fwdFin: 0, bwdFin: 0, fwdVxIdx: vEndEnt.vIdx, vxEntity: vEndEnt, nextAtVx: 0, otherFin: dummyNegFnIdx, edge, sense: '+' };
+              // Dummy '-' fin on open boundary edge (vEnd -> vStart, points to vStart, loop/fwd/bwd = 0)
+              // Per Parasolid XT Spec 5.3.9.1 & 5.3.9.2, dummy fin provides the start vertex of the edge
+              const dummyNegFin = { fnIdx: dummyNegFnIdx, lpIdx: 0, fwdFin: 0, bwdFin: 0, fwdVxIdx: vStartEnt.vIdx, vxEntity: vStartEnt, nextAtVx: 0, otherFin: posFnIdx, edge, sense: '-' };
+              edge.posFin = posFin; edge.negFin = dummyNegFin;
+              loopFins.push(posFin);
+              ents.fins.push(posFin, dummyNegFin);
+              // Link dummy '-' fin into vStart's vertex fin chain
+              dummyNegFin.nextAtVx = vStartEnt.firstFinIdx;
+              vStartEnt.firstFinIdx = dummyNegFin.fnIdx;
+            }
+            for (let k = 0; k < loopFins.length; k++) {
+              loopFins[k].fwdFin = loopFins[(k + 1) % loopFins.length].fnIdx;
+              loopFins[k].bwdFin = loopFins[(k - 1 + loopFins.length) % loopFins.length].fnIdx;
+              const vx = loopFins[k].vxEntity;
+              loopFins[k].nextAtVx = vx.firstFinIdx;
+              vx.firstFinIdx = loopFins[k].fnIdx;
+            }
+            const lpObj = { lpIdx, nodeIdLp, firstFinIdx: loopFins[0].fnIdx, fIdx, nextLoopIdx: 0 };
+            faceLoops.push(lpObj);
+            ents.loops.push(lpObj);
           }
-          flushPart();
+          for (let k = 0; k < faceLoops.length - 1; k++) faceLoops[k].nextLoopIdx = faceLoops[k + 1].lpIdx;
+          ents.faces.push({ fIdx, nodeIdF, firstLoopIdx: faceLoops[0].lpIdx, backShellIdx: shIdx, frontShellIdx: shIdx, surfIdx, nextF: 0, prevF: 0 });
+          ents.planes.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
+          ents.shells.push({ shIdx, shNodeId, fIdx });
         }
-
-        const firstShellIdx = shellC.count > 0 ? shellC.first : 0;
-        put(regVoidIdx, 19, `${regVoidNodeId} 0 ${bodyIdx} 0 0 ${firstShellIdx} 0 V0 `);
-        bodyShellPtr = firstShellIdx;
       }
-
-      const highestNodeId = nodeIdCounter;
-      const bodyTypeCode = isSolidBody ? 1 : 3;
-      const firstSurfIdx = planeC.count > 0 ? planeC.first : 0;
-      const firstCurveIdx = lineC.count > 0 ? lineC.first : 0;
-      const firstPointIdx = pointC.count > 0 ? pointC.first : 0;
-      const firstEdgeIdx = edgeC.count > 0 ? edgeC.first : 0;
-      const firstVxIdx = vertC.count > 0 ? vertC.first : 0;
-
-      for (const c of [shellC, edgeC, vertC, planeC, lineC, pointC]) c.end();
-      // 12 = BODY in the NX 37102 layout (36 fields; fields new since 13006 are null pointers / 0).
-      //   max_local_id annotations attribute_lists lattice construction_surfaces/curves/points mesh polyline key_ref
-      //   size_precision linear_precision instances next_body previous_body storage_state owner body_kind geometry_state
-      //   legacy_shell boundary_lattice boundary_surfaces/curves/points boundary_mesh boundary_polyline region_head
-      //   edge_head vertex_head index_map_offset index_map node_id_index_map schema_embedding_map child lowest_node_id
-      //   mesh_offset_data
-      put(bodyIdx, 12, `${highestNodeId} 0 0 0 0 0 0 0 0 0 ${xtF(resSize)}${xtF(1e-8)}${refInstanceIdx} 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} 0 ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} 0 0 ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx} 0 0 0 0 0 0 0 `);
-      for (let i = 0; i < recs.length; i++) {
-        const r = recs[i];
-        if (r === undefined) continue;
-        const sp = r.indexOf(' ');
-        const t = r.slice(0, sp);
-        xtStats.counts[t] = (xtStats.counts[t] || 0) + 1;
-        xs.write(r.slice(0, sp + 1) + xs.schemaBlob(t) + r.slice(sp + 1));
-        recs[i] = undefined;
-      }
-      xtStats.bodyKinds.push(bodyTypeCode);
-      return true;
+      if (nextIdx !== info.start + info.nIdx || ents.faces.length !== info.faces) throw new Error('XT writer: index plan mismatch');
+      writePart(info, ents);
     }
-
-    function emitBodyRecord(bodyIdx, refInstanceIdx, bodyParts) {
-      // Solid (body_type 1) only if every part is a valid closed 2-manifold; parts are expanded one at a
-      // time, so try solid first (fast reject on the cached watertight flag) and fall back to sheet.
-      const solidPossible = !forceSheet && bodyParts.length > 0 && bodyParts.every((p) => p.brep.isWatertight);
-      const saveIdx = nextIdx;
-      if (solidPossible && emitBody(bodyIdx, refInstanceIdx, bodyParts, true)) return;
-      nextIdx = saveIdx;
-      emitBody(bodyIdx, refInstanceIdx, bodyParts, false);
-    }
-
-    const rootBodyIdx = allocIdx(); // #1 = 12 BODY containing all visible parts' lumps/shells
-    emitBodyRecord(rootBodyIdx, 0, visibleParts);
+    planCache = null;
+    if (nodeIdCounter !== highestNodeId) throw new Error('XT writer: node id plan mismatch');
 
     // End of transmit file
     xs.write('1 0 ');
     xs.end();
     out.push('');
+    const faces = xtStats.counts[14] || 0;
+    Object.assign(xtStats, {
+      bodyKinds: [bodyTypeCode],
+      // Summary for UI messages / the 1.6.0 export card:
+      faces,                                   // FACE nodes written (= counts[14])
+      bodies: faces ? 1 : 0,                   // 0 when nothing visible has faces (an empty BODY is still written)
+      bodyType: isSolidBody ? 'solid' : 'sheet',
+      sewn: isSolidBody,                       // sheet bodies are written unsewn: one shell per face
+      openEdges: isSolidBody ? 0 : plan.edges, // every sheet edge has a dummy fin, so all are open
+      viewerFaces: plan.mergedFaces,           // merged B-Rep faces as counted in the viewer HUD
+      splitFaces: plan.splitFaces,             // curved/self-touching merged faces written as their triangles (solid only)
+      splitTris: plan.splitInto,               // triangles those faces became: faces = viewerFaces - splitFaces + splitTris
+      estimatedBytes: estBytes
+    });
     lastXTStats = xtStats;
+    if (options.stats && typeof options.stats === 'object') Object.assign(options.stats, xtStats);
     return out.result();
   }
 
@@ -3912,26 +3856,38 @@
   function exportParasolidXT() {
     const filename = `${stemName()}.x_t`;
     try {
-      const xt = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true });
-      const st = lastXTStats || { counts: {}, bodyKinds: [] };
-      const bodies = st.counts[12] || 0, faces = st.counts[14] || 0;
-      if (!bodies) {
+      const st = {};
+      const xt = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, stats: st });
+      const faces = st.faces || 0;   // FACE nodes written (counts[14]); an empty BODY node is written even with no faces
+      if (!faces) {
         showExportResult('warn', 'Parasolid export: nothing to save', ['No visible part has B-Rep faces. Show a part with geometry and try again.']);
         return false;
       }
       triggerDownload(xt, filename, 'text/plain');
-      const kind = st.bodyKinds.every((k) => k === 1) ? (bodies === 1 ? 'solid body' : 'solid bodies')
-        : st.bodyKinds.every((k) => k === 3) ? (bodies === 1 ? 'sheet body' : 'sheet bodies') : (bodies === 1 ? 'body' : 'bodies');
-      showExportResult('ok', `Parasolid file saved: ${filename}`, [
-        `${bodies} ${kind}, ${faces.toLocaleString('en-US')} planar face${faces === 1 ? '' : 's'}.`,
-        `Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep. Stored in meters (Parasolid standard), opens at true size in NX.`
-      ]);
+      const n = (v) => v.toLocaleString('en-US');
+      const faceLine = `${n(faces)} flat face${faces === 1 ? '' : 's'}`;
+      if (st.bodyType === 'sheet') {
+        showExportResult('warn', 'Parasolid sheet body exported (open model)', [
+          'This part isn\'t closed, so it was saved as surfaces, not a solid. This form hasn\'t been tested in NX.',
+          `Saved ${filename}: 1 sheet body, ${faceLine}, ${n(st.openEdges || 0)} open edges.`
+        ]);
+        return true;
+      }
+      const lines = [`1 solid body, ${faceLine}.`];
+      if (st.splitFaces) {
+        // the viewer counts merged faces; curved ones cannot be one flat Parasolid face, so they are written as their triangles
+        lines.push(`The viewer shows ${n(st.viewerFaces)} faces: ${n(st.splitFaces)} of them ${st.splitFaces === 1 ? 'is' : 'are'} not exactly flat, so ${st.splitFaces === 1 ? 'it was' : 'they were'} saved as ${n(st.splitTris)} flat triangles.`);
+      }
+      lines.push(`Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep. Stored in meters (Parasolid standard), opens at true size in NX.`);
+      showExportResult('ok', `Parasolid file saved: ${filename}`, lines);
       return true;
     } catch (e) {
       console.error('Parasolid export failed', e);
-      const oom = e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
-      showExportResult('err', 'Parasolid export failed', [
-        oom ? 'The browser ran out of memory while writing the file. Hide some parts or use Reduce detail, then try again.'
+      const tooLarge = e && e.code === 'XT_TOO_LARGE';
+      const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
+      showExportResult('err', tooLarge ? 'Parasolid export: model too large' : 'Parasolid export failed', [
+        tooLarge ? `The file would be about ${(e.estimatedBytes / 1e9).toFixed(1)} GB, more than the browser can save. Hide some parts or use Reduce detail, then try again.`
+          : oom ? 'The browser ran out of memory while writing the file. Hide some parts or use Reduce detail, then try again.'
           : `Error: ${(e && e.message) || e}`,
         'Nothing was saved.'
       ]);
@@ -3947,7 +3903,7 @@
         const b = document.createElement('button');
         b.className = 'btn';
         b.id = 'btnExportXT';
-        b.title = 'Faceted solid, flat triangles. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
+        b.title = 'Faceted solid, flat faces. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
         b.textContent = 'Export Parasolid (.x_t)';
         stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
       }
@@ -4261,6 +4217,8 @@
     activateStream,
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
     buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
+    // summary of the last .x_t written: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, viewerFaces, splitFaces, splitTris, estimatedBytes, counts }
+    getLastXTStats: () => lastXTStats,
     buildSTEPAP214: (o = {}) => buildSTEPAP214(o.parts || state.parts, { brepMode: state.brepMode, units: state.units, ...o }),
     buildBinarySTL: (o = {}) => buildBinarySTL(state.parts, state.units, o),
     buildASCIISTL: (o = {}) => buildASCIISTL(state.parts, state.units, o),

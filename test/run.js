@@ -10,6 +10,7 @@
  * Always runs: bundled sample PDF, a synthetic PDF with embedded CAD attachments, chunked-text helpers.
  * With a corpus dir (or $PDF3D_CORPUS): every *.pdf is decoded and compared with test/expect.json
  * (streams, decode path and triangles per stream); --update rewrites expect.json from this run.
+ * --exports also builds every exporter on the sample, and a merged Parasolid .x_t for each corpus file.
  * $NX_PDF (or <corpus>/../nx2512-input.pdf) must give 37,196 triangles.
  */
 const fs = require('fs'); const path = require('path'); const vm = require('vm');
@@ -91,7 +92,16 @@ function syntheticAttachmentPDF() {
       if (exp && !update) ok = check(JSON.stringify(got) === JSON.stringify(exp.streams), `${f}: got ${JSON.stringify(got)} expected ${JSON.stringify(exp.streams)}`) && ok;
       if (update) expect[f] = { streams: got };
       if (r.error) check(false, `${f}: ${r.error}`);
-      rows.push(`| ${f} | ${ok ? 'PASS' : 'FAIL'} | ${r.streams.length} | ${r.streams.map((s) => s.decodePath).join(', ')} | ${r.streams.map((s) => s.tris).join(' + ')} | ${r.ms || '-'} | ${(r.streams.find((s) => s.warning) || {}).warning || r.error || ''} |`.replace(/\n/g, ' '));
+      if (doExports && !r.error) {   // Parasolid .x_t for every file: the stream the UI would show first with geometry
+        const si = r.streams.findIndex((s) => s.tris > 0);
+        if (si >= 0) { await api.activateStream(si); let len = 0, st = null;
+          try { const o = api.buildParasolidXT({ brepMode: 'merged', blob: true }); for (const c of (Array.isArray(o) ? o : [o])) len += typeof c === 'string' ? c.length : (c.size || c.byteLength || 0); st = api.getLastXTStats(); }
+          catch (e) { ok = check(false, `${f}: buildParasolidXT ${e.code || ''} ${e.message}`) && false; }
+          if (st) { ok = check(len > 100 && st.faces > 0, `${f}: XT empty (${len} B, ${st.faces} faces)`) && ok;
+            r.xt = `XT ${st.bodyType} ${st.faces} faces ${len} B`; console.log(`  ${f}: ${r.xt}`); }
+          const s = api.getState(); if (s.streams[si]) s.streams[si].parsed = null; }
+      }
+      rows.push(`| ${f} | ${ok ? 'PASS' : 'FAIL'} | ${r.streams.length} | ${r.streams.map((s) => s.decodePath).join(', ')} | ${r.streams.map((s) => s.tris).join(' + ')} | ${r.ms || '-'} | ${(r.streams.find((s) => s.warning) || {}).warning || r.error || ''}${r.xt ? ' ' + r.xt : ''} |`.replace(/\n/g, ' '));
       console.log(rows[rows.length - 1].slice(0, 220));
     }
     if (fs.existsSync(nx) && (!only || only.includes('nx'))) { const r = await decodeFile(api, nx); const t = r.streams.reduce((n, s) => n + s.tris, 0);
