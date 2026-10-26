@@ -29,7 +29,8 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   `single_file` in the single-file build, `file_url` on a `file://` page, `browser_unsupported` when the browser has no
   Web Workers or no WebAssembly, and `kernel_download` after the CAD kernel fails to download or its worker fails to start
   (true again after the next successful run or when the browser comes back online). True otherwise (reason `null`). The Export menu dims
-  *Fitted solid* and *Both* and shows the reason when it is false.
+  *Fitted solid* and *Both* and shows the reason when it is false (for `browser_unsupported`: "This browser can’t run
+  surface fitting. Try a recent version of Chrome, Edge, Safari or Firefox.").
 - **Fitted-only CAD export can leave open shells out** (`exportCadSurfaces(..., {fittedOnly: true, solidsOnly: true})`,
   `recon/cad-worker.js`): only closed solids are written as fitted bodies. The default is unchanged.
 

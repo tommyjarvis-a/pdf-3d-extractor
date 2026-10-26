@@ -11167,7 +11167,8 @@ void main() { gl_FragColor = uRGBA; }`;
   const CAD_REASON = {
     file_url: 'Fitting needs the page opened from a web address, not a local file.',
     single_file: 'Fitting isn\u2019t included in the single-file version.',
-    kernel_download: 'The CAD kernel couldn\u2019t download. Check your connection and try again.'
+    kernel_download: 'The CAD kernel couldn\u2019t download. Check your connection and try again.',
+    browser_unsupported: 'This browser can\u2019t run surface fitting. Try a recent version of Chrome, Edge, Safari or Firefox.'
   };
   const cadReason = () => CAD_REASON[caps().cadSurfacesReason] || 'Surface fitting isn\u2019t available here.';
   function available(f) {
@@ -11676,6 +11677,7 @@ void main() { gl_FragColor = uRGBA; }`;
     fit_limit: 'too many faces to fit in the browser',
     no_face_data: 'no face data to fit',
     kernel_download: 'the CAD kernel didn\u2019t download',
+    browser_unsupported: 'this browser can\u2019t run surface fitting',
     offline: 'you\u2019re offline, so the CAD kernel couldn\u2019t load',
     worker_failed: 'the surface-fitting worker stopped',
     out_of_memory: 'the browser ran out of memory',
