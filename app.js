@@ -6,7 +6,7 @@
  *  - ISO 14739-1 (PRC) binary stream parser (B-Rep & tessellation payloads)
  *  - Coplanar B-Rep Face Merger (reconstructs outer + inner hole boundary loops & analytic cylinders/planes)
  *  - CAD Exporters:
- *      1. Parasolid XT (.x_t) - ASCII transmit format, SCH_1200000_120060, meter scaling (1e-3 m/mm, UIO=1000)
+ *      1. Parasolid XT (.x_t) - text transmit format in the NX 2512 form (SCH_3800173_37102), meters (1e-3 m/mm)
  *      2. STEP AP214 (.stp) - ISO 10303-21 MANIFOLD_SOLID_BREP / CLOSED_SHELL / ADVANCED_FACE
  *      3. Binary & ASCII STL (.stl)
  *      4. Wavefront OBJ (.obj)
@@ -1959,7 +1959,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // 6. Parasolid XT (.x_t) ASCII Transmit Exporter (SCH_1200000_120060)
+  // 6. Parasolid XT (.x_t) text transmit exporter, NX 2512 form (SCH_3800173_37102_13006, see XTNxStream)
   //    Native Parasolid units = meters (m), res_size = 1000+, res_linear = 1e-8
   //    Supports:
   //      - Closed 2-Manifold Solid Bodies (body_type = 1)
@@ -2051,19 +2051,6 @@
       return chunks;
     }
   }
-  // Doubly linked record chain (XT EDGE/VERTEX/PLANE/LINE/POINT): holds one pending record until its
-  // successor is known. fmt(prev, next) renders the line.
-  class ChainSink {
-    constructor(blob) { this.sink = new TextSink(blob); this.pendIdx = 0; this.pendPrev = 0; this.pendFmt = null; this.first = 0; this.count = 0; }
-    push(idx, fmt) {
-      let prev = 0;
-      if (this.pendFmt) { this.sink.push(this.pendFmt(this.pendPrev, idx)); prev = this.pendIdx; }
-      else this.first = idx;
-      this.pendIdx = idx; this.pendPrev = prev; this.pendFmt = fmt; this.count++;
-    }
-    end() { if (this.pendFmt) { this.sink.push(this.pendFmt(this.pendPrev, 0)); this.pendFmt = null; } return this.sink; }
-  }
-
   // Parts to export: visible ones, optionally replaced by a reduced-detail copy (state.exportDetail < 1).
   function exportPartList(parts, options) {
     const detail = options && options.detail != null ? options.detail : (state.exportDetail || 1);
@@ -2073,41 +2060,110 @@
     return vis.map((p) => decimatedPart(p, detail));
   }
 
+  // -------------------------------------------------------------------------
+  // Parasolid XT text in the form Siemens NX 2512 writes and reads (schema SCH_3800173_37102 with
+  // inline deltas over base 13006). Ported from the QA rewriter (xt-rewrite.py --nx-embedded):
+  //  * CRLF header with NX keys (APPL=NX, KEY=<part>, SCH=SCH_3800173_37102, USFLD_SIZE=0).
+  //  * one continuous token stream: every number is followed by exactly one space; char/logical
+  //    fields and a null '?' are NOT followed by a space; floats in Python repr form (1000.0, 1e-08).
+  //  * stream prefix 'T' + transmit text + key SCH_3800173_37102_13006 + max node type 239 + user field size 0.
+  //  * the first node of each type carries its schema: BODY and REGION deltas (copied from an NX file),
+  //    255 (= unchanged vs 13006) for the others.
+  //  * nodes in index order, terminator '1 0 '.
+  //  * wrapped at 80 columns with CRLF; a line never ends with a space (the separator moves to the next line).
+  // -------------------------------------------------------------------------
+  const XT_NX_SCHEMA = 'SCH_3800173_37102';
+  const XT_NX_KEY = XT_NX_SCHEMA + '_13006';
+  const XT_WRITER_FORM = 'nx-37102';
+  const XT_NX_SCHEMA_DELTAS = {
+    12: '36 CCCI7 lattice222 0 CCCI4 mesh1006 0 I8 polyline1008 0 CCCCCCCDI5 owner1040 0 CCCI16 boundary_lattice222 0 CCCI13 boundary_mesh1006 0 I17 boundary_polyline1008 0 CCCA16 index_map_offset0 0 1 dA9 index_map82 0 A17 node_id_index_map82 0 A20 schema_embedding_map82 0 A5 child12 0 A14 lowest_node_id0 0 1 dA16 mesh_offset_data206 0 Z',
+    19: '9 CCCCCCI5 frame230 0 CA5 owner12 0 Z'
+  };
+  let lastXTStats = null;
+
+  // Header KEY: the part name (file name without extension), restricted to safe characters.
+  function xtKeyName(fileName) {
+    const base = String(fileName || 'part').split(/[\\/]/).pop().replace(/(\.(x_t|xmt_txt|pdf|u3d|prc))+$/i, '');
+    return base.replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 64) || 'part';
+  }
+  function xtNxHeaderLines(key) {
+    return [
+      '**ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz**************************',
+      '**PARASOLID !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~0123456789**************************',
+      '**PART1;', 'MC=x86_64;', 'OS=linux;', 'APPL=NX;', 'FORMAT=text;', 'GUISE=transmit;', `KEY=${key};`,
+      '**PART2;', `SCH=${XT_NX_SCHEMA};`, 'USFLD_SIZE=0;', '**PART3;',
+      '**END_OF_HEADER*****************************************************************'
+    ];
+  }
+  function xtNxStreamPrefix() {
+    const tt = ': TRANSMIT FILE created by modeller version ' + XT_NX_KEY.split('_')[1];
+    return `T${tt.length} ${tt}${XT_NX_KEY.length} ${XT_NX_KEY}239 0 `;
+  }
+  // Python repr() of a double: shortest round-trip digits; exponent form when exp < -4 or exp >= 16.
+  function pyFloatRepr(x) {
+    if (x === 0) return Object.is(x, -0) ? '-0.0' : '0.0';
+    const m = /^(-?)(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(x.toExponential());
+    const sign = m[1], digits = m[2] + (m[3] || ''), exp = Number(m[4]);
+    if (exp < -4 || exp >= 16) {
+      return sign + m[2] + (m[3] ? '.' + m[3] : '') + 'e' + (exp < 0 ? '-' : '+') + String(Math.abs(exp)).padStart(2, '0');
+    }
+    if (exp < 0) return sign + '0.' + '0'.repeat(-exp - 1) + digits;
+    if (digits.length <= exp + 1) return sign + digits + '0'.repeat(exp + 1 - digits.length) + '.0';
+    return sign + digits.slice(0, exp + 1) + '.' + digits.slice(exp + 1);
+  }
+  // XT real field token (value rounded to 16 significant digits, as before), followed by its space.
+  function xtF(v) {
+    if (!isFinite(v) || Math.abs(v) < 1e-15) return '0.0 ';
+    return pyFloatRepr(Number(v.toPrecision(16))) + ' ';
+  }
+  // Token stream -> 80-column CRLF lines in a TextSink; schema blob for the first node of each type.
+  class XTNxStream {
+    constructor(sink) { this.sink = sink; this.buf = ''; this.seen = new Set(); }
+    schemaBlob(type) {
+      if (this.seen.has(type)) return '';
+      this.seen.add(type);
+      return (XT_NX_SCHEMA_DELTAS[type] || '255') + (XT_NX_SCHEMA_DELTAS[type] ? '' : ' ');
+    }
+    write(s) { this.buf += s; if (this.buf.length >= 65536) this._drain(); }
+    _drain() {
+      const b = this.buf; let k = 0;
+      while (b.length - k > 80) {  // more text follows, so the line may give its trailing spaces to the next one
+        let n = 80;
+        while (b.charCodeAt(k + n - 1) === 32) n--;
+        this.sink.push(b.slice(k, k + n) + '\r'); k += n;
+      }
+      this.buf = b.slice(k);
+    }
+    end() { this._drain(); if (this.buf.length) this.sink.push(this.buf + '\r'); this.buf = ''; }
+  }
+  // Doubly linked XT record chain: holds one pending record until its successor is known.
+  class XTChain {
+    constructor(put, type) { this.put = put; this.type = type; this.pendIdx = 0; this.pendPrev = 0; this.pendFmt = null; this.first = 0; this.count = 0; }
+    push(idx, fmt) {
+      let prev = 0;
+      if (this.pendFmt) { this.put(this.pendIdx, this.type, this.pendFmt(this.pendPrev, idx)); prev = this.pendIdx; }
+      else this.first = idx;
+      this.pendIdx = idx; this.pendPrev = prev; this.pendFmt = fmt; this.count++;
+    }
+    end() { if (this.pendFmt) { this.put(this.pendIdx, this.type, this.pendFmt(this.pendPrev, 0)); this.pendFmt = null; } }
+  }
+
   function buildParasolidXT(parts, options = {}) {
     const visibleParts = exportPartList(parts, options);
     const brepMode = options.brepMode || state.brepMode || 'merged';
     const useMerged = brepMode !== 'faceted';
     const forceSheet = brepMode === 'sheet-unsewn' || brepMode === 'faceted';
-    const useAssemblyRoot = brepMode === 'merged-assembly' && visibleParts.length > 1;
+    // 'merged-assembly' writes one merged body too: the ASSEMBLY/INSTANCE layouts of schema 37102 are not known.
     const units = options.units || state.units || 'mm';
     const scaleM = getScaleToMeters(units);
-    const fileName = (options.fileName || state.fileName || 'assembly').replace(/\.(pdf|u3d|prc)$/i, '') + '.x_t';
+    const fileName = options.fileName || state.fileName || 'assembly';
 
-    const headerLines = [
-      '**ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz**************************',
-      '**PARASOLID !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~0123456789**************************',
-      '**PART1;',
-      'MC=x86_64;',
-      'MC_MODEL=web_cad_workbench;',
-      'OS=Linux;',
-      'FRU=sdl_parasolid_3d_pdf_extractor;',
-      'APPL=pdf_3d_extractor_nx;',
-      'SITE=siemens_nx_cad;',
-      'USER=steven;',
-      'FORMAT=text;',
-      'GUISE=transmit;',
-      `FILE=${fileName};`,
-      'DATE=23-oct-2026;',
-      '**PART2;',
-      'SCH=SCH_1200000_12006;',
-      'USFLD_SIZE=0;',
-      'UIO=1000;',
-      '**PART3;',
-      '**END_OF_HEADER*****************************************************************',
-      'T51 : TRANSMIT FILE created by modeller version 120000017 SCH_1200000_120060'
-    ];
+    // NX 2512 header (Siemens NX imports exactly this form: verified on screw_parasolid_test.x_t).
     const out = new TextSink(options.blob);
-    for (const l of headerLines) out.push(l);
+    for (const l of xtNxHeaderLines(xtKeyName(fileName))) out.push(l + '\r');
+    const xs = new XTNxStream(out);
+    xs.write(xtNxStreamPrefix());
+    const xtStats = { schema: XT_NX_SCHEMA, counts: {}, bodyKinds: [] };
 
     let nextIdx = 1;
     const allocIdx = () => nextIdx++;
@@ -2179,49 +2235,49 @@
     function emitBody(bodyIdx, refInstanceIdx, bodyParts, isSolidBody) {
       let nodeIdCounter = 1;
       const allocNodeId = () => nodeIdCounter++;
-      const BL = options.blob;
-      const faceS = new TextSink(BL), loopS = new TextSink(BL), finS = new TextSink(BL);
-      const edgeC = new ChainSink(BL), vertC = new ChainSink(BL), planeC = new ChainSink(BL), lineC = new ChainSink(BL), pointC = new ChainSink(BL);
-      const shellC = new ChainSink(BL);
-      const regionRecords = [];
-      const shellRecords = [];
+      // Records are collected per body and written in index order (as NX does), each as
+      // '<type> <index> <fields>' in strict XT token form (see xtF / XTNxStream).
+      const recs = [];
+      const put = (idx, type, fields) => { recs[idx - bodyIdx] = type + ' ' + idx + ' ' + fields; };
+      const edgeC = new XTChain(put, 16), vertC = new XTChain(put, 18), planeC = new XTChain(put, 50), lineC = new XTChain(put, 30), pointC = new XTChain(put, 29);
+      const shellC = new XTChain(put, 13);
       let vertexEntities, edgeEntities, faceEntities, loopEntities, finEntities, planeEntities;
       const resetPart = () => { vertexEntities = []; edgeEntities = []; faceEntities = []; loopEntities = []; finEntities = []; planeEntities = []; };
       const flushPart = () => {
         for (const f of faceEntities) {
-          faceS.push(`14 ${f.fIdx} ${f.nodeIdF} 0 ? ${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} + 0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx}`);
+          put(f.fIdx, 14, `${f.nodeIdF} 0 ?${f.nextF} ${f.prevF} ${f.firstLoopIdx} ${f.backShellIdx} ${f.surfIdx} +0 0 ${f.nextF} ${f.prevF} ${f.frontShellIdx} `);
         }
-        for (const lp of loopEntities) loopS.push(`15 ${lp.lpIdx} ${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx}`);
+        for (const lp of loopEntities) put(lp.lpIdx, 15, `${lp.nodeIdLp} 0 ${lp.firstFinIdx} ${lp.fIdx} ${lp.nextLoopIdx} `);
         for (const fn of finEntities) {
-          finS.push(`17 ${fn.fnIdx} 0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`);
+          put(fn.fnIdx, 17, `0 ${fn.lpIdx} ${fn.fwdFin} ${fn.bwdFin} ${fn.fwdVxIdx} ${fn.otherFin} ${fn.edge.eIdx} 0 ${fn.nextAtVx} ${fn.sense}`);
         }
         for (const e of edgeEntities) {
           const primaryFin = e.posFin ? e.posFin.fnIdx : (e.negFin ? e.negFin.fnIdx : 0);
-          const s0 = `16 ${e.eIdx} ${e.nodeIdE} 0 ? ${primaryFin} `, s1 = ` ${e.lIdx} 0 0 ${bodyIdx}`;
+          const s0 = `${e.nodeIdE} 0 ?${primaryFin} `, s1 = ` ${e.lIdx} 0 0 ${bodyIdx} `;
           edgeC.push(e.eIdx, (prevE, nextE) => s0 + prevE + ' ' + nextE + s1);
         }
         for (const v of vertexEntities) {
-          const s0 = `18 ${v.vIdx} ${v.nodeIdV} 0 ${v.firstFinIdx} `, s1 = ` ${v.pIdx} ? ${bodyIdx}`;
+          const s0 = `${v.nodeIdV} 0 ${v.firstFinIdx} `, s1 = ` ${v.pIdx} ?${bodyIdx} `;
           vertC.push(v.vIdx, (prevV, nextV) => s0 + prevV + ' ' + nextV + s1);
         }
         for (const s of planeEntities) {
           const [px, py, pz] = s.pOrig;
           const [nx, ny, nz] = s.normal;
           const [ux, uy, uz] = s.uAxis;
-          const s0 = `50 ${s.surfIdx} ${s.nodeIdS} 0 ${s.fIdx} `;
-          const s1 = ` 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(nx)} ${fmtNum(ny)} ${fmtNum(nz)} ${fmtNum(ux)} ${fmtNum(uy)} ${fmtNum(uz)}`;
+          const s0 = `${s.nodeIdS} 0 ${s.fIdx} `;
+          const s1 = ` 0 +${xtF(px)}${xtF(py)}${xtF(pz)}${xtF(nx)}${xtF(ny)}${xtF(nz)}${xtF(ux)}${xtF(uy)}${xtF(uz)}`;
           planeC.push(s.surfIdx, (prevS, nextS) => s0 + nextS + ' ' + prevS + s1);
         }
         for (const e of edgeEntities) {
           const [px, py, pz] = e.originM;
           const [dx, dy, dz] = e.dir;
-          const s0 = `30 ${e.lIdx} ${e.nodeIdL} 0 ${e.eIdx} `;
-          const s1 = ` 0 + ${fmtNum(px)} ${fmtNum(py)} ${fmtNum(pz)} ${fmtNum(dx)} ${fmtNum(dy)} ${fmtNum(dz)}`;
+          const s0 = `${e.nodeIdL} 0 ${e.eIdx} `;
+          const s1 = ` 0 +${xtF(px)}${xtF(py)}${xtF(pz)}${xtF(dx)}${xtF(dy)}${xtF(dz)}`;
           lineC.push(e.lIdx, (prevL, nextL) => s0 + nextL + ' ' + prevL + s1);
         }
         for (const v of vertexEntities) {
           const [x, y, z] = v.xyzM;
-          const s0 = `29 ${v.pIdx} ${v.nodeIdP} 0 ${v.vIdx} `, s1 = ` ${fmtNum(x)} ${fmtNum(y)} ${fmtNum(z)}`;
+          const s0 = `${v.nodeIdP} 0 ${v.vIdx} `, s1 = ` ${xtF(x)}${xtF(y)}${xtF(z)}`;
           pointC.push(v.pIdx, (prevP, nextP) => s0 + nextP + ' ' + prevP + s1);
         }
         resetPart();
@@ -2403,17 +2459,17 @@
         // Build Void Region + Solid Regions and Void Shells + Solid Shells
         const firstVoidShellIdx = lumpInfos.length > 0 ? lumpInfos[0].shellVoidIdx : 0;
         const firstSolidRegIdx = lumpInfos.length > 0 ? lumpInfos[0].regSolidIdx : 0;
-        regionRecords.push(`19 ${regVoidIdx} ${regVoidNodeId} 0 ${bodyIdx} ${firstSolidRegIdx} 0 ${firstVoidShellIdx} V`);
+        put(regVoidIdx, 19, `${regVoidNodeId} 0 ${bodyIdx} ${firstSolidRegIdx} 0 ${firstVoidShellIdx} 0 V0 `);
 
         for (let i = 0; i < lumpInfos.length; i++) {
           const L = lumpInfos[i];
           const nextReg = i + 1 < lumpInfos.length ? lumpInfos[i + 1].regSolidIdx : 0;
           const prevReg = i === 0 ? regVoidIdx : lumpInfos[i - 1].regSolidIdx;
-          regionRecords.push(`19 ${L.regSolidIdx} ${L.regSolidNodeId} 0 ${bodyIdx} ${nextReg} ${prevReg} ${L.shellSolidIdx} S`);
+          put(L.regSolidIdx, 19, `${L.regSolidNodeId} 0 ${bodyIdx} ${nextReg} ${prevReg} ${L.shellSolidIdx} 0 S0 `);
 
           const nextVoidSh = i + 1 < lumpInfos.length ? lumpInfos[i + 1].shellVoidIdx : 0;
-          shellRecords.push(`13 ${L.shellVoidIdx} ${L.shellVoidNodeId} 0 0 ${nextVoidSh} 0 0 0 ${regVoidIdx} ${L.firstFaceIdx}`);
-          shellRecords.push(`13 ${L.shellSolidIdx} ${L.shellSolidNodeId} 0 ${bodyIdx} 0 ${L.firstFaceIdx} 0 0 ${L.regSolidIdx} 0`);
+          put(L.shellVoidIdx, 13, `${L.shellVoidNodeId} 0 0 ${nextVoidSh} 0 0 0 ${regVoidIdx} ${L.firstFaceIdx} `);
+          put(L.shellSolidIdx, 13, `${L.shellSolidNodeId} 0 ${bodyIdx} 0 ${L.firstFaceIdx} 0 0 ${L.regSolidIdx} 0 `);
         }
         bodyShellPtr = lumpInfos.length >= 1 ? lumpInfos[0].shellSolidIdx : 0;
       } else {
@@ -2535,13 +2591,13 @@
             planeEntities.push({ surfIdx, nodeIdS, fIdx, pOrig, normal, uAxis });
 
             const sfIdx = fIdx;
-            shellC.push(shIdx, (prevSh, nextSh) => `13 ${shIdx} ${shNodeId} 0 ${bodyIdx} ${nextSh} ${sfIdx} 0 0 ${regVoidIdx} ${sfIdx}`);
+            shellC.push(shIdx, (prevSh, nextSh) => `${shNodeId} 0 ${bodyIdx} ${nextSh} ${sfIdx} 0 0 ${regVoidIdx} ${sfIdx} `);
           }
           flushPart();
         }
 
         const firstShellIdx = shellC.count > 0 ? shellC.first : 0;
-        regionRecords.push(`19 ${regVoidIdx} ${regVoidNodeId} 0 ${bodyIdx} 0 0 ${firstShellIdx} V`);
+        put(regVoidIdx, 19, `${regVoidNodeId} 0 ${bodyIdx} 0 0 ${firstShellIdx} 0 V0 `);
         bodyShellPtr = firstShellIdx;
       }
 
@@ -2553,19 +2609,24 @@
       const firstEdgeIdx = edgeC.count > 0 ? edgeC.first : 0;
       const firstVxIdx = vertC.count > 0 ? vertC.first : 0;
 
-      // 12 = BODY (standard top-level or instance-referenced body: next = 0, previous = 0)
-      out.push(`12 ${bodyIdx} ${highestNodeId} 0 0 0 0 0 0 ${resSize} 1e-8 ${refInstanceIdx} 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx}`);
-      for (const rLine of regionRecords) out.push(rLine);   // 19 = REGION
-      for (const sLine of shellRecords) out.push(sLine);    // 13 = SHELL (solid)
-      out.append(shellC.end());                            // 13 = SHELL (sheet)
-      out.append(faceS);                                   // 14 = FACE
-      out.append(loopS);                                   // 15 = LOOP
-      out.append(finS);                                    // 17 = FIN
-      out.append(edgeC.end());                             // 16 = EDGE chain
-      out.append(vertC.end());                             // 18 = VERTEX chain
-      out.append(planeC.end());                            // 50 = PLANE chain
-      out.append(lineC.end());                             // 30 = LINE chain
-      out.append(pointC.end());                            // 29 = POINT chain
+      for (const c of [shellC, edgeC, vertC, planeC, lineC, pointC]) c.end();
+      // 12 = BODY in the NX 37102 layout (36 fields; fields new since 13006 are null pointers / 0).
+      //   max_local_id annotations attribute_lists lattice construction_surfaces/curves/points mesh polyline key_ref
+      //   size_precision linear_precision instances next_body previous_body storage_state owner body_kind geometry_state
+      //   legacy_shell boundary_lattice boundary_surfaces/curves/points boundary_mesh boundary_polyline region_head
+      //   edge_head vertex_head index_map_offset index_map node_id_index_map schema_embedding_map child lowest_node_id
+      //   mesh_offset_data
+      put(bodyIdx, 12, `${highestNodeId} 0 0 0 0 0 0 0 0 0 ${xtF(resSize)}${xtF(1e-8)}${refInstanceIdx} 0 0 1 0 ${bodyTypeCode} 1 ${bodyShellPtr} 0 ${firstSurfIdx} ${firstCurveIdx} ${firstPointIdx} 0 0 ${regVoidIdx} ${firstEdgeIdx} ${firstVxIdx} 0 0 0 0 0 0 0 `);
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        if (r === undefined) continue;
+        const sp = r.indexOf(' ');
+        const t = r.slice(0, sp);
+        xtStats.counts[t] = (xtStats.counts[t] || 0) + 1;
+        xs.write(r.slice(0, sp + 1) + xs.schemaBlob(t) + r.slice(sp + 1));
+        recs[i] = undefined;
+      }
+      xtStats.bodyKinds.push(bodyTypeCode);
       return true;
     }
 
@@ -2579,29 +2640,14 @@
       emitBody(bodyIdx, refInstanceIdx, bodyParts, false);
     }
 
-    if (useAssemblyRoot) {
-      const asmIdx = allocIdx(); // #1 = 10 ASSEMBLY
-      const instIndices = visibleParts.map(() => allocIdx());
-      const bodyIndices = visibleParts.map(() => allocIdx());
-      const highestAsmNodeId = visibleParts.length + 1;
-      out.push(`10 ${asmIdx} ${highestAsmNodeId} 0 0 0 0 0 0 0 ${resSize} 1e-8 0 0 0 1 0 1 ${instIndices[0]}`);
-      for (let i = 0; i < visibleParts.length; i++) {
-        const instIdx = instIndices[i];
-        const nextInst = i + 1 < instIndices.length ? instIndices[i + 1] : 0;
-        const prevInst = i > 0 ? instIndices[i - 1] : 0;
-        out.push(`11 ${instIdx} ${i + 1} 0 ${asmIdx} ${bodyIndices[i]} 0 1 ${nextInst} ${prevInst} 0 0`);
-      }
-      for (let i = 0; i < visibleParts.length; i++) {
-        emitBodyRecord(bodyIndices[i], instIndices[i], [visibleParts[i]]);
-      }
-    } else {
-      const rootBodyIdx = allocIdx(); // #1 = 12 BODY containing all visible parts' lumps/shells
-      emitBodyRecord(rootBodyIdx, 0, visibleParts);
-    }
+    const rootBodyIdx = allocIdx(); // #1 = 12 BODY containing all visible parts' lumps/shells
+    emitBodyRecord(rootBodyIdx, 0, visibleParts);
 
     // End of transmit file
-    out.push('1 0');
+    xs.write('1 0 ');
+    xs.end();
     out.push('');
+    lastXTStats = xtStats;
     return out.result();
   }
 
@@ -3663,7 +3709,7 @@
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
       hudScaleInfo.textContent = XT_UI_ENABLED
-        ? `Parasolid XT: 1e-3 m/mm (UIO=1000, res_size=1000, res_linear=1e-8) • Units: ${state.units}`
+        ? `Parasolid XT: 1e-3 m/mm (res_size=1000, res_linear=1e-8) • Units: ${state.units}`
         : `Units: ${state.units} • STEP AP214 export`;
     }
 
@@ -3690,6 +3736,7 @@
     }
     if (state.activeTab === 'xt' && !state.cachedXT) {
       state.cachedXT = buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName });
+      state.cachedXTStats = lastXTStats;
     }
     if (state.activeTab === 'step' && !state.cachedSTEP) {
       state.cachedSTEP = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units });
@@ -3699,32 +3746,15 @@
       const xtPrev = previewLines(state.cachedXT, 140);
       const counts = { ASSEMBLY: 0, INSTANCE: 0, BODY: 0, REGION: 0, SHELL: 0, FACE: 0, LOOP: 0, FIN: 0, EDGE: 0, VERTEX: 0, PLANE: 0, LINE: 0, POINT: 0 };
       let bodyKindLabel = 'Solid / Sheet B-Rep';
-      forEachLine(state.cachedXT, (ln) => {
-        const m = ln.match(/^(\d+)\s+/);
-        if (!m) return;
-        const code = Number(m[1]);
-        if (code === 10) counts.ASSEMBLY++;
-        else if (code === 11) counts.INSTANCE++;
-        else if (code === 12) {
-          counts.BODY++;
-          const tok = ln.trim().split(/\s+/);
-          if (tok[16] === '3') bodyKindLabel = 'Sheet Body (body_type=3)';
-          else if (tok[16] === '1') bodyKindLabel = 'Solid Body (body_type=1)';
-        }
-        else if (code === 19) counts.REGION++;
-        else if (code === 13) counts.SHELL++;
-        else if (code === 14) counts.FACE++;
-        else if (code === 15) counts.LOOP++;
-        else if (code === 17) counts.FIN++;
-        else if (code === 16) counts.EDGE++;
-        else if (code === 18) counts.VERTEX++;
-        else if (code === 50) counts.PLANE++;
-        else if (code === 30) counts.LINE++;
-        else if (code === 29) counts.POINT++;
-      });
+      // The NX-form stream is wrapped at 80 columns, so node counts come from the writer, not from lines.
+      const xtSt = state.cachedXTStats || { counts: {}, bodyKinds: [] };
+      const XT_NAMES = { 10: 'ASSEMBLY', 11: 'INSTANCE', 12: 'BODY', 19: 'REGION', 13: 'SHELL', 14: 'FACE', 15: 'LOOP', 17: 'FIN', 16: 'EDGE', 18: 'VERTEX', 50: 'PLANE', 30: 'LINE', 29: 'POINT' };
+      for (const [code, n] of Object.entries(xtSt.counts)) if (XT_NAMES[code]) counts[XT_NAMES[code]] += n;
+      if (xtSt.bodyKinds.includes(3)) bodyKindLabel = 'Sheet Body (body_type=3)';
+      else if (xtSt.bodyKinds.includes(1)) bodyKindLabel = 'Solid Body (body_type=1)';
 
       summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (SCH_1200000_120060)</div>
+        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (${(state.cachedXTStats && state.cachedXTStats.schema) || XT_NX_SCHEMA})</div>
         <div class="entity-row"><span>12 BODY (${bodyKindLabel})</span><strong>${counts.BODY}${counts.ASSEMBLY ? ' (' + counts.INSTANCE + ' Inst)' : ''}</strong></div>
         <div class="entity-row"><span>19 REGION (Void / Solid)</span><strong>${counts.REGION}</strong></div>
         <div class="entity-row"><span>13 SHELL (Connected Shells)</span><strong>${counts.SHELL}</strong></div>
@@ -4179,6 +4209,11 @@
     buildWavefrontOBJ: (o = {}) => buildWavefrontOBJ(state.parts, state.units, o),
     buildIGESWireframe: (o = {}) => buildIGESWireframe(state.parts, state.units, o)
   };
+
+  // Capability flags for UI wiring: parasolid is true only while buildParasolidXT writes the NX 2512
+  // form (SCH_3800173_37102_13006) that Siemens NX imports.
+  const PDF3D_NS = (window.PDF3D = window.PDF3D || {});
+  PDF3D_NS.capabilities = Object.assign(PDF3D_NS.capabilities || {}, { parasolid: XT_WRITER_FORM === 'nx-37102', parasolidSchema: XT_NX_SCHEMA });
 
   window.addEventListener('DOMContentLoaded', () => {
     initEvents();

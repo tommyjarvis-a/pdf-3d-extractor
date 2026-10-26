@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Parasolid XT (.x_t) writer now emits the Siemens NX 2512 form** (`buildParasolidXT` in `app.js`): schema
+  `SCH_3800173_37102` (key `SCH_3800173_37102_13006`) with inline BODY/REGION schema deltas, NX header keys
+  (`APPL=NX`, `KEY=<part>`, `USFLD_SIZE=0`), strict token spacing, Python-style reals, nodes in index order and
+  80-column CRLF lines. This is a port of the QA rewriter `xt-rewrite.py --nx-embedded`: the browser output needs no
+  post-processing. The old `SCH_1200000_12006` output was rejected by NX.
+  - screw.pdf exports byte-identical to the file verified in NX (41,222,574 bytes, 1 solid body, 44,724 planar faces).
+  - *merged-assembly* now writes one merged body (the ASSEMBLY/INSTANCE layouts of schema 37102 are not known).
+- New flag `PDF3D.capabilities.parasolid` (true while the writer is the NX form) for export UI wiring.
+  Parasolid export stays hidden in the UI (`?xt=1`); the XT inspector reads node counts from the writer.
+
 ## 1.5.1 — 2026-10-25
 
 ### Fixed
