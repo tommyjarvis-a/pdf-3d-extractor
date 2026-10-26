@@ -26,9 +26,9 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   Parasolid writer returns `status: 'error'`, `reasonCode: 'XT_TOO_LARGE'`, no file and `summary.estimatedBytes`. It calls the same writers as the Advanced buttons
   (no hidden button clicks), so STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical to theirs.
 - **`PDF3D.capabilities.cadSurfaces`** (bool) and **`cadSurfacesReason`** (`recon/cad-export.js`): false with
-  `single_file` in the single-file build, `file_url` on a `file://` page, and `kernel_download` after the CAD kernel
-  fails to download or its worker fails to start (true again after the next successful run or when the browser comes back
-  online) or when the browser has no Web Workers / WebAssembly. True otherwise (reason `null`). The Export menu dims
+  `single_file` in the single-file build, `file_url` on a `file://` page, `browser_unsupported` when the browser has no
+  Web Workers or no WebAssembly, and `kernel_download` after the CAD kernel fails to download or its worker fails to start
+  (true again after the next successful run or when the browser comes back online). True otherwise (reason `null`). The Export menu dims
   *Fitted solid* and *Both* and shows the reason when it is false.
 - **Fitted-only CAD export can leave open shells out** (`exportCadSurfaces(..., {fittedOnly: true, solidsOnly: true})`,
   `recon/cad-worker.js`): only closed solids are written as fitted bodies. The default is unchanged.

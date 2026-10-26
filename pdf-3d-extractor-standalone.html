@@ -9487,11 +9487,12 @@ void main() { gl_FragColor = uRGBA; }`;
   // PDF3D.capabilities.cadSurfaces / cadSurfacesReason (1.6.0, read by export-flow.js each time the popover opens):
   // 'single_file' (inlined build; checked first, serving that file over http does not add the kernel files),
   // 'file_url' (page opened from a local file), 'kernel_download' (the last run could not download the kernel or start the
-  // worker - cleared after a later successful run or when the browser comes back online - or no Worker / WebAssembly at all).
-  // Only these three codes are used (Designer's card maps exactly these).
+  // worker - cleared after a later successful run or when the browser comes back online), 'browser_unsupported' (no Worker
+  // or no WebAssembly in this browser). Only these four codes are used.
   let kernelFailed = false;
   const capReason = () => (!SRC ? 'single_file' : location.protocol === 'file:' ? 'file_url'
-    : (kernelFailed || typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') ? 'kernel_download' : null);
+    : (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') ? 'browser_unsupported'
+    : kernelFailed ? 'kernel_download' : null);
   const updateCaps = () => {
     const r = capReason(); const c = (NS.capabilities = NS.capabilities || {});
     c.cadSurfaces = !r; c.cadSurfacesReason = r;
