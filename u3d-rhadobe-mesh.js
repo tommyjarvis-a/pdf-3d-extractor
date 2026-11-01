@@ -25,7 +25,12 @@
  *       diffuse idx, specular idx (for faces whose material has the flag), texcoord idx [3F per tex layer]
  *   UINT block: U8 (b0-5 encoding, b6-7 bytes-1 of size field); 0 all-zero (no size), 1 replicate U32 (no size);
  *       otherwise U8|16|24|32 byte size, then data: 2 U4, 3 U8, 4 U16, 5 U24, 6 U32, 7 RH39, 8/9 U3D arithmetic
- *       (NOT implemented - not used by r09), 10 UIC1 (implemented from the appendix, verified on the spec's cube example).
+ *       (NOT implemented - not used by r09), 10 UIC1 (appendix A; verified on the spec's cube example and byte-exact on
+ *       SAP Visual Enterprise Author 9.0 output, where every array is UIC1). UIC1 notes from the VEA file: the
+ *       DeltaU4*_V/V2 "prevVertical" (value 3 back) applies to every array, not only face indices; LongReplicate16
+ *       (cmd 13) keeps the current value and queues U16+36 MORE copies (U16+37 in total); the previous-values ring
+ *       starts with GetBackValue(w) == w for w = 0..31 (not zeros); the deltas ring starts at zero.
+ *   Normals DataType 3: U32 NumQuants + ONE UINT block of 2n values (n alphas, then n thetas) for all components.
  *
  * INTEGRATION (app.js, read-only for QA; for Dev):
  *   <script src="u3d-rhadobe-mesh.js"> (global RHAdobeMesh) before app.js. In parseU3DStreamCore's block loop, on block
@@ -37,9 +42,9 @@
  *   Typed arrays (m.positions Float32Array, m.indices Uint32Array) are available for Dev's typed-array parts.
  * CLI: node fixes/u3d-rhadobe-mesh.js <in.u3d|in.pdf> [-o out.stl] [--obj out.obj] [--json summary.json] [--no-transform]
  *   (.pdf input uses fixes/pdf-extract.js + crypto-lite.js, so AES/RC4 owner-only files work.)
- * LIMITS: encodings 8/9 (U3D arithmetic coder) and normals type 3 decode paths are unverified (8/9 throw); skeleton and
- *   subchunk data are ignored; texture coordinates are decoded (OBJ vt) but textures/materials are not mapped; tested
- *   only on the CoreTechnologie producer in r09 (1 material, no normals, no colours).
+ * LIMITS: encodings 8/9 (U3D arithmetic coder) are not implemented (they throw); skeleton and subchunk data are
+ *   ignored; texture coordinates are decoded (OBJ vt) but textures/materials are not mapped. Tested on the
+ *   CoreTechnologie producer in r09 (RH39, 1 material, no normals) and SAP VEA 9.0 (UIC1, type-3 normals, texcoords).
  */
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.RHAdobeMesh = factory(); })(typeof self !== 'undefined' ? self : this, function () {
   const GUID = '96a804a6-3fb9-43c5-b2df-2a31b5569340';
@@ -75,11 +80,14 @@
   }
   function uic1(R, count, end, vertical) {
     const out = new Uint32Array(count); const PV = new Uint32Array(32), PD = new Int32Array(32);
+    // The previous-values ring starts as "w back = w" (0..31), not all zeros: SAP VEA face-index arrays open with
+    // BackPtrValue(4), (6), ... meaning 4, 6, ... (all-zero history gave 6 bogus faces and 610 open edges).
+    for (let j = 0; j < 32; j++) PV[j] = (32 - j) & 31;
     let cv = 0, cd = 0, q = 0, qv = 0, r = 0;
     const gv = (w) => PV[cv >= w ? cv - w : 32 + cv - w], gd = (w) => PD[cd >= w ? cd - w : 32 + cd - w];
     const C = [0xFF, 0xFF00, 0xFF0000, 0xFF000000, 0xFFFFFF, 0xFFFFFFFF];
     for (let i = 0; i < count; i++) {
-      const prev = r; const pv = vertical && i >= 3 ? out[i - 3] : 0;
+      const prev = r; const pv = i >= 3 ? out[i - 3] : 0; // prevVertical (value 3 back) for every UIC1 array, not only face indices (VEA screw positions use it)
       if (q) { q--; r = gv(qv); } else {
         if (R.p >= end) throw new Error('UIC1: data ended at value ' + i);
         const cmd = R.u8(), a = cmd >> 4;
@@ -96,7 +104,7 @@
             if (a <= 4) r = a; else if (a <= 10) r = C[a - 5];
             else if (a === 11) { const bl = R.u8(); r = ((R.u16() << 8) + bl) >>> 0; }
             else if (a === 12) r = R.u32();
-            else if (a === 13) { qv = 0; q = R.u16() + 35; r = gv(0); } // replicate last value 36+N times (this one + 35+N queued)
+            else if (a === 13) { qv = 0; q = R.u16() + 36; } // LongReplicate16 (appendix A): this value stays r, then 36+N more queued
             else throw new Error('UIC1: undefined extended command ' + a);
             break;
           default: throw new Error('UIC1: undefined command 2');
@@ -125,9 +133,10 @@
     for (let c = 0; c < comps; c++) {
       if (dt === 0) { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = R.f32(); out.push(a); continue; }
       if (dt === 3) { // alpha/theta normals: whole 3-vector from 2 arrays
-        const nq = R.u32(); const al = uintBlock(R, n, false, info), th = uintBlock(R, n, false, info);
+        // one UINT block of 2n values: n alphas then n thetas (verified on SAP VEA 9.0: block ends exactly, thetas <= nq/2)
+        const nq = R.u32(); const at = uintBlock(R, 2 * n, false, info);
         const x = new Float32Array(n), y = new Float32Array(n), z = new Float32Array(n), k = 2 * Math.PI / nq;
-        for (let i = 0; i < n; i++) { const A = al[i] * k, T = th[i] * k; x[i] = Math.sin(T) * Math.cos(A); y[i] = Math.sin(T) * Math.sin(A); z[i] = Math.cos(T); }
+        for (let i = 0; i < n; i++) { const A = at[i] * k, T = at[n + i] * k; x[i] = Math.sin(T) * Math.cos(A); y[i] = Math.sin(T) * Math.sin(A); z[i] = Math.cos(T); }
         return [x, y, z];
       }
       if (dt !== 2) throw new Error('RHAdobe: float DataType ' + dt);

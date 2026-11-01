@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased (fix/vea-u3d)
+
+### Fixed
+- **SAP Visual Enterprise Author 9.0 U3D** (`RHAdobeMeshResource`, UIC1-encoded arrays) now decodes. Before, the screw
+  from VEA showed "No mesh found" (`UIC1: data ended at value 65752`). Four UIC1/normal bugs in `u3d-rhadobe-mesh.js`,
+  only reachable by UIC1 producers (r09 uses RH39 and is unchanged):
+  - LongReplicate16 (extended cmd 13) produced U16+36 values, not U16+37 (it keeps the current value and queues 36+N more).
+  - prevVertical (the value 3 back) was used only for face-index arrays. VEA also uses `DeltaU4*_V` in position arrays.
+  - The previous-values ring starts as `GetBackValue(w) == w`, not zeros (VEA face indices begin with BackPtrValue(4), (6), …).
+  - Type-3 (alpha/theta) normals are one UINT block of 2n values, not two blocks.
+- `test/run.js` stubs `window.matchMedia`.
+
+### Added
+- `window.PDF3D.lastLoad` / `CAD3DExtractor.getLastLoad()`: `ok` / `unsupported` (`UNSUPPORTED_MESH`) / `error`
+  (`DECODE_ERROR`) / `no3d` (`NO_3D`) with `format`, `detail` and a display `message` (see README "Load result").
+  Simple's empty state shows the `message` for unsupported or failed 3D streams.
+
 ## 1.5.2 — 2026-10-25
 
 ### Added

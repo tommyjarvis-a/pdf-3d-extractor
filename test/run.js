@@ -23,7 +23,8 @@ function loadApp() {
   const noop = () => {};
   const el = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'length' ? 0 : el()), apply: () => el(), set: () => true });
   const document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => el(), addEventListener: noop, body: el(), documentElement: el() };
-  const window = { addEventListener: noop, removeEventListener: noop, devicePixelRatio: 1, innerWidth: 1280, innerHeight: 800, requestAnimationFrame: () => 0, alert: (m) => { window.__alerts.push(m); }, __alerts: [] };
+  const window = { addEventListener: noop, removeEventListener: noop, devicePixelRatio: 1, innerWidth: 1280, innerHeight: 800, requestAnimationFrame: () => 0, alert: (m) => { window.__alerts.push(m); }, __alerts: [],
+    matchMedia: () => ({ matches: false, media: '', addEventListener: noop, removeEventListener: noop, addListener: noop, removeListener: noop }) };
   const ctx = { window, self: window, document, console, setTimeout, clearTimeout, TextDecoder, TextEncoder, Blob: typeof Blob !== 'undefined' ? Blob : undefined,
     DecompressionStream: typeof DecompressionStream !== 'undefined' ? DecompressionStream : undefined, Response: typeof Response !== 'undefined' ? Response : undefined,
     URL, atob, btoa, performance, crypto: globalThis.crypto, alert: window.alert, requestAnimationFrame: () => 0 };

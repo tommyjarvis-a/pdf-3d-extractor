@@ -20,7 +20,7 @@ Open `index.html` (multi-file, served or via `file://`) or the single-file offli
 | `/3D` or `/RichMedia` PRC stream with tessellation (`TESS_3D`, `TESS_3D_Compressed`, `TESS_3D_Wire`) | `prc-decoder.js` | `PRC TESS • …` |
 | PRC stream with exact B-Rep only (`TOPO_BrepData`, `TOPO_BrepDataCompress`) | `prc-brep.js` tessellates NURBS/analytic faces | `PRC EXACT B-REP • …` |
 | U3D (ECMA-363) CLOD mesh | `app.js` U3D parser plus `u3d-guard.js` (bounded reads, unsupported-block warnings) | `U3D • …` |
-| U3D vendor `RHAdobeMeshResource` mesh | `u3d-rhadobe-mesh.js` (see `docs/rhadobe-mesh-resource.md`) | `U3D/RHAdobeMeshResource` |
+| U3D vendor `RHAdobeMeshResource` mesh | `u3d-rhadobe-mesh.js` (RH39 and UIC1 encodings; CoreTechnologie and SAP VEA 9.0 output; see `docs/rhadobe-mesh-resource.md`) | `U3D/RHAdobeMeshResource` |
 | Embedded CAD file (`/EmbeddedFiles` name tree or `/FileAttachment` annotation: STEP, IGES, Parasolid, JT, NX/CATIA/SolidWorks, STL/OBJ/3MF, …) | `pdf-extract.js` | `NO 3D STREAM • EMBEDDED CAD ATTACHMENT: name` |
 | Nothing usable | n/a | alert "No embedded /3D (U3D / PRC) streams or file attachments found" |
 
@@ -33,6 +33,29 @@ PDF layer (`pdf-extract.js`, `crypto-lite.js`):
 Every 3D annotation on every page is listed. Each stream gets its product tree (PRC product occurrences, with names), part transforms, and the `/3DU` unit scale. Wire and polyline geometry is drawn as well. Embedded attachments can be saved from the "Product Tree & Attachments" panel.
 
 Large models: parts are stored as typed arrays with one compact welded B-Rep each, and every exporter streams part by part into a chunked `Blob`, so 1–2M triangle models parse and export without `RangeError: Invalid string length` or out-of-memory. The viewport shows a decimated preview (≤200k tris) and a banner above 1M tris. An optional "Export detail" setting (off = 100% by default) decimates exports.
+
+## Load result (API)
+
+After every load (`CAD3DExtractor.loadPDFBuffer`) and stream switch (`activateStream`), the app sets
+`window.PDF3D.lastLoad` (also returned by `CAD3DExtractor.getLastLoad()`). Use `reasonCode` for logic and `message` for display.
+
+| `status` | `reasonCode` | When | Fields |
+|---|---|---|---|
+| `'ok'` | `null` | the active stream produced triangles | `format` (`'U3D'`/`'PRC'`), `stream`, `streams`, `decodePath`, `parts`, `tris` |
+| `'unsupported'` | `'UNSUPPORTED_MESH'` | a U3D/PRC stream exists but yields no mesh (vendor block, missing tessellation, unimplemented encoding) | `format`, `stream`, `streams`, `decodePath` (`'none'`), `detail`, `wires`, `message` |
+| `'error'` | `'DECODE_ERROR'` | the stream decoder threw | `format`, `stream`, `streams`, `decodePath`, `detail` (error text), `message` |
+| `'no3d'` | `'NO_3D'` | no `/3D` or `/RichMedia` stream at all (attachment-only PDFs included) | `format: null`, `streams: 0`, `attachments` (names), `message` |
+
+`detail` is the vendor New Object Type name(s) for U3D (e.g. `'RHAdobeMeshResource'`), otherwise
+`'no supported mesh blocks'`; for PRC it is `'exact geometry without tessellation'` or `'no tessellated representation'`.
+`message` for `unsupported` is `This PDF has a 3D model, but it's stored in a format the app can't read yet (<format>, <detail>).`
+Example (VEA file with the RHAdobe decoder unavailable):
+
+```json
+{"status":"unsupported","reasonCode":"UNSUPPORTED_MESH","format":"U3D","stream":0,"streams":1,"decodePath":"none",
+ "detail":"RHAdobeMeshResource","wires":0,
+ "message":"This PDF has a 3D model, but it's stored in a format the app can't read yet (U3D, RHAdobeMeshResource)."}
+```
 
 ## Known limitations
 

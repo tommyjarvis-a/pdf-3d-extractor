@@ -878,6 +878,7 @@
         ? `Unsupported proprietary U3D mesh: geometry is only in vendor New Object Type block(s) ${sc.newTypes.join(', ')} (not defined in ECMA-363), which cannot be decoded`
         : `U3D parsed but no mesh was produced${Object.keys(sc.types).length ? ' (block types: ' + Object.keys(sc.types).join(',') + ')' : ''}`);
       r.errorCode = 'U3D_NO_GEOMETRY';
+      r.unsupportedDetail = sc.newTypes.length ? sc.newTypes.join(', ') : 'no supported mesh blocks';
     }
     return r;
   }
@@ -1541,9 +1542,11 @@
     const fsInfo = (r.info && r.info.fileStructures) || [];
     const exactParts = parts.filter((p) => p.source === 'brep').length;
     const decodePath = !parts.length ? 'none' : exactParts === parts.length ? 'PRC exact B-Rep' : exactParts ? 'PRC tess + exact B-Rep' : 'PRC tess';
+    let unsupportedDetail;
     if (!parts.length) {
       const geomBytes = fsInfo.reduce((s, f) => s + ((f.geometry && f.geometry.sizeBytes) || 0), 0);
       const tess = fsInfo.reduce((s, f) => s + (f.tessellations || []).filter((t) => t.kind === '3d' && t.numFaces).length, 0);
+      unsupportedDetail = geomBytes > 64 && !tess ? 'exact geometry without tessellation' : 'no tessellated representation';
       warnings.push(geomBytes > 64 && !tess
         ? `PRC has no face tessellation; its ${geomBytes} bytes of exact geometry could not be tessellated${wires.length ? ' (' + wires.length + ' wire(s) shown)' : ''}`
         : `PRC decoded but no product occurrence references a tessellated representation item (${tess} tessellations, ${fsInfo.length} file structures)`);
@@ -1551,7 +1554,7 @@
     return {
       format: 'PRC (ISO 14739-1)', decodePath, minVer: r.info && r.info.minVersion, authVer: r.info && r.info.authoringVersion,
       numStructs: fsInfo.length, unitsScalingFactor: 0.001, units: { source: r.units, positionsIn: 'mm' },
-      tree: r.tree || null, wires, warnings,
+      tree: r.tree || null, wires, warnings, unsupportedDetail,
       blocks: fsInfo.map((f, i) => ({ blockType: 0x50524310 + (i & 0xf), name: `PRC_FileStructure_${i}`, dataSize: (f.geometry && f.geometry.sizeBytes) || 0, metaSize: 0, offset: 0 })),
       parts
     };
@@ -3754,7 +3757,7 @@
         compactParts(st.parsed.parts || []);
       } catch (err) {
         console.error(err);
-        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)] };
+        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)], decodeError: String((err && err.message) || err) };
       }
     }
     state.wires = st.parsed.wires || [];
@@ -3767,8 +3770,23 @@
     state.selectedPartIdx = -1;
     state.cachedXT = null;
     state.cachedSTEP = null;
+    setLastLoad(loadResultFor(st, idx));
     refreshAllUI();
   }
+
+  // Outcome of the last load / stream activation, published as window.PDF3D.lastLoad (see README "Load result").
+  function loadResultFor(st, idx) {
+    const p = st.parsed || {};
+    const tris = (p.parts || []).reduce((n, q) => n + (q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
+    const base = { format: st.subtype, stream: idx, streams: state.streams.length, decodePath: p.decodePath || 'none' };
+    if (tris) return { status: 'ok', reasonCode: null, ...base, parts: (p.parts || []).length, tris };
+    if (p.decodeError) return { status: 'error', reasonCode: 'DECODE_ERROR', ...base, detail: p.decodeError,
+      message: `This PDF has a 3D model, but the app could not decode it (${st.subtype}: ${p.decodeError}).` };
+    const detail = p.unsupportedDetail || (p.warnings || [])[0] || 'unknown';
+    return { status: 'unsupported', reasonCode: 'UNSUPPORTED_MESH', ...base, detail, wires: (p.wires || []).length,
+      message: `This PDF has a 3D model, but it's stored in a format the app can't read yet (${st.subtype}, ${detail}).` };
+  }
+  function setLastLoad(r) { (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r; }
 
   async function loadPDFBuffer(u8, fileName) {
     state.fileName = fileName || 'document-3d.pdf';
@@ -3776,6 +3794,8 @@
     const streams = await extract3DStreamsFromPDF(u8, state.fileName);
     state.attachments = (streams && streams.attachments) || [];
     if (streams.length === 0) {
+      setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0, attachments: state.attachments.map((a) => a.name),
+        message: state.attachments.length ? 'No 3D model in this PDF; it has embedded file attachments.' : 'No 3D model (U3D / PRC) in this PDF.' });
       if (state.attachments.length) {
         // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
         state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
@@ -4213,6 +4233,7 @@
   // Expose programmatic API for automated verification & CAD testing
   window.CAD3DExtractor = { U3DBitStreamReader, U3DHistogram, U3D_CTX, U3D_AC_STATIC_FULL, parseU3DStream,
     getState: () => state, computeAssemblyBounds,
+    getLastLoad: () => (window.PDF3D || {}).lastLoad || null,
     loadPDFBuffer,
     activateStream,
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export

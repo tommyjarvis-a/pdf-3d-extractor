@@ -705,7 +705,10 @@
     const t = (($('statusBadge') || {}).textContent || '');
     const loaded = /NO MESH|NO 3D STREAM/.test(t);
     ui.empty.hidden = nParts > 0;
-    ui.emptyText.textContent = loaded
+    const ll = (window.PDF3D || {}).lastLoad;
+    ui.emptyText.textContent = loaded && ll && (ll.status === 'unsupported' || ll.status === 'error') && ll.message
+      ? `${ll.message} Drop another 3D PDF here or click Open.`
+      : loaded
       ? `No 3D geometry found in ${(($('docFileName') || {}).textContent || 'this file').trim()}. Drop another 3D PDF here or click Open.`
       : 'Drop a 3D PDF here or click Open';
   }
