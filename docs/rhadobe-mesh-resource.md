@@ -61,7 +61,7 @@ When the standard U3D parse yields 0 triangles, `parseU3DStream` calls `RHAdobeM
 
 ## Limits
 - Encodings 8/9 (U3D arithmetic coder) are not implemented. Files that use them keep the "unsupported" message.
-- The decode paths for normals type 3, multi-material face IDs, skeletons and subchunks are unverified, because only one producer (CoreTechnologie) was available.
+- Normals type 3 (alpha/theta, one UINT block of 2n values) is verified by the SAP VEA 9.0 screw (r18): all 394,596 normals agree with their faces. The multi-material face ID, skeleton and subchunk paths are still unverified: only two producers (CoreTechnologie, SAP VEA) were available, and neither file is known to use them.
 
 ## Offline fallback (not built in)
 For an unknown vendor mesh encoding, one option is to capture the geometry while Acrobat/Reader renders the 3D annotation, by intercepting graphics API calls (for example an OpenGL/Direct3D call capture tool such as RenderDoc). This is manual, platform-specific, and depends on the Acrobat EULA. It is documented only as an offline last resort and is not part of the app.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (fix/vea-u3d)
+## 1.5.3 — 2026-11-01
 
 ### Fixed
 - **SAP Visual Enterprise Author 9.0 U3D** (`RHAdobeMeshResource`, UIC1-encoded arrays) now decodes. Before, the screw
@@ -10,7 +10,10 @@
   - prevVertical (the value 3 back) was used only for face-index arrays. VEA also uses `DeltaU4*_V` in position arrays.
   - The previous-values ring starts as `GetBackValue(w) == w`, not zeros (VEA face indices begin with BackPtrValue(4), (6), …).
   - Type-3 (alpha/theta) normals are one UINT block of 2n values, not two blocks.
+- Simple's status chip no longer shows the raw decoder error as its hover text: for `DECODE_ERROR` it shows the card
+  line, and the raw error is only in the console.
 - `test/run.js` stubs `window.matchMedia`.
+- `docs/rhadobe-mesh-resource.md`: type-3 normals are now listed as verified (SAP VEA screw).
 
 ### Added
 - `window.PDF3D.lastLoad` / `CAD3DExtractor.getLastLoad()`: `ok` / `unsupported` (`UNSUPPORTED_MESH`) / `error`
@@ -19,7 +22,13 @@
   is neutral. The raw decode error is never shown on the card; it is logged once with `console.warn('[PDF3D] 3D decode error: …')`.
   A PDF with no 3D content and no attachments now clears the viewport and shows the `NO_3D` card in Simple mode instead of an
   `alert()` over the previous model. Advanced is unchanged.
-  Simple's empty state shows the `message` for unsupported or failed 3D streams.
+
+### Known issues
+- The *sheet-unsewn* and *faceted* XT modes (API only) are not tested in NX; `xt-check` reports their open sheet edges.
+- Open models (any open edges) export by default as a Parasolid **sheet body**; this form has not yet been tested in NX.
+- Chrome: very large Parasolid downloads (roughly above 300–600 MB, a browser limit on blob downloads) can be cancelled
+  at 0 bytes while the app still shows success. Normal parts (e.g. the 41 MB screw) are unaffected. Fixed in 1.6.0.
+- One zero-length line (zero tangent) is written for a degenerate edge in r07, an open sheet model (1 of 1.6 million lines).
 
 ## 1.5.2 — 2026-10-25
 

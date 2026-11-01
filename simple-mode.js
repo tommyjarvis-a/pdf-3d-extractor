@@ -637,7 +637,10 @@
     if (tone === 'warn' && b.title && !/No mesh|Attachment/.test(short)) short += ' · warnings';
     ui.status.dataset.tone = tone;
     ui.status.querySelector('.sm-status-t').textContent = short;
-    ui.status.title = t + (b.title ? '\n' + b.title : '');
+    // A decode error's raw text stays in the console (app.js console.error + syncEmpty's console.warn); the chip's
+    // hover text uses the approved card line instead.
+    const ll = (window.PDF3D || {}).lastLoad;
+    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : t + (b.title ? '\n' + b.title : '');
     syncEmpty();
   }
   function syncDisplay() {

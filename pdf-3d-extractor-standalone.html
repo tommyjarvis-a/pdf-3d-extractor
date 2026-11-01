@@ -1479,7 +1479,7 @@ body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: swi
     <div class="brand">
       <div class="brand-badge">3D</div>
       <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.5.2</span></div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.5.3</span></div>
         <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
       </div>
     </div>
@@ -4810,7 +4810,7 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.2
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.5.3
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -4827,7 +4827,7 @@ void main() { gl_FragColor = uRGBA; }`;
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.5.2';
+  const APP_VERSION = '1.5.3';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -10037,7 +10037,10 @@ void main() { gl_FragColor = uRGBA; }`;
     if (tone === 'warn' && b.title && !/No mesh|Attachment/.test(short)) short += ' · warnings';
     ui.status.dataset.tone = tone;
     ui.status.querySelector('.sm-status-t').textContent = short;
-    ui.status.title = t + (b.title ? '\n' + b.title : '');
+    // A decode error's raw text stays in the console (app.js console.error + syncEmpty's console.warn); the chip's
+    // hover text uses the approved card line instead.
+    const ll = (window.PDF3D || {}).lastLoad;
+    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : t + (b.title ? '\n' + b.title : '');
     syncEmpty();
   }
   function syncDisplay() {
