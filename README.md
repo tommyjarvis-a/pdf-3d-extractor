@@ -37,19 +37,48 @@ Large models: parts are stored as typed arrays with one compact welded B-Rep eac
 ## Load result (API)
 
 After every load (`CAD3DExtractor.loadPDFBuffer`) and stream switch (`activateStream`), the app sets
-`window.PDF3D.lastLoad` (also returned by `CAD3DExtractor.getLastLoad()`). Use `reasonCode` for logic. `message` is a developer/log string (for `error` it includes the raw decoder error).
+`window.PDF3D.lastLoad` (also returned by `CAD3DExtractor.getLastLoad()`). Use `reasonCode` for logic. `message` is a developer/log string (for `error` it includes the decoder's damage text; since 1.6.2 a JavaScript runtime error such as `Offset is outside the bounds of the DataView` is never shown: it is reported as damaged data and logged to the console).
 
 | `status` | `reasonCode` | When | Fields |
 |---|---|---|---|
-| `'ok'` | `null` | the active stream produced triangles | `format` (`'U3D'`/`'PRC'`), `stream`, `streams`, `decodePath`, `parts`, `tris` |
+| `'ok'` | `null` | the active stream produced triangles (also when damaged data was skipped: then `damaged` is set) | `format` (`'U3D'`/`'PRC'`), `stream`, `streams`, `decodePath`, `parts`, `tris`, `trisParsed`, [`damaged`] |
 | `'unsupported'` | `'UNSUPPORTED_MESH'` | a U3D/PRC stream exists but yields no mesh (vendor block, missing tessellation, unimplemented encoding) | `format`, `stream`, `streams`, `decodePath` (`'none'`), `detail`, `wires`, `message` |
 | `'error'` | `'DECODE_ERROR'` | the stream decoder threw, or the stream is damaged: not U3D/PRC data at all (random bytes), a damaged RHAdobeMeshResource mesh, a truncated or damaged classic U3D stream with no decodable mesh, or a PRC whose decode failures left no body | `format`, `stream`, `streams`, `decodePath`, `detail` (error text), `message` |
 | `'no3d'` | `'NO_3D'` | no `/3D` or `/RichMedia` stream at all (attachment-only PDFs included) | `format: null`, `streams: 0`, `message` |
 
+Triangle counts on `'ok'` (1.6.2): `tris` is what the viewer draws, the HUD "Tris" shows and mesh exports write: after the
+B-Rep weld drops degenerate (zero-area) triangles. `trisParsed` is the count as decoded from the file, before that; the CAD
+export fit limit (`fitSkippedTris`) and the large-model banner use it. They differ only by the degenerate triangles
+(r08: `trisParsed` 429,271, `tris` 427,503; g09: 11,516 / 11,514). Show `tris` as "triangles"; compare limits with `trisParsed`.
+
+Damaged streams (1.6.2): the decoder loads what decodes. A U3D block that fails to decode, or a block header that is not a
+U3D block (impossible type, metadata or data past the stream end), is skipped and parsing resumes at the next valid pair of
+block headers. If triangles remain the load is `'ok'` with `damaged` = the warning text (`"U3D: damaged data skipped (…)"`,
+also in the stream's warnings); if nothing decodes it is `DECODE_ERROR`. A PRC stream shorter than its header's
+end-of-file offset is truncated: `DECODE_ERROR` (`"PRC stream is damaged (truncated: …)"`) when no body decodes, else `'ok'`
+with `damaged`. Damage is never reported as `UNSUPPORTED_MESH`.
+
 Every result (1.6.1) also carries the PDF's embedded files: `attachments` (names, as `NO_3D` had since 1.5.3) and
-`attachmentDetails: [{ name, ext, isCAD, size, description, error }]` (`ext` lower-case without the dot, `isCAD` true for
-STEP/IGES/STL/OBJ/Parasolid/…, `size` in bytes, `description` from the file spec's `/Desc` or `''`, `error` null or the
-reason the file could not be read). Both are `[]` when the PDF has none.
+`attachmentDetails: [{ name, fileName, mime, ext, isCAD, size, description, error }]`. Both are `[]` when the PDF has none.
+- `name`: the file spec's `/UF` (else `/F`) as written in the PDF (decrypted in encrypted PDFs). Raw: it may contain
+  paths, control or bidi-override characters (`../../evil:name?.sat`); don't display it or use it as a path. `attachments`
+  lists these raw names too
+- `fileName` (1.6.2): suggested save name: `name`'s last path segment, control / bidi-override / `<>:"|?*` characters
+  replaced by `_`, leading and trailing dots and spaces trimmed, Windows device names (`CON`, `NUL`, `COM1`…) prefixed with
+  `_`, at most 200 characters (extension kept), `attachment-<n>.bin` if nothing is left (`../../evil:name?.sat` → `evil_name_.sat`).
+  Use it as the display name too (the Attachments panel does, since 1.6.2)
+- `mime` (1.6.2): the EmbeddedFile stream's `/Subtype` (e.g. `/model#2Fstep` → `model/step`), else by extension
+  (`model/step`, `model/iges`, `model/stl`, `model/jt`, `model/vnd.parasolid.transmit.text|binary`, `text/plain`, …), else `null`
+- `ext`: lower-case, without the dot; `isCAD` (1.6.2 list): `ext` is one of stp, step, igs, iges, jt, x_t, x_b, sat, sab,
+  3dxml, stl, prt, catpart, catproduct, sldprt, sldasm, ipt, iam, vds (any case: `Wing.CATPart` and `GAUGE.STL` count)
+- `size`: decoded bytes; `description`: the file spec's `/Desc` or `''`
+- `error`: `null`, or why the file can't be read (e.g. `'FlateDecode: inflate failed'`); `PDF3D.saveAttachment(i)` then
+  returns `ATTACHMENT_UNREADABLE`
+
+Embedded files are found in the catalog `/Names /EmbeddedFiles` tree, `/FileAttachment` annotations (`/FS`) and PDF 2.0
+`/AF` arrays (catalog, pages, annotations); a file listed in several places is reported once. `/EF /UF` is preferred, with
+`/EF /F` tried when the `/UF` stream is missing or does not decode. Streams are decoded through their filters and, in
+encrypted PDFs (empty user password), decrypted with the embedded-file crypt filter (`/EFF`, else `/StmF`).
 
 `detail` is the vendor New Object Type name(s) for U3D (e.g. `'RHAdobeMeshResource'`), otherwise
 `'no supported mesh blocks'`; for PRC it is `'exact geometry without tessellation'` or `'no tessellated representation'`.
@@ -120,12 +149,38 @@ const bytes = await PDF3D.estimateBytes('xt', { partIds: null, detail });   // s
 // whole model (seconds on large ones), so open the save dialog first or estimate ahead of the click.
 ```
 
+### Saving an embedded file (1.6.2)
+
+`PDF3D.saveAttachment(index, opts)` saves `lastLoad.attachmentDetails[index]` exactly as embedded (decoded and decrypted
+bytes), for example from the `NO_3D` card's "Save {name}" button. Delivery works like `exportFormat`:
+
+```js
+const d = PDF3D.lastLoad.attachmentDetails[i];
+const h = await showSaveFilePicker({ suggestedName: d.fileName }); const w = await h.createWritable();
+const r = await PDF3D.saveAttachment(i, { writable: w, signal, onProgress });
+// opts.writable    -> written in ~1 MiB Uint8Array pieces, no Blob:
+//                     { status: 'ok', reasonCode: null, reason: null, blob: null, delivery: 'picker', size, name, filename, mime }
+// no opts.writable -> { status: 'ok', reasonCode: null, reason: null, blob, delivery: 'download', size, name, filename, mime }
+//                     (blob.type = mime || 'application/octet-stream')
+// failure          -> { status: 'error', reasonCode: 'WRITE_FAILED' | 'ATTACHMENT_UNREADABLE', reason, errorName, quota,
+//                       blob: null, delivery, size: null, name, filename, mime }
+//   ATTACHMENT_UNREADABLE: the entry has no readable bytes (attachmentDetails[i].error is set; errorName = the decode
+//                          error's name), or there is no attachment i (errorName 'RangeError'); nothing is written
+//   WRITE_FAILED:          writable.write() threw (errorName = its name, quota = errorName === 'QuotaExceededError');
+//                          the file is partly written
+// opts.signal aborted -> the exportFormat cancelled shape { status: 'cancelled', reasonCode: 'cancelled', blob: null, ... }
+// opts.onProgress({ stage: 'write', pct, label, bytes, totalBytes }) after each piece.
+// name = filename = attachmentDetails[i].fileName. saveAttachment never calls close() or abort(): close() on status 'ok',
+// abort() otherwise (as with exportFormat).
+```
+
 ## Known limitations
 
 - **U3D `RHAdobeMeshResource`**: encodings 8/9 (U3D arithmetic coder) are not implemented; files using them are reported with a warning.
 - **Exact B-Rep** is tessellated for display and export. Analytic hole/boss features are only derived from meshes, and trimmed NURBS faces that fail tessellation are skipped with a warning.
 - **Very large models**: STEP text output is large (r13, 2M tris: STEP 1.9 GB); the exporter working set stays near 1.1–1.3 GB, but the browser must hold or spill the resulting Blob. STL/OBJ are far smaller.
-- **Encryption:** only files that open without a user password are supported.
+- **Encryption:** only files that open without a user password are supported (Standard handler: RC4 40–128-bit, AESV2,
+  AES-256 R5/R6; strings, streams and embedded files, including `/EFF`-only files).
 
 ## Tests
 

@@ -16,6 +16,12 @@
  * --exports also builds every exporter on the sample, checks that PDF3D.exportFormat writes the same bytes into a
  * writable (streamed, no Blob created) as its download Blob for every format, and builds a merged Parasolid .x_t for
  * each corpus file. --identity runs that writable-vs-download check on every corpus file too (slow).
+ * Every loaded PDF with embedded files (1.6.2): each lastLoad.attachmentDetails[i] goes through PDF3D.saveAttachment(i) both
+ * ways (download Blob and a streamed writable: same bytes, <= 1 MiB Uint8Array writes, no Blob, close/abort left to the
+ * caller); an entry with an error must give ATTACHMENT_UNREADABLE both ways. An expect.json entry may pin
+ * "attachmentSha256": [sha256 | null per attachment] (from tools/make-damaged-fixtures.js; null = unreadable on purpose).
+ * Every corpus file (1.6.2): no raw JavaScript error text (DataView, Cannot read properties...) in lastLoad detail / message /
+ * damaged, and lastLoad.trisParsed >= tris on 'ok' loads.
  * $NX_PDF (or <corpus>/../nx2512-input.pdf) must give 37,196 triangles.
  */
 const fs = require('fs'); const path = require('path'); const vm = require('vm');
@@ -74,6 +80,57 @@ async function exportIdentity(window, ctx, label) {
   }
 }
 
+// PDF3D.saveAttachment (1.6.2): every attachment of the loaded PDF, download Blob vs streamed writable, byte for byte
+const sha256 = (u8) => require('crypto').createHash('sha256').update(u8).digest('hex');
+async function attachmentRoundTrip(window, ctx, label, expSha) {
+  const det = ((window.PDF3D && window.PDF3D.lastLoad) || {}).attachmentDetails || []; const MiB = 1 << 20; const shas = [];
+  if (expSha) check(expSha.length === det.length, `${label}: ${det.length} attachments, expect.json attachmentSha256 lists ${expSha.length}`);
+  for (let i = 0; i < det.length; i++) {
+    const d = det[i]; const tag = `${label} attachment ${i} ${JSON.stringify(d.name)}`;
+    const dl = await window.PDF3D.saveAttachment(i);
+    const h = require('crypto').createHash('sha256'); let got = 0, writes = 0, maxWrite = 0, badType = 0, closed = 0, aborted = 0;
+    const writable = { write: async (u8) => { if (Object.prototype.toString.call(u8) !== '[object Uint8Array]') badType++; writes++; maxWrite = Math.max(maxWrite, u8.length); h.update(u8); got += u8.length; },
+      close: async () => { closed++; }, abort: async () => { aborted++; } };
+    const RealBlob = ctx.Blob; let blobs = 0; ctx.Blob = function (...a) { blobs++; return new RealBlob(...a); };
+    let pk; try { pk = await window.PDF3D.saveAttachment(i, { writable }); } finally { ctx.Blob = RealBlob; }
+    check(closed === 0 && aborted === 0, `${tag}: saveAttachment called close()/abort() (${closed}/${aborted})`);
+    check(dl.name === d.fileName && pk.name === d.fileName && dl.mime === d.mime && pk.mime === d.mime, `${tag}: name/mime ${dl.name}/${dl.mime} vs details ${d.fileName}/${d.mime}`);
+    if (d.error) {
+      for (const [r, how] of [[dl, 'download'], [pk, 'picker']]) check(r.status === 'error' && r.reasonCode === 'ATTACHMENT_UNREADABLE' && r.blob === null && r.delivery === how && typeof r.errorName === 'string' && r.quota === false,
+        `${tag} (${how}): unreadable entry gave ${r.status} ${r.reasonCode} ${r.errorName} ${r.quota}`);
+      check(writes === 0, `${tag}: unreadable entry wrote ${writes} pieces`);
+      shas.push(null); console.log(`  ${tag}: ATTACHMENT_UNREADABLE both ways (${d.error}; errorName ${dl.errorName})`); continue;
+    }
+    let dsha = null;
+    if (check(dl.status === 'ok' && dl.delivery === 'download' && dl.blob && dl.size === d.size && dl.blob.size === d.size, `${tag}: download ${dl.status} ${dl.reasonCode} ${dl.delivery} size ${dl.size} (details ${d.size})`)) {
+      check(dl.blob.type === (d.mime || 'application/octet-stream'), `${tag}: Blob type ${dl.blob.type}`); dsha = sha256(new Uint8Array(await dl.blob.arrayBuffer())); }
+    const psha = h.digest('hex');
+    check(pk.status === 'ok' && pk.delivery === 'picker' && pk.blob === null && pk.size === d.size && got === d.size, `${tag}: picker ${pk.status} ${pk.reasonCode} ${pk.delivery} size ${pk.size}/${got} (details ${d.size})`);
+    check(blobs === 0 && badType === 0 && maxWrite <= MiB && writes === Math.ceil(d.size / MiB), `${tag}: picker made ${blobs} Blob(s), ${badType} non-Uint8Array writes, ${writes} writes (max ${maxWrite} B)`);
+    check(dsha === psha, `${tag}: download and picker bytes differ`);
+    if (expSha && expSha[i] !== undefined) check(psha === expSha[i], `${tag}: sha256 ${psha.slice(0, 16)}... expected ${String(expSha[i]).slice(0, 16)}...`);
+    shas.push(psha); console.log(`  ${tag}: ${d.size} B ${dsha === psha ? 'identical both ways' : 'DIFFERENT'}${expSha ? (psha === expSha[i] ? ', = source' : ', SOURCE MISMATCH') : ''}, ${writes} writes (max ${maxWrite} B), Blobs on picker path ${blobs}, fileName ${JSON.stringify(d.fileName)}, mime ${d.mime}, isCAD ${d.isCAD}`);
+    if (d.size > MiB) { // cancelling after the first piece: the cancelled shape, nothing more written
+      const ac = new AbortController(); let w2 = 0; const r = await window.PDF3D.saveAttachment(i, { writable: { write: async () => { w2++; ac.abort(); } }, signal: ac.signal });
+      check(r.status === 'cancelled' && r.reasonCode === 'cancelled' && w2 === 1, `${tag}: abort after the first piece gave ${r.status} after ${w2} writes`); }
+  }
+  return shas;
+}
+// saveAttachment error paths (on the loaded PDF's first readable attachment)
+async function attachmentErrorPaths(window) {
+  const det = window.PDF3D.lastLoad.attachmentDetails; const i = det.findIndex((d) => !d.error);
+  for (const bad of [det.length, -1, '0', 1.5, undefined]) { const r = await window.PDF3D.saveAttachment(bad);
+    check(r.status === 'error' && r.reasonCode === 'ATTACHMENT_UNREADABLE' && r.errorName === 'RangeError' && r.quota === false && r.blob === null, `saveAttachment(${JSON.stringify(bad)}): ${r.status} ${r.reasonCode} ${r.errorName}`); }
+  const thrower = (name) => ({ write: async () => { throw Object.assign(new Error(name === 'QuotaExceededError' ? 'The disk is full.' : 'write refused'), { name }); } });
+  for (const name of ['QuotaExceededError', 'NotAllowedError', 'TypeError']) { const r = await window.PDF3D.saveAttachment(i, { writable: thrower(name) });
+    check(r.status === 'error' && r.reasonCode === 'WRITE_FAILED' && r.errorName === name && r.quota === (name === 'QuotaExceededError') && r.delivery === 'picker' && r.blob === null && r.size === null && r.name === det[i].fileName,
+      `saveAttachment WRITE_FAILED ${name}: ${JSON.stringify({ ...r, blob: undefined })}`); }
+  const ac = new AbortController(); ac.abort(); let w = 0;
+  const r = await window.PDF3D.saveAttachment(i, { writable: { write: async () => { w++; } }, signal: ac.signal });
+  check(r.status === 'cancelled' && r.reasonCode === 'cancelled' && w === 0, `saveAttachment with an aborted signal: ${r.status} after ${w} writes`);
+  console.log('saveAttachment error paths: RangeError x5, WRITE_FAILED x3 (quota only for QuotaExceededError), pre-aborted signal -> cancelled');
+}
+
 async function decodeFile(api, file) {
   const u8 = new Uint8Array(fs.readFileSync(file)); const t0 = Date.now();
   await api.loadPDFBuffer(u8, path.basename(file));
@@ -89,12 +146,11 @@ async function decodeFile(api, file) {
   return { streams, attachments: (st.attachments || []).map((a) => a.name), lastLoad, ms: Date.now() - t0 };
 }
 
-function syntheticAttachmentPDF() {
-  const step = 'ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n';
-  const objs = ['<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [(bracket.step) 4 0 R] >> >> >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>',
-    '<< /Type /Filespec /F (bracket.step) /UF (bracket.step) /EF << /F 5 0 R >> >>',
-    `<< /Type /EmbeddedFile /Length ${step.length} >>\nstream\n${step}\nendstream`];
+function syntheticAttachmentPDF(names) {
+  const step = 'ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n'; names = names || ['bracket.step'];
+  const objs = [`<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [${names.map((n, i) => `(${n}) ${4 + 2 * i} 0 R`).join(' ')}] >> >> >>`,
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>'];
+  names.forEach((n, i) => objs.push(`<< /Type /Filespec /F (${n}) /UF (${n}) /EF << /F ${5 + 2 * i} 0 R >> >>`, `<< /Type /EmbeddedFile /Length ${step.length} >>\nstream\n${step}\nendstream`));
   let out = '%PDF-1.7\n'; const off = [];
   objs.forEach((o, i) => { off.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
   const x = out.length;
@@ -116,7 +172,17 @@ function syntheticAttachmentPDF() {
   // 2. embedded CAD attachment, no 3D annotation
   { const tmp = path.join(require('os').tmpdir(), 'pdf3d-attach-test.pdf'); fs.writeFileSync(tmp, syntheticAttachmentPDF());
     const r = await decodeFile(api, tmp); console.log(`attachment pdf: streams ${r.streams.length}, attachments ${r.attachments.join(', ')}`);
-    check(r.streams.length === 0 && r.attachments.includes('bracket.step'), 'embedded STEP attachment not offered'); }
+    check(r.streams.length === 0 && r.attachments.includes('bracket.step'), 'embedded STEP attachment not offered');
+    await attachmentRoundTrip(window, ctx, 'attachment pdf'); await attachmentErrorPaths(window);
+    // attachmentDetails[].isCAD (1.6.2): exactly these 19 extensions, any case
+    const cad = ['stp', 'step', 'igs', 'iges', 'jt', 'x_t', 'x_b', 'sat', 'sab', '3dxml', 'stl', 'prt', 'catpart', 'catproduct', 'sldprt', 'sldasm', 'ipt', 'iam', 'vds'];
+    const flip = (e) => e.split('').map((c, k) => (k % 2 ? c.toUpperCase() : c)).join('');
+    const yes = cad.flatMap((e) => [`a.${e}`, `B.${e.toUpperCase()}`, `c.${flip(e)}`]);
+    const no = ['d.obj', 'e.dwg', 'f.glb', 'g.txt', 'h.x_t.bak', 'stp', 'i.stpz', 'j.CATDrawing', 'k.pdf', 'l.3dm'];
+    fs.writeFileSync(tmp, syntheticAttachmentPDF([...yes, ...no])); await decodeFile(api, tmp);
+    const det = window.PDF3D.lastLoad.attachmentDetails; const wrong = det.filter((d) => d.isCAD !== yes.includes(d.name)).map((d) => d.name);
+    check(det.length === yes.length + no.length && !wrong.length, `isCAD wrong for ${wrong.join(', ')} (${det.length} attachments)`);
+    console.log(`isCAD: ${det.filter((d) => d.isCAD).length} of ${yes.length} CAD names (19 extensions x lower / UPPER / mixed case) and 0 of ${no.length} others`); }
 
   // 3. corpus
   if (corpus) {
@@ -133,12 +199,18 @@ function syntheticAttachmentPDF() {
       if (!r.error && !totalTris && !(exp && exp.allowZeroTris)) ok = check(false, `${f}: 0 triangles (set "allowZeroTris": true in its expect.json entry if that is expected)`) && ok;
       if (exp && !update) ok = check(JSON.stringify(got) === JSON.stringify(exp.streams), `${f}: got ${JSON.stringify(got)} expected ${JSON.stringify(exp.streams)}`) && ok;
       const ll = r.lastLoad || {};
+      // 1.6.2: decoder runtime errors are never shown raw (Tester 1.6.1: "Offset is outside the bounds of the DataView")
+      { const shown = [ll.detail, ll.message, ll.damaged].filter(Boolean).join(' | ');
+        ok = check(!/DataView|typed array|out of bounds|Cannot read propert|is not a function|is not iterable|Invalid array length/i.test(shown), `${f}: raw runtime error text in lastLoad: ${shown.slice(0, 200)}`) && ok;
+        if (ll.status === 'ok') ok = check(ll.trisParsed >= ll.tris, `${f}: lastLoad.trisParsed ${ll.trisParsed} < tris ${ll.tris}`) && ok; }
+      if (!r.error && (ll.attachmentDetails || []).length) { const f0 = failures; await attachmentRoundTrip(window, ctx, f, exp && !update ? exp.attachmentSha256 : undefined); if (failures > f0) ok = false; }
       if (exp && exp.lastLoad && !update) for (const k of Object.keys(exp.lastLoad))
         ok = check(JSON.stringify(ll[k]) === JSON.stringify(exp.lastLoad[k]), `${f}: lastLoad.${k} ${JSON.stringify(ll[k])} expected ${JSON.stringify(exp.lastLoad[k])}`) && ok;
       if (update) {   // keep (and refresh) the lastLoad keys an entry pins; pin status/reasonCode for a new file that does not load ok
         const keys = exp && exp.lastLoad ? Object.keys(exp.lastLoad) : !exp && ll.status && ll.status !== 'ok' ? ['status', 'reasonCode'] : [];
         expect[f] = { ...(exp && exp.allowZeroTris ? { allowZeroTris: true } : {}), streams: got,
-          ...(keys.length ? { lastLoad: Object.fromEntries(keys.map((k) => [k, ll[k] === undefined ? null : ll[k]])) } : {}) };
+          ...(keys.length ? { lastLoad: Object.fromEntries(keys.map((k) => [k, ll[k] === undefined ? null : ll[k]])) } : {}),
+          ...(exp && exp.attachmentSha256 ? { attachmentSha256: exp.attachmentSha256 } : {}) };
       }
       if (r.error) check(false, `${f}: ${r.error}`);
       if (doExports && !r.error) {   // Parasolid .x_t for every file: the stream the UI would show first with geometry

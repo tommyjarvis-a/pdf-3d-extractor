@@ -2128,6 +2128,9 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
       let r = null;
       if (this.offsets.has(n)) { try { r = this.parseIndirectAt(this.offsets.get(n)); } catch (_) {} if (r && r.num !== n) r = null; }
       if (!r && this.inObjStm.has(n)) { const { stm, idx } = this.inObjStm.get(n); r = this.fromObjStm(stm, idx, n); }
+      // 1.6.2: strings of an encrypted file are decrypted with their object's key (not inside object streams, whose
+      // stream is decrypted as a whole; not the /Encrypt dictionary or an XRef stream's dictionary)
+      if (r && this.crypt && !r.inStm && this.strMethod !== 'None' && !(this.encNum === n) && !(r.value && isName(r.value.Type, 'XRef'))) r.value = this.decryptStrings(r.value, r.num, r.gen, 0);
       this.cache.set(n, r); return r;
     }
     getSync(n) { const o = this.getObj(n); return o ? o.value : undefined; }
@@ -2141,18 +2144,23 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
         objs = new Map(); for (const [on, off] of hdr) { try { objs.set(on, new Parser(data, First + off).parse()); } catch (_) {} }
         this.objStmCache.set(stmNum, objs);
       }
-      return objs.has(n) ? { num: n, gen: 0, value: objs.get(n), stream: false } : null;
+      return objs.has(n) ? { num: n, gen: 0, value: objs.get(n), stream: false, inStm: true } : null;
     }
     resolve(v) { let k = 0; while (v instanceof Ref && k++ < 32) v = this.getSync(v.num); return v; }
     // --- encryption (ISO 32000-2 7.6) ---
     async initCrypt() {
+      if (this.trailer.Encrypt instanceof Ref) this.encNum = this.trailer.Encrypt.num;
       const E = this.resolve(this.trailer.Encrypt); if (!E || !isName(E.Filter, 'Standard')) { this.cryptError = 'unsupported security handler ' + (E && E.Filter && E.Filter.name); return; }
       const V = num(E.V, 0), R = num(E.R, 2); const O = this.strBytes(E.O), U = this.strBytes(E.U);
       const id0 = this.trailer.ID ? this.strBytes(this.resolve(this.trailer.ID)[0]) : new Uint8Array(0);
       let method = 'RC4', keyLen = V === 1 ? 5 : num(E.Length, 40) / 8;
       if (V >= 4) { const cf = this.resolve(E.CF) || {}; const stmf = (E.StmF && E.StmF.name) || 'Identity'; this.stmIdentity = stmf === 'Identity';
         const f = this.resolve(cf[stmf]) || {}; const cfm = f.CFM && f.CFM.name; method = cfm === 'AESV2' ? 'AES' : cfm === 'AESV3' ? 'AES256' : cfm === 'None' ? 'None' : 'RC4'; if (f.Length) keyLen = f.Length > 32 ? f.Length / 8 : f.Length; if (method === 'AES') keyLen = 16;
-        this.efMethod = (E.EFF && E.EFF.name && this.resolve(cf[E.EFF.name])) ? ((this.resolve(cf[E.EFF.name]).CFM || {}).name) : null; }
+        this.efMethod = (E.EFF && E.EFF.name && this.resolve(cf[E.EFF.name])) ? ((this.resolve(cf[E.EFF.name]).CFM || {}).name) : null;
+        const strf = (E.StrF && E.StrF.name) || 'Identity'; const sf = this.resolve(cf[strf]) || {};
+        this.strMethod = strf === 'Identity' ? 'None' : ({ AESV2: 'AES', AESV3: 'AES256', None: 'None' })[sf.CFM && sf.CFM.name] || 'RC4';
+        // AESV2 is always 128-bit, whichever of StmF / StrF / EFF uses it (StmF may be Identity in an EFF-only file)
+        if (this.efMethod === 'AESV2' || this.strMethod === 'AES') keyLen = 16; }
       let key;
       if (R >= 5) {
         const pw = new Uint8Array(0); // empty user password (owner-password-only files)
@@ -2169,7 +2177,7 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
         else { let x = C.rc4(key, C.md5(Uint8Array.from([...PAD, ...id0]))); for (let i = 1; i <= 19; i++) x = C.rc4(key.map((b) => b ^ i), x); ok = eq(x.subarray(0, 16), U.subarray(0, 16)); }
         if (!ok) { this.cryptError = 'user password is not empty (cannot open without it)'; return; }
       }
-      this.crypt = { key, method, R, V }; this.log.push(`decrypt: Standard R${R} V${V} ${method} key ${key.length * 8} bit (empty user password)`);
+      this.crypt = { key, method, R, V }; this.log.push(`decrypt: Standard R${R} V${V} ${method} key ${key.length * 8} bit (empty user password)${V >= 4 && (this.stmIdentity || this.efMethod) ? ` [StmF ${this.stmIdentity ? 'Identity' : method}, StrF ${this.strMethod}, EFF ${this.efMethod || 'StmF'}]` : ''}`);
     }
     async hash2B(pw, salt, R, udata) {
       let K = await C.sha('SHA-256', cat(pw, salt, udata || new Uint8Array(0))); if (R === 5) return K;
@@ -2183,12 +2191,27 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
       return K.subarray(0, 32);
     }
     strBytes(v) { v = this.resolve(v); return v instanceof Str ? v.bytes : new Uint8Array(0); }
-    decryptFor(num_, gen, data, isEF) {
-      const c = this.crypt; if (!c || (this.stmIdentity && !isEF)) return data; if (isEF && this.efMethod === 'None') return data;
-      if (c.method === 'AES256') return C.aesCbcDecrypt(c.key, data);
-      const k = cat(c.key, Uint8Array.from([num_ & 255, (num_ >> 8) & 255, (num_ >> 16) & 255, gen & 255, (gen >> 8) & 255]), c.method === 'AES' ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0));
+    // strings: the string crypt filter (V4+ /StrF; V1-3 the file's method); a string that fails to decrypt stays as it was
+    decryptStrings(v, num_, gen, depth) {
+      if (depth > 64 || v == null || typeof v !== 'object') return v;
+      if (v instanceof Str) { if (!v.bytes.length) return v; try { return new Str(this.decryptWith(this.strMethod || this.crypt.method, num_, gen, v.bytes)); } catch (_) { return v; } }
+      if (v instanceof Ref || v instanceof Name) return v;
+      if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = this.decryptStrings(v[i], num_, gen, depth + 1); return v; }
+      for (const k of Object.keys(v)) v[k] = this.decryptStrings(v[k], num_, gen, depth + 1); return v;
+    }
+    decryptWith(method, num_, gen, data) {
+      const c = this.crypt; if (method === 'None') return data;
+      if (method === 'AES256') return C.aesCbcDecrypt(c.key, data);
+      const k = cat(c.key, Uint8Array.from([num_ & 255, (num_ >> 8) & 255, (num_ >> 16) & 255, gen & 255, (gen >> 8) & 255]), method === 'AES' ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0));
       const ok = C.md5(k).subarray(0, Math.min(c.key.length + 5, 16));
-      return c.method === 'AES' ? C.aesCbcDecrypt(ok, data) : C.rc4(ok, data);
+      return method === 'AES' ? C.aesCbcDecrypt(ok, data) : C.rc4(ok, data);
+    }
+    decryptFor(num_, gen, data, isEF) {
+      const c = this.crypt; if (!c) return data;
+      // embedded files use /EFF's crypt filter when given (it may differ from /StmF), otherwise /StmF's
+      if (isEF && this.efMethod) return this.decryptWith(({ AESV2: 'AES', AESV3: 'AES256', None: 'None' })[this.efMethod] || 'RC4', num_, gen, data);
+      if (this.stmIdentity) return data;
+      return this.decryptWith(c.method, num_, gen, data);
     }
     async streamData(o, isEF) {
       let data = this.rawStream(o); const v = o.value; const isXref = isName(v.Type, 'XRef');
@@ -2222,7 +2245,8 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
       if (Array.isArray(n.Kids)) for (const k of n.Kids) walk(k, d + 1); else out.push(n); };
     if (root && root.Pages) walk(root.Pages, 0); return out; }
 
-  const CAD_EXT = new Set(['step', 'stp', 'stpz', 'p21', 'igs', 'iges', 'x_t', 'x_b', 'xmt_txt', 'xmt_bin', 'sat', 'sab', 'jt', 'catpart', 'catproduct', 'cgr', 'prt', 'asm', 'sldprt', 'sldasm', 'ipt', 'iam', 'par', 'psm', '3dm', 'stl', 'obj', '3mf', 'ply', 'fbx', 'gltf', 'glb', 'dae', 'u3d', 'prc', 'dwg', 'dxf', 'ifc', 'vda', 'model', 'neu', 'creo', 'f3d', 'skp', 'brep']);
+  // 1.6.2: attachmentDetails[].isCAD: exactly these extensions, case-insensitive (the name's suffix is lower-cased first)
+  const CAD_EXT = new Set(['stp', 'step', 'igs', 'iges', 'jt', 'x_t', 'x_b', 'sat', 'sab', '3dxml', 'stl', 'prt', 'catpart', 'catproduct', 'sldprt', 'sldasm', 'ipt', 'iam', 'vds']);
   async function extract3DStreamsFromPDF(u8, fileName, opts) {
     opts = opts || {};
     const head = latin1(u8, 0, 4);
@@ -2272,21 +2296,32 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
         if (is3D || isEF) await take(new Ref(n, o.gen), { container: is3D ? 'stream scan' : 'EmbeddedFile scan', page: null, annot: null, title: '' }, isEF);
       }
     }
-    // embedded files (catalog /EmbeddedFiles name tree + /FileAttachment annotations): offered as downloads
+    // embedded files (catalog /EmbeddedFiles name tree, /FileAttachment annotations, PDF 2.0 /AF associated files): offered as downloads
     const attachments = []; const seenEF = new Set();
     const takeFS = async (fsRef, where) => {
-      const fsd = doc.resolve(fsRef); if (!fsd || typeof fsd !== 'object') return; const ef = doc.resolve(fsd.EF) || {}; const sref = ef.UF || ef.F;
-      if (!(sref instanceof Ref) || seenEF.has(sref.num)) return; seenEF.add(sref.num); const o = doc.getObj(sref.num); if (!o || !o.stream) return;
-      const name = textOf(doc, fsd.UF) || textOf(doc, fsd.F) || ('attachment-' + sref.num);
-      let data = null, error = null; try { data = (await doc.streamData(o, true)).data; } catch (e) { error = e.message; }
+      const fsd = doc.resolve(fsRef); if (!fsd || typeof fsd !== 'object' || fsd instanceof Str) return; // a plain-string file spec embeds nothing
+      const ef = doc.resolve(fsd.EF) || {}; const refs = [ef.UF, ef.F].filter((r, i, a) => r instanceof Ref && a.findIndex((x) => x instanceof Ref && x.num === r.num) === i);
+      if (!refs.length || refs.some((r) => seenEF.has(r.num))) return; for (const r of refs) seenEF.add(r.num);
+      const name = textOf(doc, fsd.UF) || textOf(doc, fsd.F) || ('attachment-' + refs[0].num);
+      // /UF is preferred; when its stream is missing or does not decode, a distinct /F stream is tried before giving up
+      let data = null, error = null, errorName = null, o = null, sref = refs[0];
+      for (const r of refs) { const oo = doc.getObj(r.num);
+        if (!oo || !oo.stream) { if (!error) { error = 'embedded file stream missing (object ' + r.num + ')'; errorName = 'Error'; } continue; }
+        try { data = (await doc.streamData(oo, true)).data; o = oo; sref = r; error = null; errorName = null; break; } catch (e) { if (!o) { o = oo; sref = r; } error = e.message; errorName = (e && e.name) || 'Error'; data = null; } }
       const ext = (/\.([A-Za-z0-9_]+)$/.exec(name) || [, ''])[1].toLowerCase();
-      attachments.push({ name, ext, isCAD: CAD_EXT.has(ext), bytes: data, size: data ? data.length : 0, error, objNum: sref.num, where, description: textOf(doc, fsd.Desc) || '' });
+      const sub = o && o.value && doc.resolve(o.value.Subtype); const mime = sub instanceof Name && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(sub.name) ? sub.name.toLowerCase() : null;
+      const params = o && o.value && doc.resolve(o.value.Params); const declaredSize = params && typeof doc.resolve(params.Size) === 'number' ? doc.resolve(params.Size) : null;
+      attachments.push({ name, ext, isCAD: CAD_EXT.has(ext), bytes: data, size: data ? data.length : 0, error, errorName, mime, declaredSize, objNum: sref.num, where, description: textOf(doc, fsd.Desc) || '' });
     };
+    const takeAF = async (af, where) => { af = doc.resolve(af); if (Array.isArray(af)) for (const f of af) await takeFS(f, where); };
     try {
       const root = doc.resolve(doc.trailer.Root) || {}; const names = doc.resolve(root.Names) || {};
       for (const [, fsRef] of nameTreeValues(doc, names.EmbeddedFiles, [])) await takeFS(fsRef, 'EmbeddedFiles');
-      for (let pi = 0; pi < pages.length; pi++) { const annots = doc.resolve(pages[pi].Annots); if (!Array.isArray(annots)) continue;
-        for (const ar of annots) { const a = doc.resolve(ar); if (a && isName(a.Subtype, 'FileAttachment')) await takeFS(a.FS, 'FileAttachment p' + (pi + 1)); } }
+      await takeAF(root.AF, 'AF catalog');
+      for (let pi = 0; pi < pages.length; pi++) { await takeAF(pages[pi].AF, 'AF p' + (pi + 1)); const annots = doc.resolve(pages[pi].Annots); if (!Array.isArray(annots)) continue;
+        for (const ar of annots) { const a = doc.resolve(ar); if (!a || typeof a !== 'object') continue;
+          if (isName(a.Subtype, 'FileAttachment')) await takeFS(a.FS, 'FileAttachment p' + (pi + 1));
+          await takeAF(a.AF, 'AF annot p' + (pi + 1)); } }
       for (const e of seenObj.values()) if (!e.st && e.meta && e.meta.container === '/RichMedia') { /* non-3D RichMedia assets (e.g. .swf/.js) are not CAD */ }
     } catch (e) { doc.log.push('attachments: ' + e.message); }
     const bySha = new Map();
@@ -4057,6 +4092,10 @@ function parsePRC(input, opts){
   // damage (1.6.1): decode failures caught below (unreadable exact geometry / topology context, undecodable tessellation);
   // a stream that yields no body and has damage is reported as damaged by the app (DECODE_ERROR), not as unsupported
   const damage=(opts.damage=[]);
+  // truncation (1.6.2): the header's end-of-file offset is the stream length in every PRC writer seen (19/19 corpus streams);
+  // a shorter stream lost its tail, which usually holds tessellation or exact geometry, so "nothing decoded" is damage, not "unsupported"
+  if(hdr.modelFileEnd>d.length){ const m='truncated: the header declares '+hdr.modelFileEnd+' bytes, the stream has '+d.length;
+    damage.push(m); (opts.warnings=opts.warnings||[]).push('PRC stream is '+m); }
   const fss=hdr.fileStructures.map((fsd,fi)=>{
     const o=fsd.offsets; const fsh=readFSHeader(d,o[0]);
     const ctx={authoringVersion:fsh.authoringVersion||hdr.authoringVersion, curName:null, graphics:{layer:-1,lineStyle:-1,behavior:1}, numFileStructures:hdr.fileStructures.length};
@@ -5691,8 +5730,19 @@ void main() { gl_FragColor = uRGBA; }`;
     }
   }
 
+  // pad to 4 bytes; plain arithmetic (1.6.2): `(n + 3) & ~3` is negative for sizes >= 2^31 and sent the parser backwards
   function pad4(n) {
-    return (n + 3) & ~3;
+    return n + ((4 - (n % 4)) % 4);
+  }
+
+  // 1.6.2: an error the JS runtime throws while decoding (DataView / typed-array RangeError, TypeError on a record the damaged
+  // data left out) is reported in our own words as damage; the raw text only goes to the console.
+  function damageMessage(e) {
+    const m = String((e && e.message) || e || 'unknown error');
+    const name = e && e.name;
+    if (name === 'RangeError' || /DataView|typed array|out of (range|bounds)|Invalid array length|buffer allocation/i.test(m)) return 'data ends early or has an impossible size (damaged data)';
+    if (name === 'TypeError' || name === 'ReferenceError' || /Cannot read propert|is not (a function|iterable|defined)/i.test(m)) return 'unexpected values (damaged data)';
+    return m;
   }
 
   function blockTypeName(t) {
@@ -5842,7 +5892,7 @@ void main() { gl_FragColor = uRGBA; }`;
     r.warnings = r.warnings || [];
     const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
     r.decodePath = tris ? 'U3D' : 'none';
-    if (tris && r.damage && r.damage.length) r.warnings.push(`U3D: damaged data skipped (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
+    if (tris && r.damage && r.damage.length) r.warnings.push(r.damaged = `U3D: damaged data skipped (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
     if (!tris) {
       // Vendor mesh "RHAdobeMeshResource" (Adobe Acrobat SDK 8.1 U3D supplement; decoder by QA/Tester)
       const RH = getModule('RHAdobeMesh', 'u3d-rhadobe-mesh.js');
@@ -5868,8 +5918,13 @@ void main() { gl_FragColor = uRGBA; }`;
           }
           for (const w of rr.warnings || []) r.warnings.push(w);
           // declared RHAdobeMeshResource mesh block(s) exist but none decoded: the mesh data is damaged (DECODE_ERROR), not an unsupported format
-          if (rr.meshErrors && rr.meshErrors.length) { const e0 = rr.meshErrors[0]; const err = new Error(`RHAdobeMeshResource mesh is damaged (${rr.meshErrors.length} block${rr.meshErrors.length > 1 ? 's' : ''}; block at ${e0.offset}: ${e0.message})`); err.rhDamaged = true; throw err; }
-        } catch (e) { if (e && e.rhDamaged) throw e; r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+          if (rr.meshErrors && rr.meshErrors.length) { const e0 = rr.meshErrors[0]; const err = new Error(`RHAdobeMeshResource mesh is damaged (${rr.meshErrors.length} block${rr.meshErrors.length > 1 ? 's' : ''}; block at ${e0.offset}: ${damageMessage({ message: e0.message })})`); err.rhDamaged = true; throw err; }
+        } catch (e) {
+          if (e && e.rhDamaged) throw e;
+          r.warnings.push(`RHAdobeMeshResource: ${damageMessage(e)}`);
+          // 1.6.2: a vendor mesh block whose size overruns the stream is damage, not an unsupported format
+          if (/overruns|past the end|truncat/i.test(String(e && e.message)) || damageMessage(e) !== String(e && e.message)) (r.damage = r.damage || []).push(`RHAdobeMeshResource: ${damageMessage(e)}`);
+        }
       }
       if (r.damage && r.damage.length) {
         throw new Error(`U3D stream is damaged (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
@@ -5965,7 +6020,7 @@ void main() { gl_FragColor = uRGBA; }`;
                   const subNext = subMetaStart + pad4(subMetaSize);
                   if (subNext > chainEnd + 4) break;
                   try { parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true); }
-                  catch (e) { damage.push(`block ${blockTypeName(subType)} at ${subOff}: ${e && e.message}`); throw e; }
+                  catch (e) { damage.push(`block ${blockTypeName(subType)} at ${subOff}: ${damageMessage(e)}`); throw e; }
                   subOff = subNext;
                 }
               }
@@ -6361,26 +6416,47 @@ void main() { gl_FragColor = uRGBA; }`;
           }
         } catch (e) {
           // Keep progressive mesh decoded up to the last complete resolution step
-          damage.push(`progressive mesh block at ${blockOffset}: ${e && e.message}`);
+          damage.push(`progressive mesh block at ${blockOffset}: ${damageMessage(e)}`);
         }
       }
     }
 
-    while (offset + 12 <= u8.length) {
-      const blockType = dv.getUint32(offset, true);
-      const dataSize = dv.getUint32(offset + 4, true);
-      const metaSize = dv.getUint32(offset + 8, true);
-
-      const dataStart = offset + 12;
-      const metaStart = dataStart + pad4(dataSize);
-      const nextBlockOffset = metaStart + pad4(metaSize);
-      if (dataStart + dataSize > u8.length) {   // truncated stream or a damaged block size
-        damage.push(`block 0x${(blockType >>> 0).toString(16)} at ${offset} declares ${dataSize} data bytes but the stream ends ${u8.length - dataStart} bytes later`);
-        break;
+    // 1.6.2: block framing is checked and a block that fails to decode is skipped (recorded in `damage`) instead of failing
+    // the whole stream, so damage in the middle salvages what decodes, like a truncated tail. A header that is not a
+    // U3D block (impossible type, metadata past the end, a size that overruns the stream) is damage too; parsing
+    // resumes at the next offset where two consecutive ECMA-363 block headers fit, if there is one.
+    const len = u8.length;
+    const validType = (t) => t >= 0xFFFFFF00 || (t >= 0x100 && t <= 0x00FFFFFF); // ECMA-363 blocks, or New Object Types
+    const frameAt = (o) => {
+      const t = dv.getUint32(o, true) >>> 0, d = dv.getUint32(o + 4, true), m = dv.getUint32(o + 8, true);
+      const ds = o + 12, ms = ds + pad4(d);
+      return { t, d, m, ds, ms, nx: ms + pad4(m), typeOk: validType(t), dataOk: ds + d <= len, metaOk: m === 0 || ms + m <= len };
+    };
+    const sound = (f) => f.t >= 0xFFFFFF00 && f.dataOk && f.metaOk;
+    const resync = (from) => {
+      for (let o = from; o + 12 <= len; o += 4) {
+        const f = frameAt(o);
+        if (!sound(f)) continue;
+        if (f.nx + 12 > len) { if (f.nx >= len - 3) return o; continue; } // a sound last block
+        if (sound(frameAt(f.nx))) return o;
       }
-
-      parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, offset, false);
-      offset = nextBlockOffset;
+      return -1;
+    };
+    while (offset + 12 <= len) {
+      const f = frameAt(offset);
+      if (!f.typeOk || !f.dataOk || !f.metaOk) {
+        const why = !f.typeOk ? `0x${f.t.toString(16)} is not a U3D block type`
+          : !f.dataOk ? `declares ${f.d} data bytes but the stream ends ${len - f.ds} bytes later`
+          : `declares ${f.m} metadata bytes but the stream ends ${Math.max(0, len - f.ms)} bytes later`;
+        const next = resync(offset + 4);
+        damage.push(`block ${f.typeOk ? blockTypeName(f.t) : ''}${f.typeOk ? ' ' : ''}at ${offset} ${f.typeOk ? '' : 'is damaged: '}${why}${next > 0 ? `; resumed at ${next}` : ''}`);
+        if (next < 0) break;
+        offset = next;
+        continue;
+      }
+      try { parseSingleBlock(f.t, f.ds, f.d, f.ms, f.m, offset, false); }
+      catch (e) { console.warn('U3D block at ' + offset, e); damage.push(`block ${blockTypeName(f.t)} at ${offset}: ${damageMessage(e)}`); }
+      offset = f.nx;
     }
 
     // Resolve full world 4x4 transform matrix for any node by walking parent chain
@@ -6571,6 +6647,8 @@ void main() { gl_FragColor = uRGBA; }`;
       format: 'PRC (ISO 14739-1)', decodePath, minVer: r.info && r.info.minVersion, authVer: r.info && r.info.authoringVersion,
       numStructs: fsInfo.length, unitsScalingFactor: 0.001, units: { source: r.units, positionsIn: 'mm' },
       tree: r.tree || null, wires, warnings, unsupportedDetail,
+      // 1.6.2: a truncated stream that still yielded parts loads partially (lastLoad.damaged)
+      damaged: parts.length ? warnings.find((w) => /^PRC stream is truncated/.test(w)) : undefined,
       blocks: fsInfo.map((f, i) => ({ blockType: 0x50524310 + (i & 0xf), name: `PRC_FileStructure_${i}`, dataSize: (f.geometry && f.geometry.sizeBytes) || 0, metaSize: 0, offset: 0 })),
       parts
     };
@@ -8605,14 +8683,15 @@ void main() { gl_FragColor = uRGBA; }`;
     const attEl = document.getElementById('attachList');
     if (attEl) {
       const atts = state.attachments || [];
+      // 1.6.2: shown under its sanitized fileName (no path, control / bidi-override or reserved characters), the name Save writes
       attEl.innerHTML = atts.map((a, i) => `
         <div class="feature-item">
-          <div><strong>${escHTML(a.name)}</strong>
+          <div><strong>${escHTML(attachmentFileName(a, i))}</strong>
             <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);">${a.isCAD ? 'CAD file • ' : ''}${a.size.toLocaleString()} B • ${escHTML(a.where)}${a.error ? ' • ' + escHTML(a.error) : ''}</div></div>
           ${a.bytes ? `<button class="btn btn-sm" data-att="${i}">Save</button>` : '<code>unreadable</code>'}
         </div>`).join('');
       attEl.querySelectorAll('button[data-att]').forEach((b) => b.addEventListener('click', () => {
-        const a = atts[+b.getAttribute('data-att')]; if (a && a.bytes) triggerDownload(a.bytes, a.name.split(/[\\/]/).pop() || 'attachment.bin', 'application/octet-stream');
+        const i = +b.getAttribute('data-att'); const a = atts[i]; if (a && a.bytes) triggerDownload(a.bytes, attachmentFileName(a, i), attachmentMime(a) || 'application/octet-stream');
       }));
     }
   }
@@ -8895,7 +8974,10 @@ void main() { gl_FragColor = uRGBA; }`;
         compactParts(st.parsed.parts || []);
       } catch (err) {
         console.error(err);
-        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)], decodeError: String((err && err.message) || err) };
+        // 1.6.2: runtime errors (RangeError from a DataView, TypeError...) are never shown raw
+        const raw = String((err && err.message) || err); const msg = damageMessage(err);
+        const shown = msg === raw ? raw : `${st.subtype} stream is damaged (${msg})`;
+        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [shown], decodeError: shown };
       }
     }
     state.wires = st.parsed.wires || [];
@@ -8915,21 +8997,44 @@ void main() { gl_FragColor = uRGBA; }`;
   // Outcome of the last load / stream activation, published as window.PDF3D.lastLoad (see README "Load result").
   function loadResultFor(st, idx) {
     const p = st.parsed || {};
+    // tris: triangles the viewer draws and mesh exports write (after the B-Rep weld drops degenerate, zero-area ones; the
+    // HUD "Tris"). trisParsed (1.6.2): triangles as decoded from the file, before that; the CAD-export fit limit
+    // (fitSkippedTris) and the large-model banner count these. The two differ only by the degenerate triangles.
     const tris = (p.parts || []).reduce((n, q) => n + (q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
+    const trisParsed = (p.parts || []).reduce((n, q) => n + (q.triCount != null ? q.triCount : q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
     const base = { format: st.subtype, stream: idx, streams: state.streams.length, decodePath: p.decodePath || 'none' };
-    if (tris) return { status: 'ok', reasonCode: null, ...base, parts: (p.parts || []).length, tris };
+    if (tris) return { status: 'ok', reasonCode: null, ...base, parts: (p.parts || []).length, tris, trisParsed, ...(p.damaged ? { damaged: p.damaged } : {}) };
     if (p.decodeError) return { status: 'error', reasonCode: 'DECODE_ERROR', ...base, detail: p.decodeError,
       message: `This PDF has a 3D model, but the app could not decode it (${st.subtype}: ${p.decodeError}).` };
     const detail = p.unsupportedDetail || (p.warnings || [])[0] || 'unknown';
     return { status: 'unsupported', reasonCode: 'UNSUPPORTED_MESH', ...base, detail, wires: (p.wires || []).length,
       message: `This PDF has a 3D model, but it's stored in a format the app can't read yet (${st.subtype}, ${detail}).` };
   }
+  // Suggested save name for an embedded file (1.6.2): the attachment's own name, last path segment only, with control /
+  // bidi-override / Windows-reserved characters replaced by '_', leading/trailing dots and spaces trimmed, Windows device
+  // names (CON, NUL, COM1...) prefixed with '_', at most 200 characters (extension kept); 'attachment-<n>.bin' if nothing is left.
+  function attachmentFileName(a, i) {
+    let n = String((a && a.name) || '').split(/[\\/]/).pop()
+      .replace(/[\u0000-\u001f\u007f<>:"|?*\u202a-\u202e\u2066-\u2069]/g, '_').replace(/^[\s.]+|[\s.]+$/g, '');
+    if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(n)) n = '_' + n;
+    const cps = Array.from(n);
+    if (cps.length > 200) { const m = /\.[A-Za-z0-9_]{1,16}$/.exec(n); const e = m ? m[0] : ''; n = cps.slice(0, 200 - e.length).join('') + e; }
+    return n || `attachment-${(i | 0) + 1}.bin`;
+  }
+  // MIME type of an embedded file: the PDF's own /Subtype on the EmbeddedFile stream when it is a well-formed type/subtype,
+  // else by extension (registered types only), else null (save as application/octet-stream)
+  const ATTACHMENT_MIME = { step: 'model/step', stp: 'model/step', igs: 'model/iges', iges: 'model/iges', stl: 'model/stl', jt: 'model/jt',
+    x_t: 'model/vnd.parasolid.transmit.text', x_b: 'model/vnd.parasolid.transmit.binary', txt: 'text/plain', csv: 'text/csv', htm: 'text/html', html: 'text/html',
+    xml: 'application/xml', json: 'application/json', pdf: 'application/pdf', zip: 'application/zip', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif' };
+  function attachmentMime(a) { return (a && a.mime) || (a && ATTACHMENT_MIME[String(a.ext || '').toLowerCase()]) || null; }
   // every lastLoad (1.6.1) carries the PDF's embedded files: attachments = names (as NO_3D had since 1.5.3),
-  // attachmentDetails = [{ name, ext, isCAD, size, description, error }] (no bytes; the Attachments panel downloads them)
+  // attachmentDetails = [{ name, fileName, mime, ext, isCAD, size, description, error }] (no bytes; PDF3D.saveAttachment(i) saves entry i)
+  //   fileName (1.6.2) = suggested save name (sanitized), mime (1.6.2) = MIME type or null, error = why the bytes are unreadable (else null)
   function setLastLoad(r) {
     const atts = state.attachments || [];
     r.attachments = atts.map((a) => a.name);
-    r.attachmentDetails = atts.map((a) => ({ name: a.name, ext: a.ext || '', isCAD: !!a.isCAD, size: a.size || 0, description: a.description || '', error: a.error || null }));
+    r.attachmentDetails = atts.map((a, i) => ({ name: a.name, fileName: attachmentFileName(a, i), mime: attachmentMime(a), ext: a.ext || '', isCAD: !!a.isCAD,
+      size: a.size || 0, description: a.description || '', error: a.error || (a.bytes ? null : 'no data') }));
     (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r;
   }
 
@@ -9694,6 +9799,47 @@ void main() { gl_FragColor = uRGBA; }`;
     return e && e.faces ? e.estimatedBytes : null;
   }
   PDF3D_NS.estimateBytes = estimateBytes;
+
+  // PDF3D.saveAttachment(index, opts) -> Promise (1.6.2): saves embedded file lastLoad.attachmentDetails[index] (decoded and
+  // decrypted bytes, exactly as embedded). Delivery as exportFormat:
+  //   opts.writable (FileSystemWritableFileStream) -> the bytes are written in ~1 MiB Uint8Array pieces, no Blob:
+  //     { status: 'ok', blob: null, delivery: 'picker', size, name, filename, mime }
+  //   no opts.writable -> { status: 'ok', blob, delivery: 'download', size, name, filename, mime }
+  //   failure -> { status: 'error', reasonCode: 'WRITE_FAILED' | 'ATTACHMENT_UNREADABLE', reason, errorName, quota, blob: null, delivery, size: null, name, filename, mime }
+  //     ATTACHMENT_UNREADABLE: no such index (errorName 'RangeError') or the entry has no readable bytes (attachmentDetails[index].error is set);
+  //     WRITE_FAILED: writable.write() threw (errorName = its name, quota = errorName === 'QuotaExceededError'; the file is partly written)
+  //   opts.signal aborted -> the exportFormat cancelled shape { status: 'cancelled', reasonCode: 'cancelled', blob: null, ... }
+  //   opts.onProgress({ stage: 'write', pct, label, bytes, totalBytes }) after each piece.
+  // name / filename = the suggested name (attachmentDetails[index].fileName). Like exportFormat, saveAttachment never calls
+  // close() or abort() on the writable: the caller does.
+  async function saveAttachment(index, opts) {
+    const o = opts || {}; const w = o.writable || null; const delivery = w ? 'picker' : 'download';
+    const atts = state.attachments || []; const a = Number.isInteger(index) && index >= 0 ? atts[index] : undefined;
+    const name = a ? attachmentFileName(a, index) : null; const mime = a ? attachmentMime(a) : null;
+    const res = { status: 'ok', reasonCode: null, reason: null, blob: null, delivery, size: null, name, filename: name, mime };
+    const fail = (reasonCode, reason, errorName) => Object.assign(res, { status: 'error', reasonCode, reason, blob: null, size: null, errorName: errorName || null, quota: errorName === 'QuotaExceededError' });
+    if (!a) return fail('ATTACHMENT_UNREADABLE', `There is no embedded file #${index} in this PDF.`, 'RangeError');
+    // realm-independent check: an unfiltered stream's bytes are a view of the caller's buffer, which may come from another realm
+    if (Object.prototype.toString.call(a.bytes) !== '[object Uint8Array]' || a.error) return fail('ATTACHMENT_UNREADABLE', `Couldn\u2019t read the embedded file \u201c${name}\u201d: ` + String(a.error || 'no data').replace(/[.\s]+$/, ''), a.errorName || 'Error');
+    if (o.signal && o.signal.aborted) return exportCancelled();
+    const bytes = a.bytes; const total = bytes.length;
+    if (!w) { const blob = new Blob([bytes], { type: mime || 'application/octet-stream' }); return Object.assign(res, { blob, size: blob.size }); }
+    const progress = (p) => { if (typeof o.onProgress === 'function') { try { o.onProgress(p); } catch (e) { /* UI callback */ } } };
+    let size = 0;
+    try {
+      for (let i = 0; i < total; i += WRITE_SLICE) {
+        if (o.signal && o.signal.aborted) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' });
+        const piece = bytes.subarray(i, Math.min(total, i + WRITE_SLICE));
+        await w.write(piece); size += piece.length;
+        progress({ stage: 'write', pct: Math.min(100, Math.round(size / total * 100)), label: 'Saving\u2026', bytes: size, totalBytes: total });
+      }
+      return Object.assign(res, { size });
+    } catch (e) {
+      if (e && e.name === 'AbortError' && o.signal && o.signal.aborted) return exportCancelled();
+      return fail('WRITE_FAILED', 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, ''), (e && e.name) || null);
+    }
+  }
+  PDF3D_NS.saveAttachment = saveAttachment;
 
   window.addEventListener('DOMContentLoaded', () => {
     initEvents();

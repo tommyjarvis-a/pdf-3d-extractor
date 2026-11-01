@@ -703,8 +703,19 @@
     }
   }
 
+  // pad to 4 bytes; plain arithmetic (1.6.2): `(n + 3) & ~3` is negative for sizes >= 2^31 and sent the parser backwards
   function pad4(n) {
-    return (n + 3) & ~3;
+    return n + ((4 - (n % 4)) % 4);
+  }
+
+  // 1.6.2: an error the JS runtime throws while decoding (DataView / typed-array RangeError, TypeError on a record the damaged
+  // data left out) is reported in our own words as damage; the raw text only goes to the console.
+  function damageMessage(e) {
+    const m = String((e && e.message) || e || 'unknown error');
+    const name = e && e.name;
+    if (name === 'RangeError' || /DataView|typed array|out of (range|bounds)|Invalid array length|buffer allocation/i.test(m)) return 'data ends early or has an impossible size (damaged data)';
+    if (name === 'TypeError' || name === 'ReferenceError' || /Cannot read propert|is not (a function|iterable|defined)/i.test(m)) return 'unexpected values (damaged data)';
+    return m;
   }
 
   function blockTypeName(t) {
@@ -854,7 +865,7 @@
     r.warnings = r.warnings || [];
     const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
     r.decodePath = tris ? 'U3D' : 'none';
-    if (tris && r.damage && r.damage.length) r.warnings.push(`U3D: damaged data skipped (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
+    if (tris && r.damage && r.damage.length) r.warnings.push(r.damaged = `U3D: damaged data skipped (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
     if (!tris) {
       // Vendor mesh "RHAdobeMeshResource" (Adobe Acrobat SDK 8.1 U3D supplement; decoder by QA/Tester)
       const RH = getModule('RHAdobeMesh', 'u3d-rhadobe-mesh.js');
@@ -880,8 +891,13 @@
           }
           for (const w of rr.warnings || []) r.warnings.push(w);
           // declared RHAdobeMeshResource mesh block(s) exist but none decoded: the mesh data is damaged (DECODE_ERROR), not an unsupported format
-          if (rr.meshErrors && rr.meshErrors.length) { const e0 = rr.meshErrors[0]; const err = new Error(`RHAdobeMeshResource mesh is damaged (${rr.meshErrors.length} block${rr.meshErrors.length > 1 ? 's' : ''}; block at ${e0.offset}: ${e0.message})`); err.rhDamaged = true; throw err; }
-        } catch (e) { if (e && e.rhDamaged) throw e; r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+          if (rr.meshErrors && rr.meshErrors.length) { const e0 = rr.meshErrors[0]; const err = new Error(`RHAdobeMeshResource mesh is damaged (${rr.meshErrors.length} block${rr.meshErrors.length > 1 ? 's' : ''}; block at ${e0.offset}: ${damageMessage({ message: e0.message })})`); err.rhDamaged = true; throw err; }
+        } catch (e) {
+          if (e && e.rhDamaged) throw e;
+          r.warnings.push(`RHAdobeMeshResource: ${damageMessage(e)}`);
+          // 1.6.2: a vendor mesh block whose size overruns the stream is damage, not an unsupported format
+          if (/overruns|past the end|truncat/i.test(String(e && e.message)) || damageMessage(e) !== String(e && e.message)) (r.damage = r.damage || []).push(`RHAdobeMeshResource: ${damageMessage(e)}`);
+        }
       }
       if (r.damage && r.damage.length) {
         throw new Error(`U3D stream is damaged (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
@@ -977,7 +993,7 @@
                   const subNext = subMetaStart + pad4(subMetaSize);
                   if (subNext > chainEnd + 4) break;
                   try { parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true); }
-                  catch (e) { damage.push(`block ${blockTypeName(subType)} at ${subOff}: ${e && e.message}`); throw e; }
+                  catch (e) { damage.push(`block ${blockTypeName(subType)} at ${subOff}: ${damageMessage(e)}`); throw e; }
                   subOff = subNext;
                 }
               }
@@ -1373,26 +1389,47 @@
           }
         } catch (e) {
           // Keep progressive mesh decoded up to the last complete resolution step
-          damage.push(`progressive mesh block at ${blockOffset}: ${e && e.message}`);
+          damage.push(`progressive mesh block at ${blockOffset}: ${damageMessage(e)}`);
         }
       }
     }
 
-    while (offset + 12 <= u8.length) {
-      const blockType = dv.getUint32(offset, true);
-      const dataSize = dv.getUint32(offset + 4, true);
-      const metaSize = dv.getUint32(offset + 8, true);
-
-      const dataStart = offset + 12;
-      const metaStart = dataStart + pad4(dataSize);
-      const nextBlockOffset = metaStart + pad4(metaSize);
-      if (dataStart + dataSize > u8.length) {   // truncated stream or a damaged block size
-        damage.push(`block 0x${(blockType >>> 0).toString(16)} at ${offset} declares ${dataSize} data bytes but the stream ends ${u8.length - dataStart} bytes later`);
-        break;
+    // 1.6.2: block framing is checked and a block that fails to decode is skipped (recorded in `damage`) instead of failing
+    // the whole stream, so damage in the middle salvages what decodes, like a truncated tail. A header that is not a
+    // U3D block (impossible type, metadata past the end, a size that overruns the stream) is damage too; parsing
+    // resumes at the next offset where two consecutive ECMA-363 block headers fit, if there is one.
+    const len = u8.length;
+    const validType = (t) => t >= 0xFFFFFF00 || (t >= 0x100 && t <= 0x00FFFFFF); // ECMA-363 blocks, or New Object Types
+    const frameAt = (o) => {
+      const t = dv.getUint32(o, true) >>> 0, d = dv.getUint32(o + 4, true), m = dv.getUint32(o + 8, true);
+      const ds = o + 12, ms = ds + pad4(d);
+      return { t, d, m, ds, ms, nx: ms + pad4(m), typeOk: validType(t), dataOk: ds + d <= len, metaOk: m === 0 || ms + m <= len };
+    };
+    const sound = (f) => f.t >= 0xFFFFFF00 && f.dataOk && f.metaOk;
+    const resync = (from) => {
+      for (let o = from; o + 12 <= len; o += 4) {
+        const f = frameAt(o);
+        if (!sound(f)) continue;
+        if (f.nx + 12 > len) { if (f.nx >= len - 3) return o; continue; } // a sound last block
+        if (sound(frameAt(f.nx))) return o;
       }
-
-      parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, offset, false);
-      offset = nextBlockOffset;
+      return -1;
+    };
+    while (offset + 12 <= len) {
+      const f = frameAt(offset);
+      if (!f.typeOk || !f.dataOk || !f.metaOk) {
+        const why = !f.typeOk ? `0x${f.t.toString(16)} is not a U3D block type`
+          : !f.dataOk ? `declares ${f.d} data bytes but the stream ends ${len - f.ds} bytes later`
+          : `declares ${f.m} metadata bytes but the stream ends ${Math.max(0, len - f.ms)} bytes later`;
+        const next = resync(offset + 4);
+        damage.push(`block ${f.typeOk ? blockTypeName(f.t) : ''}${f.typeOk ? ' ' : ''}at ${offset} ${f.typeOk ? '' : 'is damaged: '}${why}${next > 0 ? `; resumed at ${next}` : ''}`);
+        if (next < 0) break;
+        offset = next;
+        continue;
+      }
+      try { parseSingleBlock(f.t, f.ds, f.d, f.ms, f.m, offset, false); }
+      catch (e) { console.warn('U3D block at ' + offset, e); damage.push(`block ${blockTypeName(f.t)} at ${offset}: ${damageMessage(e)}`); }
+      offset = f.nx;
     }
 
     // Resolve full world 4x4 transform matrix for any node by walking parent chain
@@ -1583,6 +1620,8 @@
       format: 'PRC (ISO 14739-1)', decodePath, minVer: r.info && r.info.minVersion, authVer: r.info && r.info.authoringVersion,
       numStructs: fsInfo.length, unitsScalingFactor: 0.001, units: { source: r.units, positionsIn: 'mm' },
       tree: r.tree || null, wires, warnings, unsupportedDetail,
+      // 1.6.2: a truncated stream that still yielded parts loads partially (lastLoad.damaged)
+      damaged: parts.length ? warnings.find((w) => /^PRC stream is truncated/.test(w)) : undefined,
       blocks: fsInfo.map((f, i) => ({ blockType: 0x50524310 + (i & 0xf), name: `PRC_FileStructure_${i}`, dataSize: (f.geometry && f.geometry.sizeBytes) || 0, metaSize: 0, offset: 0 })),
       parts
     };
@@ -3617,14 +3656,15 @@
     const attEl = document.getElementById('attachList');
     if (attEl) {
       const atts = state.attachments || [];
+      // 1.6.2: shown under its sanitized fileName (no path, control / bidi-override or reserved characters), the name Save writes
       attEl.innerHTML = atts.map((a, i) => `
         <div class="feature-item">
-          <div><strong>${escHTML(a.name)}</strong>
+          <div><strong>${escHTML(attachmentFileName(a, i))}</strong>
             <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);">${a.isCAD ? 'CAD file • ' : ''}${a.size.toLocaleString()} B • ${escHTML(a.where)}${a.error ? ' • ' + escHTML(a.error) : ''}</div></div>
           ${a.bytes ? `<button class="btn btn-sm" data-att="${i}">Save</button>` : '<code>unreadable</code>'}
         </div>`).join('');
       attEl.querySelectorAll('button[data-att]').forEach((b) => b.addEventListener('click', () => {
-        const a = atts[+b.getAttribute('data-att')]; if (a && a.bytes) triggerDownload(a.bytes, a.name.split(/[\\/]/).pop() || 'attachment.bin', 'application/octet-stream');
+        const i = +b.getAttribute('data-att'); const a = atts[i]; if (a && a.bytes) triggerDownload(a.bytes, attachmentFileName(a, i), attachmentMime(a) || 'application/octet-stream');
       }));
     }
   }
@@ -3907,7 +3947,10 @@
         compactParts(st.parsed.parts || []);
       } catch (err) {
         console.error(err);
-        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [String((err && err.message) || err)], decodeError: String((err && err.message) || err) };
+        // 1.6.2: runtime errors (RangeError from a DataView, TypeError...) are never shown raw
+        const raw = String((err && err.message) || err); const msg = damageMessage(err);
+        const shown = msg === raw ? raw : `${st.subtype} stream is damaged (${msg})`;
+        st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [shown], decodeError: shown };
       }
     }
     state.wires = st.parsed.wires || [];
@@ -3927,21 +3970,44 @@
   // Outcome of the last load / stream activation, published as window.PDF3D.lastLoad (see README "Load result").
   function loadResultFor(st, idx) {
     const p = st.parsed || {};
+    // tris: triangles the viewer draws and mesh exports write (after the B-Rep weld drops degenerate, zero-area ones; the
+    // HUD "Tris"). trisParsed (1.6.2): triangles as decoded from the file, before that; the CAD-export fit limit
+    // (fitSkippedTris) and the large-model banner count these. The two differ only by the degenerate triangles.
     const tris = (p.parts || []).reduce((n, q) => n + (q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
+    const trisParsed = (p.parts || []).reduce((n, q) => n + (q.triCount != null ? q.triCount : q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
     const base = { format: st.subtype, stream: idx, streams: state.streams.length, decodePath: p.decodePath || 'none' };
-    if (tris) return { status: 'ok', reasonCode: null, ...base, parts: (p.parts || []).length, tris };
+    if (tris) return { status: 'ok', reasonCode: null, ...base, parts: (p.parts || []).length, tris, trisParsed, ...(p.damaged ? { damaged: p.damaged } : {}) };
     if (p.decodeError) return { status: 'error', reasonCode: 'DECODE_ERROR', ...base, detail: p.decodeError,
       message: `This PDF has a 3D model, but the app could not decode it (${st.subtype}: ${p.decodeError}).` };
     const detail = p.unsupportedDetail || (p.warnings || [])[0] || 'unknown';
     return { status: 'unsupported', reasonCode: 'UNSUPPORTED_MESH', ...base, detail, wires: (p.wires || []).length,
       message: `This PDF has a 3D model, but it's stored in a format the app can't read yet (${st.subtype}, ${detail}).` };
   }
+  // Suggested save name for an embedded file (1.6.2): the attachment's own name, last path segment only, with control /
+  // bidi-override / Windows-reserved characters replaced by '_', leading/trailing dots and spaces trimmed, Windows device
+  // names (CON, NUL, COM1...) prefixed with '_', at most 200 characters (extension kept); 'attachment-<n>.bin' if nothing is left.
+  function attachmentFileName(a, i) {
+    let n = String((a && a.name) || '').split(/[\\/]/).pop()
+      .replace(/[\u0000-\u001f\u007f<>:"|?*\u202a-\u202e\u2066-\u2069]/g, '_').replace(/^[\s.]+|[\s.]+$/g, '');
+    if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(n)) n = '_' + n;
+    const cps = Array.from(n);
+    if (cps.length > 200) { const m = /\.[A-Za-z0-9_]{1,16}$/.exec(n); const e = m ? m[0] : ''; n = cps.slice(0, 200 - e.length).join('') + e; }
+    return n || `attachment-${(i | 0) + 1}.bin`;
+  }
+  // MIME type of an embedded file: the PDF's own /Subtype on the EmbeddedFile stream when it is a well-formed type/subtype,
+  // else by extension (registered types only), else null (save as application/octet-stream)
+  const ATTACHMENT_MIME = { step: 'model/step', stp: 'model/step', igs: 'model/iges', iges: 'model/iges', stl: 'model/stl', jt: 'model/jt',
+    x_t: 'model/vnd.parasolid.transmit.text', x_b: 'model/vnd.parasolid.transmit.binary', txt: 'text/plain', csv: 'text/csv', htm: 'text/html', html: 'text/html',
+    xml: 'application/xml', json: 'application/json', pdf: 'application/pdf', zip: 'application/zip', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif' };
+  function attachmentMime(a) { return (a && a.mime) || (a && ATTACHMENT_MIME[String(a.ext || '').toLowerCase()]) || null; }
   // every lastLoad (1.6.1) carries the PDF's embedded files: attachments = names (as NO_3D had since 1.5.3),
-  // attachmentDetails = [{ name, ext, isCAD, size, description, error }] (no bytes; the Attachments panel downloads them)
+  // attachmentDetails = [{ name, fileName, mime, ext, isCAD, size, description, error }] (no bytes; PDF3D.saveAttachment(i) saves entry i)
+  //   fileName (1.6.2) = suggested save name (sanitized), mime (1.6.2) = MIME type or null, error = why the bytes are unreadable (else null)
   function setLastLoad(r) {
     const atts = state.attachments || [];
     r.attachments = atts.map((a) => a.name);
-    r.attachmentDetails = atts.map((a) => ({ name: a.name, ext: a.ext || '', isCAD: !!a.isCAD, size: a.size || 0, description: a.description || '', error: a.error || null }));
+    r.attachmentDetails = atts.map((a, i) => ({ name: a.name, fileName: attachmentFileName(a, i), mime: attachmentMime(a), ext: a.ext || '', isCAD: !!a.isCAD,
+      size: a.size || 0, description: a.description || '', error: a.error || (a.bytes ? null : 'no data') }));
     (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r;
   }
 
@@ -4706,6 +4772,47 @@
     return e && e.faces ? e.estimatedBytes : null;
   }
   PDF3D_NS.estimateBytes = estimateBytes;
+
+  // PDF3D.saveAttachment(index, opts) -> Promise (1.6.2): saves embedded file lastLoad.attachmentDetails[index] (decoded and
+  // decrypted bytes, exactly as embedded). Delivery as exportFormat:
+  //   opts.writable (FileSystemWritableFileStream) -> the bytes are written in ~1 MiB Uint8Array pieces, no Blob:
+  //     { status: 'ok', blob: null, delivery: 'picker', size, name, filename, mime }
+  //   no opts.writable -> { status: 'ok', blob, delivery: 'download', size, name, filename, mime }
+  //   failure -> { status: 'error', reasonCode: 'WRITE_FAILED' | 'ATTACHMENT_UNREADABLE', reason, errorName, quota, blob: null, delivery, size: null, name, filename, mime }
+  //     ATTACHMENT_UNREADABLE: no such index (errorName 'RangeError') or the entry has no readable bytes (attachmentDetails[index].error is set);
+  //     WRITE_FAILED: writable.write() threw (errorName = its name, quota = errorName === 'QuotaExceededError'; the file is partly written)
+  //   opts.signal aborted -> the exportFormat cancelled shape { status: 'cancelled', reasonCode: 'cancelled', blob: null, ... }
+  //   opts.onProgress({ stage: 'write', pct, label, bytes, totalBytes }) after each piece.
+  // name / filename = the suggested name (attachmentDetails[index].fileName). Like exportFormat, saveAttachment never calls
+  // close() or abort() on the writable: the caller does.
+  async function saveAttachment(index, opts) {
+    const o = opts || {}; const w = o.writable || null; const delivery = w ? 'picker' : 'download';
+    const atts = state.attachments || []; const a = Number.isInteger(index) && index >= 0 ? atts[index] : undefined;
+    const name = a ? attachmentFileName(a, index) : null; const mime = a ? attachmentMime(a) : null;
+    const res = { status: 'ok', reasonCode: null, reason: null, blob: null, delivery, size: null, name, filename: name, mime };
+    const fail = (reasonCode, reason, errorName) => Object.assign(res, { status: 'error', reasonCode, reason, blob: null, size: null, errorName: errorName || null, quota: errorName === 'QuotaExceededError' });
+    if (!a) return fail('ATTACHMENT_UNREADABLE', `There is no embedded file #${index} in this PDF.`, 'RangeError');
+    // realm-independent check: an unfiltered stream's bytes are a view of the caller's buffer, which may come from another realm
+    if (Object.prototype.toString.call(a.bytes) !== '[object Uint8Array]' || a.error) return fail('ATTACHMENT_UNREADABLE', `Couldn\u2019t read the embedded file \u201c${name}\u201d: ` + String(a.error || 'no data').replace(/[.\s]+$/, ''), a.errorName || 'Error');
+    if (o.signal && o.signal.aborted) return exportCancelled();
+    const bytes = a.bytes; const total = bytes.length;
+    if (!w) { const blob = new Blob([bytes], { type: mime || 'application/octet-stream' }); return Object.assign(res, { blob, size: blob.size }); }
+    const progress = (p) => { if (typeof o.onProgress === 'function') { try { o.onProgress(p); } catch (e) { /* UI callback */ } } };
+    let size = 0;
+    try {
+      for (let i = 0; i < total; i += WRITE_SLICE) {
+        if (o.signal && o.signal.aborted) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' });
+        const piece = bytes.subarray(i, Math.min(total, i + WRITE_SLICE));
+        await w.write(piece); size += piece.length;
+        progress({ stage: 'write', pct: Math.min(100, Math.round(size / total * 100)), label: 'Saving\u2026', bytes: size, totalBytes: total });
+      }
+      return Object.assign(res, { size });
+    } catch (e) {
+      if (e && e.name === 'AbortError' && o.signal && o.signal.aborted) return exportCancelled();
+      return fail('WRITE_FAILED', 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, ''), (e && e.name) || null);
+    }
+  }
+  PDF3D_NS.saveAttachment = saveAttachment;
 
   window.addEventListener('DOMContentLoaded', () => {
     initEvents();

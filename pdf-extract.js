@@ -193,6 +193,9 @@
       let r = null;
       if (this.offsets.has(n)) { try { r = this.parseIndirectAt(this.offsets.get(n)); } catch (_) {} if (r && r.num !== n) r = null; }
       if (!r && this.inObjStm.has(n)) { const { stm, idx } = this.inObjStm.get(n); r = this.fromObjStm(stm, idx, n); }
+      // 1.6.2: strings of an encrypted file are decrypted with their object's key (not inside object streams, whose
+      // stream is decrypted as a whole; not the /Encrypt dictionary or an XRef stream's dictionary)
+      if (r && this.crypt && !r.inStm && this.strMethod !== 'None' && !(this.encNum === n) && !(r.value && isName(r.value.Type, 'XRef'))) r.value = this.decryptStrings(r.value, r.num, r.gen, 0);
       this.cache.set(n, r); return r;
     }
     getSync(n) { const o = this.getObj(n); return o ? o.value : undefined; }
@@ -206,18 +209,23 @@
         objs = new Map(); for (const [on, off] of hdr) { try { objs.set(on, new Parser(data, First + off).parse()); } catch (_) {} }
         this.objStmCache.set(stmNum, objs);
       }
-      return objs.has(n) ? { num: n, gen: 0, value: objs.get(n), stream: false } : null;
+      return objs.has(n) ? { num: n, gen: 0, value: objs.get(n), stream: false, inStm: true } : null;
     }
     resolve(v) { let k = 0; while (v instanceof Ref && k++ < 32) v = this.getSync(v.num); return v; }
     // --- encryption (ISO 32000-2 7.6) ---
     async initCrypt() {
+      if (this.trailer.Encrypt instanceof Ref) this.encNum = this.trailer.Encrypt.num;
       const E = this.resolve(this.trailer.Encrypt); if (!E || !isName(E.Filter, 'Standard')) { this.cryptError = 'unsupported security handler ' + (E && E.Filter && E.Filter.name); return; }
       const V = num(E.V, 0), R = num(E.R, 2); const O = this.strBytes(E.O), U = this.strBytes(E.U);
       const id0 = this.trailer.ID ? this.strBytes(this.resolve(this.trailer.ID)[0]) : new Uint8Array(0);
       let method = 'RC4', keyLen = V === 1 ? 5 : num(E.Length, 40) / 8;
       if (V >= 4) { const cf = this.resolve(E.CF) || {}; const stmf = (E.StmF && E.StmF.name) || 'Identity'; this.stmIdentity = stmf === 'Identity';
         const f = this.resolve(cf[stmf]) || {}; const cfm = f.CFM && f.CFM.name; method = cfm === 'AESV2' ? 'AES' : cfm === 'AESV3' ? 'AES256' : cfm === 'None' ? 'None' : 'RC4'; if (f.Length) keyLen = f.Length > 32 ? f.Length / 8 : f.Length; if (method === 'AES') keyLen = 16;
-        this.efMethod = (E.EFF && E.EFF.name && this.resolve(cf[E.EFF.name])) ? ((this.resolve(cf[E.EFF.name]).CFM || {}).name) : null; }
+        this.efMethod = (E.EFF && E.EFF.name && this.resolve(cf[E.EFF.name])) ? ((this.resolve(cf[E.EFF.name]).CFM || {}).name) : null;
+        const strf = (E.StrF && E.StrF.name) || 'Identity'; const sf = this.resolve(cf[strf]) || {};
+        this.strMethod = strf === 'Identity' ? 'None' : ({ AESV2: 'AES', AESV3: 'AES256', None: 'None' })[sf.CFM && sf.CFM.name] || 'RC4';
+        // AESV2 is always 128-bit, whichever of StmF / StrF / EFF uses it (StmF may be Identity in an EFF-only file)
+        if (this.efMethod === 'AESV2' || this.strMethod === 'AES') keyLen = 16; }
       let key;
       if (R >= 5) {
         const pw = new Uint8Array(0); // empty user password (owner-password-only files)
@@ -234,7 +242,7 @@
         else { let x = C.rc4(key, C.md5(Uint8Array.from([...PAD, ...id0]))); for (let i = 1; i <= 19; i++) x = C.rc4(key.map((b) => b ^ i), x); ok = eq(x.subarray(0, 16), U.subarray(0, 16)); }
         if (!ok) { this.cryptError = 'user password is not empty (cannot open without it)'; return; }
       }
-      this.crypt = { key, method, R, V }; this.log.push(`decrypt: Standard R${R} V${V} ${method} key ${key.length * 8} bit (empty user password)`);
+      this.crypt = { key, method, R, V }; this.log.push(`decrypt: Standard R${R} V${V} ${method} key ${key.length * 8} bit (empty user password)${V >= 4 && (this.stmIdentity || this.efMethod) ? ` [StmF ${this.stmIdentity ? 'Identity' : method}, StrF ${this.strMethod}, EFF ${this.efMethod || 'StmF'}]` : ''}`);
     }
     async hash2B(pw, salt, R, udata) {
       let K = await C.sha('SHA-256', cat(pw, salt, udata || new Uint8Array(0))); if (R === 5) return K;
@@ -248,12 +256,27 @@
       return K.subarray(0, 32);
     }
     strBytes(v) { v = this.resolve(v); return v instanceof Str ? v.bytes : new Uint8Array(0); }
-    decryptFor(num_, gen, data, isEF) {
-      const c = this.crypt; if (!c || (this.stmIdentity && !isEF)) return data; if (isEF && this.efMethod === 'None') return data;
-      if (c.method === 'AES256') return C.aesCbcDecrypt(c.key, data);
-      const k = cat(c.key, Uint8Array.from([num_ & 255, (num_ >> 8) & 255, (num_ >> 16) & 255, gen & 255, (gen >> 8) & 255]), c.method === 'AES' ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0));
+    // strings: the string crypt filter (V4+ /StrF; V1-3 the file's method); a string that fails to decrypt stays as it was
+    decryptStrings(v, num_, gen, depth) {
+      if (depth > 64 || v == null || typeof v !== 'object') return v;
+      if (v instanceof Str) { if (!v.bytes.length) return v; try { return new Str(this.decryptWith(this.strMethod || this.crypt.method, num_, gen, v.bytes)); } catch (_) { return v; } }
+      if (v instanceof Ref || v instanceof Name) return v;
+      if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = this.decryptStrings(v[i], num_, gen, depth + 1); return v; }
+      for (const k of Object.keys(v)) v[k] = this.decryptStrings(v[k], num_, gen, depth + 1); return v;
+    }
+    decryptWith(method, num_, gen, data) {
+      const c = this.crypt; if (method === 'None') return data;
+      if (method === 'AES256') return C.aesCbcDecrypt(c.key, data);
+      const k = cat(c.key, Uint8Array.from([num_ & 255, (num_ >> 8) & 255, (num_ >> 16) & 255, gen & 255, (gen >> 8) & 255]), method === 'AES' ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0));
       const ok = C.md5(k).subarray(0, Math.min(c.key.length + 5, 16));
-      return c.method === 'AES' ? C.aesCbcDecrypt(ok, data) : C.rc4(ok, data);
+      return method === 'AES' ? C.aesCbcDecrypt(ok, data) : C.rc4(ok, data);
+    }
+    decryptFor(num_, gen, data, isEF) {
+      const c = this.crypt; if (!c) return data;
+      // embedded files use /EFF's crypt filter when given (it may differ from /StmF), otherwise /StmF's
+      if (isEF && this.efMethod) return this.decryptWith(({ AESV2: 'AES', AESV3: 'AES256', None: 'None' })[this.efMethod] || 'RC4', num_, gen, data);
+      if (this.stmIdentity) return data;
+      return this.decryptWith(c.method, num_, gen, data);
     }
     async streamData(o, isEF) {
       let data = this.rawStream(o); const v = o.value; const isXref = isName(v.Type, 'XRef');
@@ -287,7 +310,8 @@
       if (Array.isArray(n.Kids)) for (const k of n.Kids) walk(k, d + 1); else out.push(n); };
     if (root && root.Pages) walk(root.Pages, 0); return out; }
 
-  const CAD_EXT = new Set(['step', 'stp', 'stpz', 'p21', 'igs', 'iges', 'x_t', 'x_b', 'xmt_txt', 'xmt_bin', 'sat', 'sab', 'jt', 'catpart', 'catproduct', 'cgr', 'prt', 'asm', 'sldprt', 'sldasm', 'ipt', 'iam', 'par', 'psm', '3dm', 'stl', 'obj', '3mf', 'ply', 'fbx', 'gltf', 'glb', 'dae', 'u3d', 'prc', 'dwg', 'dxf', 'ifc', 'vda', 'model', 'neu', 'creo', 'f3d', 'skp', 'brep']);
+  // 1.6.2: attachmentDetails[].isCAD: exactly these extensions, case-insensitive (the name's suffix is lower-cased first)
+  const CAD_EXT = new Set(['stp', 'step', 'igs', 'iges', 'jt', 'x_t', 'x_b', 'sat', 'sab', '3dxml', 'stl', 'prt', 'catpart', 'catproduct', 'sldprt', 'sldasm', 'ipt', 'iam', 'vds']);
   async function extract3DStreamsFromPDF(u8, fileName, opts) {
     opts = opts || {};
     const head = latin1(u8, 0, 4);
@@ -337,21 +361,32 @@
         if (is3D || isEF) await take(new Ref(n, o.gen), { container: is3D ? 'stream scan' : 'EmbeddedFile scan', page: null, annot: null, title: '' }, isEF);
       }
     }
-    // embedded files (catalog /EmbeddedFiles name tree + /FileAttachment annotations): offered as downloads
+    // embedded files (catalog /EmbeddedFiles name tree, /FileAttachment annotations, PDF 2.0 /AF associated files): offered as downloads
     const attachments = []; const seenEF = new Set();
     const takeFS = async (fsRef, where) => {
-      const fsd = doc.resolve(fsRef); if (!fsd || typeof fsd !== 'object') return; const ef = doc.resolve(fsd.EF) || {}; const sref = ef.UF || ef.F;
-      if (!(sref instanceof Ref) || seenEF.has(sref.num)) return; seenEF.add(sref.num); const o = doc.getObj(sref.num); if (!o || !o.stream) return;
-      const name = textOf(doc, fsd.UF) || textOf(doc, fsd.F) || ('attachment-' + sref.num);
-      let data = null, error = null; try { data = (await doc.streamData(o, true)).data; } catch (e) { error = e.message; }
+      const fsd = doc.resolve(fsRef); if (!fsd || typeof fsd !== 'object' || fsd instanceof Str) return; // a plain-string file spec embeds nothing
+      const ef = doc.resolve(fsd.EF) || {}; const refs = [ef.UF, ef.F].filter((r, i, a) => r instanceof Ref && a.findIndex((x) => x instanceof Ref && x.num === r.num) === i);
+      if (!refs.length || refs.some((r) => seenEF.has(r.num))) return; for (const r of refs) seenEF.add(r.num);
+      const name = textOf(doc, fsd.UF) || textOf(doc, fsd.F) || ('attachment-' + refs[0].num);
+      // /UF is preferred; when its stream is missing or does not decode, a distinct /F stream is tried before giving up
+      let data = null, error = null, errorName = null, o = null, sref = refs[0];
+      for (const r of refs) { const oo = doc.getObj(r.num);
+        if (!oo || !oo.stream) { if (!error) { error = 'embedded file stream missing (object ' + r.num + ')'; errorName = 'Error'; } continue; }
+        try { data = (await doc.streamData(oo, true)).data; o = oo; sref = r; error = null; errorName = null; break; } catch (e) { if (!o) { o = oo; sref = r; } error = e.message; errorName = (e && e.name) || 'Error'; data = null; } }
       const ext = (/\.([A-Za-z0-9_]+)$/.exec(name) || [, ''])[1].toLowerCase();
-      attachments.push({ name, ext, isCAD: CAD_EXT.has(ext), bytes: data, size: data ? data.length : 0, error, objNum: sref.num, where, description: textOf(doc, fsd.Desc) || '' });
+      const sub = o && o.value && doc.resolve(o.value.Subtype); const mime = sub instanceof Name && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(sub.name) ? sub.name.toLowerCase() : null;
+      const params = o && o.value && doc.resolve(o.value.Params); const declaredSize = params && typeof doc.resolve(params.Size) === 'number' ? doc.resolve(params.Size) : null;
+      attachments.push({ name, ext, isCAD: CAD_EXT.has(ext), bytes: data, size: data ? data.length : 0, error, errorName, mime, declaredSize, objNum: sref.num, where, description: textOf(doc, fsd.Desc) || '' });
     };
+    const takeAF = async (af, where) => { af = doc.resolve(af); if (Array.isArray(af)) for (const f of af) await takeFS(f, where); };
     try {
       const root = doc.resolve(doc.trailer.Root) || {}; const names = doc.resolve(root.Names) || {};
       for (const [, fsRef] of nameTreeValues(doc, names.EmbeddedFiles, [])) await takeFS(fsRef, 'EmbeddedFiles');
-      for (let pi = 0; pi < pages.length; pi++) { const annots = doc.resolve(pages[pi].Annots); if (!Array.isArray(annots)) continue;
-        for (const ar of annots) { const a = doc.resolve(ar); if (a && isName(a.Subtype, 'FileAttachment')) await takeFS(a.FS, 'FileAttachment p' + (pi + 1)); } }
+      await takeAF(root.AF, 'AF catalog');
+      for (let pi = 0; pi < pages.length; pi++) { await takeAF(pages[pi].AF, 'AF p' + (pi + 1)); const annots = doc.resolve(pages[pi].Annots); if (!Array.isArray(annots)) continue;
+        for (const ar of annots) { const a = doc.resolve(ar); if (!a || typeof a !== 'object') continue;
+          if (isName(a.Subtype, 'FileAttachment')) await takeFS(a.FS, 'FileAttachment p' + (pi + 1));
+          await takeAF(a.AF, 'AF annot p' + (pi + 1)); } }
       for (const e of seenObj.values()) if (!e.st && e.meta && e.meta.container === '/RichMedia') { /* non-3D RichMedia assets (e.g. .swf/.js) are not CAD */ }
     } catch (e) { doc.log.push('attachments: ' + e.message); }
     const bySha = new Map();

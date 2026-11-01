@@ -744,6 +744,10 @@ function parsePRC(input, opts){
   // damage (1.6.1): decode failures caught below (unreadable exact geometry / topology context, undecodable tessellation);
   // a stream that yields no body and has damage is reported as damaged by the app (DECODE_ERROR), not as unsupported
   const damage=(opts.damage=[]);
+  // truncation (1.6.2): the header's end-of-file offset is the stream length in every PRC writer seen (19/19 corpus streams);
+  // a shorter stream lost its tail, which usually holds tessellation or exact geometry, so "nothing decoded" is damage, not "unsupported"
+  if(hdr.modelFileEnd>d.length){ const m='truncated: the header declares '+hdr.modelFileEnd+' bytes, the stream has '+d.length;
+    damage.push(m); (opts.warnings=opts.warnings||[]).push('PRC stream is '+m); }
   const fss=hdr.fileStructures.map((fsd,fi)=>{
     const o=fsd.offsets; const fsh=readFSHeader(d,o[0]);
     const ctx={authoringVersion:fsh.authoringVersion||hdr.authoringVersion, curName:null, graphics:{layer:-1,lineStyle:-1,behavior:1}, numFileStructures:hdr.fileStructures.length};

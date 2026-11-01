@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.6.2 (unreleased)
+
+### Added
+- **`PDF3D.saveAttachment(index, opts)`** saves embedded file `lastLoad.attachmentDetails[index]` exactly as embedded
+  (decoded and decrypted), so the `NO_3D` card can offer "Save {name}" for attachment-only PDFs. Delivery as
+  `exportFormat`: with `opts.writable` the bytes are written in ~1 MiB `Uint8Array` pieces with no Blob →
+  `{ status: 'ok', blob: null, delivery: 'picker', size, name, filename, mime }`; without it →
+  `{ status: 'ok', blob, delivery: 'download', size, name, filename, mime }`. Failures → `status: 'error'` with
+  `reasonCode` `'ATTACHMENT_UNREADABLE'` (unreadable entry or no such index) or `'WRITE_FAILED'`, plus `errorName` and
+  `quota`. `opts.signal` gives the cancelled shape; the caller closes or aborts the writable.
+- **`attachmentDetails[].fileName`** (sanitized suggested save name) and **`.mime`** (the EmbeddedFile `/Subtype`, else
+  by extension, else `null`). An entry without bytes always has `error` set.
+- **`lastLoad.trisParsed`** next to `tris` on `'ok'` loads: `tris` is drawn / exported / shown in the HUD (after the
+  B-Rep weld drops degenerate triangles), `trisParsed` is as decoded (what the CAD fit limit `fitSkippedTris` and the
+  large-model banner count). r08 showed 429,271 in the fit line and 427,503 in `lastLoad.tris`; both are now exposed and labelled.
+- **`lastLoad.damaged`** on `'ok'` loads that skipped damaged data (the warning text).
+- **Attachment fixtures** `x06_attachments_mixed.pdf`, `x07_attachments_aesv2.pdf`, `x08_attachments_rc4.pdf`,
+  `x09_attachments_eff_aesv2.pdf` (tools/make-damaged-fixtures.js). Their expect.json entries pin `attachmentDetails`
+  and the source sha256 of every attachment. `test/run.js` saves every attachment of every corpus file both ways and
+  compares the bytes.
+- **Damage fixtures** `x10_u3d_bad_block_header.pdf` (g01's U3D with one block type overwritten → `'ok'`, `damaged`)
+  and `x11_prc_truncated.pdf` (g07's PRC with the last 1% cut → `DECODE_ERROR`).
+
+### Changed
+- **`attachmentDetails[].isCAD`** is true for exactly these extensions, in any case: stp, step, igs, iges, jt, x_t,
+  x_b, sat, sab, 3dxml, stl, prt, catpart, catproduct, sldprt, sldasm, ipt, iam, vds (`3dxml` and `vds` are new;
+  obj, glb/gltf, dwg/dxf, 3dm, asm, par, ifc and the other mesh/drawing formats of 1.6.1's list no longer count).
+- The Attachments panel shows each file under its sanitized `fileName` (it showed the raw `../../evil:name?.sat`), and
+  Save uses that name and the attachment's MIME type. `attachmentDetails[].name` / `attachments` stay the raw PDF names.
+- **Damaged U3D loads what decodes** (Tester's 1.6.1 fuzz): a block that fails to decode is skipped instead of failing the
+  whole stream, and a block header that is not U3D (impossible type, metadata or data past the end) is skipped with a
+  resync to the next valid pair of block headers. g01-zero0.3 / zero0.6 failed completely while a truncated tail loaded
+  partly; now both load 20 of 22 parts with "U3D: damaged data skipped (…)". `x05_u3d_damaged_node_count` changes from
+  `DECODE_ERROR` to `'ok'` (81 parts, `damaged` set) for the same reason; its expect entry is updated.
+
+### Fixed
+- **Encrypted PDFs: strings are decrypted.** Attachment names, descriptions and name-tree keys were ciphertext, so an
+  embedded `.step` got a garbage name and `isCAD: false`. Strings now use the string crypt filter (`/StrF`; RC4/AES
+  by object), except in object streams, the `/Encrypt` dictionary and XRef streams.
+- **`/EFF`-only encryption** (`/StmF /Identity`, `/EFF` AESV2): embedded files were decrypted with RC4 and came out
+  as garbage. They now use the `/EFF` crypt filter (falling back to `/StmF` per ISO 32000), with a 128-bit key for AESV2.
+- **Damaged streams are no longer `UNSUPPORTED_MESH`:** g01-flip1024s1/s2 and g01-zero0.05 (broken U3D block headers)
+  now load partly with a warning; g06-trunc0.999 and g07-trunc0.99 (PRC with the tail cut off, reported as "exact
+  geometry without tessellation") are `DECODE_ERROR` "PRC stream is damaged (truncated: …)": a PRC stream shorter than
+  its header's end-of-file offset is truncated.
+- **No raw JavaScript errors** in `detail`, `message` or warnings: g01-flip1024s3 showed
+  `Offset is outside the bounds of the DataView`. Runtime errors (RangeError, TypeError) from a decoder are reported as
+  damaged data; the raw error goes to the console.
+- **U3D block sizes ≥ 2³¹** made the 4-byte padding negative (`(n + 3) & ~3`), moving the parser backwards.
+- **More embedded files are found:** PDF 2.0 `/AF` arrays (catalog, pages, annotations); `/EF /F` when the `/EF /UF`
+  stream is missing or does not decode; a file spec whose EF stream is missing is listed with an `error` instead
+  of being dropped; a file listed in several places is reported once.
+
 ## 1.6.1 (alpha) — 2026-11-01
 
 ### Fixed

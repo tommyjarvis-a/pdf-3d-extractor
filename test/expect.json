@@ -323,10 +323,298 @@
   }
  },
  "x05_u3d_damaged_node_count.pdf": {
-  "allowZeroTris": true,
   "streams": [
    [
     "U3D",
+    "U3D",
+    1820
+   ]
+  ],
+  "lastLoad": {
+   "status": "ok",
+   "reasonCode": null,
+   "damaged": "U3D: damaged data skipped (block GroupNode at 2956: U3D: read past the end of a 99-byte block at offset 2968 (damaged data); 1 more)"
+  }
+ },
+ "x06_attachments_mixed.pdf": {
+  "allowZeroTris": true,
+  "streams": [],
+  "lastLoad": {
+   "status": "no3d",
+   "reasonCode": "NO_3D",
+   "attachments": [
+    "bracket.step",
+    "notes.txt",
+    "damaged.stp",
+    "Wing Assembly.CATPart",
+    "fallback.igs",
+    "../../evil:name?.sat",
+    "part.x_t",
+    "GAUGE.STL"
+   ],
+   "attachmentDetails": [
+    {
+     "name": "bracket.step",
+     "fileName": "bracket.step",
+     "mime": "model/step",
+     "ext": "step",
+     "isCAD": true,
+     "size": 2760676,
+     "description": "Bracket STEP model",
+     "error": null
+    },
+    {
+     "name": "notes.txt",
+     "fileName": "notes.txt",
+     "mime": "text/plain",
+     "ext": "txt",
+     "isCAD": false,
+     "size": 41,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "damaged.stp",
+     "fileName": "damaged.stp",
+     "mime": "model/step",
+     "ext": "stp",
+     "isCAD": true,
+     "size": 0,
+     "description": "unreadable on purpose",
+     "error": "FlateDecode: inflate failed"
+    },
+    {
+     "name": "Wing Assembly.CATPart",
+     "fileName": "Wing Assembly.CATPart",
+     "mime": null,
+     "ext": "catpart",
+     "isCAD": true,
+     "size": 20000,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "fallback.igs",
+     "fileName": "fallback.igs",
+     "mime": "model/iges",
+     "ext": "igs",
+     "isCAD": true,
+     "size": 44,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "../../evil:name?.sat",
+     "fileName": "evil_name_.sat",
+     "mime": null,
+     "ext": "sat",
+     "isCAD": true,
+     "size": 10,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "part.x_t",
+     "fileName": "part.x_t",
+     "mime": "model/vnd.parasolid.transmit.text",
+     "ext": "x_t",
+     "isCAD": true,
+     "size": 86,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "GAUGE.STL",
+     "fileName": "GAUGE.STL",
+     "mime": "model/stl",
+     "ext": "stl",
+     "isCAD": true,
+     "size": 684,
+     "description": "",
+     "error": null
+    }
+   ]
+  },
+  "attachmentSha256": [
+   "286fd61d1bc52d76f8ad59b468b8f9700808e172dcc96256da9b85f70fc2a317",
+   "0232b49a55cfc671af6e264d83739f276f05b5d7ddba038db772ce25051e346a",
+   null,
+   "3fef289ba555bd641d1eba1bff0fd43e0d42b834adffbdd6909d187ac4a6ba32",
+   "a8c072d25baff37426f17fec7fe6cef431e4be78e453e4774735b135cc7dc840",
+   "de0e43820c4667397fd3c6780b43dd0fb1b926fe80fe0ba17978023a0962fb9d",
+   "67c33e8e1f970d1dfd0f57727ce78e0e162c7d8fc43eb6a3b18ea3ddd24c72ed",
+   "b15fe363c5ea5d975e30c3ddbeb6c5e8724802fdd06167f8cda9ae0e347eb890"
+  ]
+ },
+ "x07_attachments_aesv2.pdf": {
+  "allowZeroTris": true,
+  "streams": [],
+  "lastLoad": {
+   "status": "no3d",
+   "reasonCode": "NO_3D",
+   "attachments": [
+    "bracket.step",
+    "notes.txt",
+    "Wing Assembly.CATPart",
+    "damaged.stp",
+    "GAUGE.STL"
+   ],
+   "attachmentDetails": [
+    {
+     "name": "bracket.step",
+     "fileName": "bracket.step",
+     "mime": "model/step",
+     "ext": "step",
+     "isCAD": true,
+     "size": 134,
+     "description": "Bracket STEP model (encrypted PDF)",
+     "error": null
+    },
+    {
+     "name": "notes.txt",
+     "fileName": "notes.txt",
+     "mime": "text/plain",
+     "ext": "txt",
+     "isCAD": false,
+     "size": 16,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "Wing Assembly.CATPart",
+     "fileName": "Wing Assembly.CATPart",
+     "mime": null,
+     "ext": "catpart",
+     "isCAD": true,
+     "size": 4096,
+     "description": "",
+     "error": null
+    },
+    {
+     "name": "damaged.stp",
+     "fileName": "damaged.stp",
+     "mime": "model/step",
+     "ext": "stp",
+     "isCAD": true,
+     "size": 0,
+     "description": "",
+     "error": "FlateDecode: inflate failed"
+    },
+    {
+     "name": "GAUGE.STL",
+     "fileName": "GAUGE.STL",
+     "mime": "model/stl",
+     "ext": "stl",
+     "isCAD": true,
+     "size": 684,
+     "description": "",
+     "error": null
+    }
+   ]
+  },
+  "attachmentSha256": [
+   "0673ed4b69f8e961a39b3a454b329ac6d19cfee6ff602e6db8fe450e455e3d0d",
+   "d97529928eaa8b26cd80bc40e4a9d311937d18bd4fb80e4f898a31ebf4f506e9",
+   "e1b82d04f3d74731c451b21dd954c78fb1720b05e959973a1276d0c28a20b837",
+   null,
+   "b15fe363c5ea5d975e30c3ddbeb6c5e8724802fdd06167f8cda9ae0e347eb890"
+  ]
+ },
+ "x08_attachments_rc4.pdf": {
+  "allowZeroTris": true,
+  "streams": [],
+  "lastLoad": {
+   "status": "no3d",
+   "reasonCode": "NO_3D",
+   "attachments": [
+    "bracket.step",
+    "notes.txt"
+   ],
+   "attachmentDetails": [
+    {
+     "name": "bracket.step",
+     "fileName": "bracket.step",
+     "mime": "model/step",
+     "ext": "step",
+     "isCAD": true,
+     "size": 134,
+     "description": "RC4 128-bit",
+     "error": null
+    },
+    {
+     "name": "notes.txt",
+     "fileName": "notes.txt",
+     "mime": "text/plain",
+     "ext": "txt",
+     "isCAD": false,
+     "size": 10,
+     "description": "",
+     "error": null
+    }
+   ]
+  },
+  "attachmentSha256": [
+   "0673ed4b69f8e961a39b3a454b329ac6d19cfee6ff602e6db8fe450e455e3d0d",
+   "d11c68f3de3d9711877c0674e91687a1adefd11b3f0d54d4d93d9c9117614cde"
+  ]
+ },
+ "x09_attachments_eff_aesv2.pdf": {
+  "allowZeroTris": true,
+  "streams": [],
+  "lastLoad": {
+   "status": "no3d",
+   "reasonCode": "NO_3D",
+   "attachments": [
+    "bracket.step",
+    "notes.txt"
+   ],
+   "attachmentDetails": [
+    {
+     "name": "bracket.step",
+     "fileName": "bracket.step",
+     "mime": "model/step",
+     "ext": "step",
+     "isCAD": true,
+     "size": 134,
+     "description": "only embedded files are encrypted",
+     "error": null
+    },
+    {
+     "name": "notes.txt",
+     "fileName": "notes.txt",
+     "mime": "text/plain",
+     "ext": "txt",
+     "isCAD": false,
+     "size": 10,
+     "description": "",
+     "error": null
+    }
+   ]
+  },
+  "attachmentSha256": [
+   "0673ed4b69f8e961a39b3a454b329ac6d19cfee6ff602e6db8fe450e455e3d0d",
+   "541f6a8755a66e45a502cdde4cc98e33b44ebfc564ffefc89bb2b7d029ec6b64"
+  ]
+ },
+ "x10_u3d_bad_block_header.pdf": {
+  "streams": [
+   [
+    "U3D",
+    "U3D",
+    4716
+   ]
+  ],
+  "lastLoad": {
+   "status": "ok",
+   "reasonCode": null,
+   "damaged": "U3D: damaged data skipped (block at 4480 is damaged: 0x7a7a7a7a is not a U3D block type; resumed at 4524)"
+  }
+ },
+ "x11_prc_truncated.pdf": {
+  "allowZeroTris": true,
+  "streams": [
+   [
+    "PRC",
     "none",
     0
    ]
