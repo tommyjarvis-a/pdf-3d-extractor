@@ -24,7 +24,11 @@
  * damaged, and lastLoad.trisParsed >= tris on 'ok' loads. Every corpus file that loads 'ok' with lastLoad.damaged set (x05, x10):
  * every PDF3D.exportFormat format (xt, step mesh/fitted/both, stl binary/ascii, obj, iges, raw), download and writable, must
  * carry damaged / summary.damaged = lastLoad.damaged, a <stem>_partial.<ext> filename = suggestedName, the PARTIAL note in
- * STEP FILE_DESCRIPTION and the IGES Start section; with damaged cleared the file is the same minus the note.
+ * STEP FILE_DESCRIPTION, the IGES Start section and the .x_t header (two lines under **PART3;, split at the note's ';',
+ * <= 80 chars, right above **END_OF_HEADER); with damaged cleared the file is the same minus the note.
+ * STEP strings (1.6.2, always): the sample loaded as "O'Brien bracket – ø20 ü.pdf" (and a name with \, an emoji and $&)
+ * exports a mesh STEP whose header is printable ASCII, tokenizes as ISO 10303-21 strings ('' \\ \X2\ \X4\) and decodes
+ * back to the name; PDF3DStepMerge.mergeSTEP / mergeSTEPChunks with that fileName too; a plain-ASCII name is unchanged.
  * Sample (always): exportFormat step / iges / raw results have no damaged key, no _partial name, no PARTIAL note.
  * $NX_PDF (or <corpus>/../nx2512-input.pdf) must give 37,196 triangles.
  */
@@ -99,8 +103,10 @@ async function exportText(window, fmt, extra, writableToo) {
   const w = await window.PDF3D.exportFormat(fmt, { ...extra, writable });
   return { d, dl, w, wb: Buffer.concat(bufs) };
 }
+const xtNoteLines = (note) => note.split(/(?<=;) /).map((l) => (l.endsWith(';') ? l : l + ';'));
 const stripNote = (fmt, buf, note) => {
   let t = buf.toString('latin1');
+  if (fmt === 'xt') return t.replace(xtNoteLines(note).map((l) => l + '\r\n').join(''), '');
   if (fmt === 'step') return t.replace(`,'${note}'),'2;1');`, "),'2;1');");
   const lines = t.split('\n'); const sl = lines.filter((l) => l[72] === 'S'); const keep = lines.filter((l) => !(l[72] === 'S' && l !== sl[0]));
   return keep.join('\n').replace(/^S\s*\d+(G)/m, (m, g) => 'S' + '1'.padStart(7, ' ') + g);
@@ -123,16 +129,54 @@ async function damagedExports(window, label) {
     if (fmt === 'step') check(txt.includes(`FILE_DESCRIPTION(('`) && txt.includes(`,'${note}'),'2;1');`) && /^[\x20-\x7e\n\r]*$/.test(txt.slice(0, txt.indexOf('DATA;'))), `${tag}: STEP header has no PARTIAL FILE_DESCRIPTION (or non-ASCII header)`);
     else if (fmt === 'iges') { const sl = txt.split('\n').filter((l) => l[72] === 'S');
       check(sl.length >= 2 && sl.every((l) => l.length === 80) && sl.slice(1).map((l) => l.slice(0, 72).trim()).join(' ') === note && new RegExp(`^S${String(sl.length).padStart(7, ' ')}G`, 'm').test(txt), `${tag}: IGES Start section has no PARTIAL note (${sl.length} S lines)`); }
-    else check(!txt.includes('PARTIAL:'), `${tag}: ${fmt} contains the PARTIAL note (only STEP / IGES carry it)`);
+    else if (fmt === 'xt') { const hl = txt.slice(0, txt.indexOf('**END_OF_HEADER')).split('\r\n'); const nl = xtNoteLines(note);
+      check(nl.length === 2 && hl[hl.length - 1] === '' && hl.slice(-nl.length - 2, -1).join('\n') === ['**PART3;', ...nl].join('\n') && nl.every((l) => l.length <= 80 && !l.includes('=') && l.endsWith(';'))
+        && nl.join(' ') === note + ';' && txt.split('PARTIAL:').length === 2, `${tag}: .x_t header has no PARTIAL lines right above **END_OF_HEADER`); }
+    else check(!txt.includes('PARTIAL:'), `${tag}: ${fmt} contains the PARTIAL note (only STEP / IGES / XT carry it)`);
     // same export, lastLoad.damaged cleared
     const { damaged: _, ...clean } = ll; P.lastLoad = clean; let u;
     try { u = await exportText(window, fmt, extra, false); } finally { P.lastLoad = ll; }
     check(u.d && !('damaged' in u.d) && !(u.d.summary && 'damaged' in u.d.summary) && u.d.filename === d.filename.replace(/_partial(\.[A-Za-z0-9_]+)$/, '$1') && u.d.suggestedName === u.d.filename,
       `${tag} undamaged: damaged ${u.d && u.d.damaged} filename ${u.d && u.d.filename}`);
-    const same = fmt === 'step' || fmt === 'iges' ? stripNote(fmt, dl, note) === u.dl.toString('latin1') && !u.dl.toString('latin1').includes('PARTIAL:') : u.dl.equals(dl);
+    const same = fmt === 'step' || fmt === 'iges' || fmt === 'xt' ? stripNote(fmt, dl, note) === u.dl.toString('latin1') && !u.dl.toString('latin1').includes('PARTIAL:') : u.dl.equals(dl);
     check(same, `${tag}: damaged file minus the note differs from the undamaged file`);
     console.log(`  ${tag}: ${d.status} ${d.filename} ${dl.length} B, both ways same, damaged/summary.damaged ok, undamaged = minus note ${same ? 'yes' : 'NO'}`);
   }
+}
+
+// ISO 10303-21 string tokens (1.6.2): a quoted string may hold printable ASCII except a lone ' or \, '' , \\ ,
+// \X2\(4 hex)+\X0\ , \X4\(8 hex)+\X0\ ; stepStrings returns the decoded strings of one header record or null if any
+// quote is malformed.
+const STEP_STR = /'((?:[\x20-\x26\x28-\x5b\x5d-\x7e]|''|\\\\|\\X2\\(?:[0-9A-F]{4})+\\X0\\|\\X4\\(?:[0-9A-F]{8})+\\X0\\)*)'/y;
+function stepDecode(body) {
+  return body.replace(/''|\\\\|\\X2\\((?:[0-9A-F]{4})+)\\X0\\|\\X4\\((?:[0-9A-F]{8})+)\\X0\\/g, (m, x2, x4) => m === "''" ? "'" : m === '\\\\' ? '\\'
+    : x2 ? String.fromCharCode(...x2.match(/.{4}/g).map((h) => parseInt(h, 16))) : String.fromCodePoint(...x4.match(/.{8}/g).map((h) => parseInt(h, 16))));
+}
+function stepRecordStrings(header, kw) {
+  const at = header.indexOf(kw + '('); if (at < 0) return null; const out = []; let i = at + kw.length + 1, depth = 1;
+  while (i < header.length && depth > 0) { const c = header[i];
+    if (c === "'") { STEP_STR.lastIndex = i; const m = STEP_STR.exec(header); if (!m) return null; out.push(stepDecode(m[1])); i = STEP_STR.lastIndex; continue; }
+    if (c === '(') depth++; else if (c === ')') depth--; i++; }
+  return header[i] === ';' ? out : null;
+}
+async function stepNameCase(window, api, tmpdir, name) {
+  const src = path.join(ROOT, 'sample-cad-assembly-3d.pdf'); const f = path.join(tmpdir, name); fs.copyFileSync(src, f);
+  await api.loadPDFBuffer(new Uint8Array(fs.readFileSync(f)), name); await api.activateStream(0);
+  const want = name.replace(/\.pdf$/i, '') + '.stp';
+  const { d, dl } = await exportText(window, 'step', undefined, false); const txt = dl ? dl.toString('latin1') : '';
+  const header = txt.slice(0, txt.indexOf('DATA;')); const fn = stepRecordStrings(header, 'FILE_NAME'); const fd = stepRecordStrings(header, 'FILE_DESCRIPTION');
+  check(d && d.status === 'ok' && /^[\x20-\x7e\r\n]*$/.test(header) && fn && fd && fn[0] === want && fn.length === 7, `step name ${JSON.stringify(name)}: mesh STEP header ${fn ? 'FILE_NAME ' + JSON.stringify(fn[0]) : 'does not parse'}`);
+  // every quoted string in DATA must tokenize too (part names)
+  const data = txt.slice(txt.indexOf('DATA;')); let bad = 0; for (let i = 0; i < data.length; i++) if (data[i] === "'") { STEP_STR.lastIndex = i; if (!STEP_STR.exec(data)) { bad++; break; } i = STEP_STR.lastIndex - 1; }
+  check(bad === 0 && /^[\x20-\x7e\r\n]*$/.test(data), `step name ${JSON.stringify(name)}: DATA has a malformed / non-ASCII string`);
+  // fitted / Both go through PDF3DStepMerge with the same fileName
+  const SM = window.PDF3DStepMerge; const tiny = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('x'),'2;1');\nFILE_NAME('x','t',('a'),('o'),'p','s','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\nENDSEC;\nEND-ISO-10303-21;\n";
+  for (const [how, out] of [['mergeSTEP', () => SM.mergeSTEP([tiny, tiny], { fileName: want, description: ['d', want], timeStamp: '2026-11-01T00:00:00' })],
+    ['mergeSTEPChunks', () => [].concat(SM.mergeSTEPChunks([tiny, [tiny]], { fileName: want, description: ['d', want], timeStamp: '2026-11-01T00:00:00' })).join('')]]) {
+    const t = out(); const h = t.slice(0, t.indexOf('DATA;')); const a = stepRecordStrings(h, 'FILE_NAME'); const b = stepRecordStrings(h, 'FILE_DESCRIPTION');
+    check(/^[\x20-\x7e\r\n]*$/.test(h) && a && a[0] === want && b && b[1] === want, `step name ${JSON.stringify(name)}: ${how} header ${a ? JSON.stringify(a[0]) : 'does not parse'}`); }
+  console.log(`  step name ${JSON.stringify(name)}: ${(header.match(/FILE_NAME\('((?:[^']|'')*)'/) || [])[1]}`);
+  return fn && fn[0];
 }
 
 // PDF3D.saveAttachment (1.6.2): every attachment of the loaded PDF, download Blob vs streamed writable, byte for byte
@@ -229,6 +273,19 @@ function syntheticAttachmentPDF(names) {
     for (const fmt of ['step', 'iges', 'raw']) { const { d, dl } = await exportText(window, fmt, undefined, false);
       check(d && dl && !('damaged' in d) && !(d.summary && 'damaged' in d.summary) && !/_partial/.test(d.filename) && d.suggestedName === d.filename && d.filename === window.PDF3D.suggestedFileName(fmt) && !dl.toString('latin1').includes('PARTIAL:'),
         `sample ${fmt}: undamaged export has damaged ${d && d.damaged} / name ${d && d.filename} / suggested ${window.PDF3D.suggestedFileName(fmt)}`); } }
+
+  // 1c. 1.6.2: STEP header strings use ISO 10303-21 encoding ('' \\ \X2\ \X4\); plain ASCII names are unchanged
+  { const tmpdir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pdf3d-stepname-'));
+    try {
+      await stepNameCase(window, api, tmpdir, "O'Brien bracket \u2013 \u00f820 \u00fc.pdf");
+      await stepNameCase(window, api, tmpdir, 'back\\slash \u{1F600} $& $1.pdf');
+      const plain = await stepNameCase(window, api, tmpdir, 'plain-ascii_name 01.pdf');
+      const { dl } = await exportText(window, 'step', undefined, false);
+      check(plain === 'plain-ascii_name 01.stp' && dl.toString('latin1').includes("FILE_NAME('plain-ascii_name 01.stp','2026-10-23T12:00:00',"), 'step name: plain ASCII FILE_NAME changed');
+      const t = window.PDF3DStepMerge.mergeSTEP(["ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('x'),'2;1');\nFILE_NAME('x','t',('a'),('o'),'p','s','');\nFILE_SCHEMA(('S'));\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"], { fileName: "O'Brien \u2013 \u{1F600}\\.stp", timeStamp: 'T' });
+      check(t.includes("FILE_NAME('O''Brien \\X2\\2013\\X0\\ \\X4\\0001F600\\X0\\\\\\.stp','T',"), `step name: mergeSTEP encoding ${(t.match(/FILE_NAME\([^\n]*/) || [])[0]}`);
+    } finally { fs.rmSync(tmpdir, { recursive: true, force: true }); }
+    await decodeFile(api, path.join(ROOT, 'sample-cad-assembly-3d.pdf')); }
 
   // 2. embedded CAD attachment, no 3D annotation
   { const tmp = path.join(require('os').tmpdir(), 'pdf3d-attach-test.pdf'); fs.writeFileSync(tmp, syntheticAttachmentPDF());

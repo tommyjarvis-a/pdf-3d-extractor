@@ -170,8 +170,30 @@ PDF3D.partialNote()  // -> 'PARTIAL: some 3D data in the source PDF could not be
 The file itself carries that note in STEP (mesh, fitted and both) as a second `FILE_DESCRIPTION` string,
 `FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214','PARTIAL: some 3D data in the source PDF could not be read; check against the drawing'),'2;1');`
 (printable ASCII, no apostrophe), and in IGES as extra Start-section lines (72 columns each; the Terminate line counts
-them). Parasolid `.x_t`, STL, OBJ and the raw stream are unchanged. Undamaged loads export byte-identical files, names and
-result fields (apart from the new `suggestedName`). `saveAttachment` results are not affected: embedded files are saved
+them). Parasolid `.x_t` gets it as two free-text lines in the header's `**PART3;` section, right above
+`**END_OF_HEADER` (split at the note's `;` so no header line is longer than the 80 characters NX writes; no `=`, so they
+are not header keys):
+
+```
+**PART3;
+PARTIAL: some 3D data in the source PDF could not be read;
+check against the drawing;
+**END_OF_HEADER*****************************************************************
+```
+
+(each line ends in CR LF like the rest of the header; the size estimate counts the extra 88 bytes). STL, OBJ and the raw
+stream are unchanged. Undamaged loads export byte-identical files, names and result fields (apart from the new
+`suggestedName`).
+
+#### STEP strings (1.6.2)
+
+Every STEP writer (mesh, fitted, Both, the step-merge of fitted + mesh) writes header strings that come from the PDF name
+or its metadata (`FILE_NAME`, `FILE_DESCRIPTION`) and the mesh writer's part names with ISO 10303-21 string encoding:
+`'` → `''`, `\` → `\\`, other characters outside printable ASCII → `\X2\HHHH…\X0\` (UTF-16 code units, consecutive
+characters share one run) or `\X4\HHHHHHHH…\X0\` beyond the BMP. `O'Brien bracket – ø20 ü.pdf` →
+`FILE_NAME('O''Brien bracket \X2\2013\X0\ \X2\00F8\X0\20 \X2\00FC\X0\.stp',…)`. Names in plain printable ASCII
+without `'` or `\` are written unchanged. IGES does not embed the file name (the Global section is fixed text) and the
+`.x_t` `KEY=` is already reduced to `[A-Za-z0-9_.-]`. `saveAttachment` results are not affected: embedded files are saved
 exactly as embedded and do not depend on whether the 3D stream decoded.
 
 ### Saving an embedded file (1.6.2)

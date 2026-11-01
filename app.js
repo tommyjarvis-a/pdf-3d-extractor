@@ -2180,14 +2180,21 @@
     const base = String(fileName || 'part').split(/[\\/]/).pop().replace(/(\.(x_t|xmt_txt|pdf|u3d|prc))+$/i, '');
     return base.replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 64) || 'part';
   }
-  function xtNxHeaderLines(key) {
+  // extra (1.6.2): free-text lines under **PART3; (the PARTIAL note on damaged loads), each <= 80 chars, no '=' (not a key)
+  function xtNxHeaderLines(key, extra) {
     return [
       '**ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz**************************',
       '**PARASOLID !"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~0123456789**************************',
       '**PART1;', 'MC=x86_64;', 'OS=linux;', 'APPL=NX;', 'FORMAT=text;', 'GUISE=transmit;', `KEY=${key};`,
-      '**PART2;', `SCH=${XT_NX_SCHEMA};`, 'USFLD_SIZE=0;', '**PART3;',
+      '**PART2;', `SCH=${XT_NX_SCHEMA};`, 'USFLD_SIZE=0;', '**PART3;', ...(extra || []),
       '**END_OF_HEADER*****************************************************************'
     ];
+  }
+  // 1.6.2: the PARTIAL note as .x_t header lines (split at its ';' so each line is <= 80 chars and ends in ';' like the
+  // other header lines), or [] when lastLoad.damaged is not set (undamaged XT is byte-identical).
+  function xtPartialHeaderLines() {
+    const n = partialNote(); if (!n) return [];
+    return n.split(/(?<=;) /).map((l) => (l.endsWith(';') ? l : l + ';'));
   }
   function xtNxStreamPrefix() {
     const tt = ': TRANSMIT FILE created by modeller version ' + XT_NX_KEY.split('_')[1];
@@ -2260,7 +2267,8 @@
 
     // NX 2512 header (Siemens NX imports exactly this form: verified on screw_parasolid_test.x_t).
     const out = new TextSink(options.stream ? 'stream' : options.blob);
-    for (const l of xtNxHeaderLines(xtKeyName(fileName))) out.push(l + '\r');
+    const xtExtra = xtPartialHeaderLines();
+    for (const l of xtNxHeaderLines(xtKeyName(fileName), xtExtra)) out.push(l + '\r');
     const xs = new XTNxStream(out);
     xs.write(xtNxStreamPrefix());
     const xtStats = { schema: XT_NX_SCHEMA, counts: {}, bodyKinds: [] };
@@ -2449,7 +2457,7 @@
     if (!plan) plan = planBody(false);
 
     // Guard: refuse up front (nothing written) when the file would be too large to save.
-    const estBytes = plan.nIdx * XT_EST_BYTES_PER_NODE;
+    const estBytes = plan.nIdx * XT_EST_BYTES_PER_NODE + xtExtra.reduce((n, l) => n + l.length + 2, 0);   // + the PARTIAL header lines (each + CR LF; 0 when undamaged)
     const maxBytes = options.maxBytes != null ? options.maxBytes : XT_MAX_EST_BYTES;
     // estimateOnly: stop after the counting pre-pass (nothing is written past the header); PDF3D.estimateBytes uses it.
     if (options.estimateOnly) {
@@ -2775,6 +2783,20 @@
   // -------------------------------------------------------------------------
   // 7. STEP AP214 (ISO-10303-21 .stp) Solid & Open-Shell Surface B-Rep Exporter
   // -------------------------------------------------------------------------
+  // 1.6.2: ISO 10303-21 string contents (no surrounding quotes). Printable ASCII passes through, except ' -> '' and
+  // \ -> \\; runs of other BMP code points (incl. control chars) -> \X2\HHHH...\X0\, beyond the BMP -> \X4\HHHHHHHH...\X0\.
+  // Plain-ASCII names come out unchanged (byte-identical files); same encoder as recon/step-merge.js.
+  function stepEncode(s) {
+    let out = '', mode = 0;   // 0 = ASCII, 2 = inside \X2\, 4 = inside \X4\
+    for (const ch of String(s)) {
+      const c = ch.codePointAt(0);
+      const m = c >= 0x20 && c <= 0x7e ? 0 : c > 0xffff ? 4 : 2;
+      if (m !== mode) { if (mode) out += '\\X0\\'; if (m) out += m === 2 ? '\\X2\\' : '\\X4\\'; mode = m; }
+      if (m === 0) out += ch === "'" ? "''" : ch === '\\' ? '\\\\' : ch;
+      else out += c.toString(16).toUpperCase().padStart(m === 2 ? 4 : 8, '0');
+    }
+    return mode ? out + '\\X0\\' : out;
+  }
   function buildSTEPAP214(parts, options = {}) { return runWriter(stepAP214Writer(parts, options)); }
   function* stepAP214Writer(parts, options = {}) {
     const visibleParts = exportPartList(parts, options);
@@ -2788,9 +2810,9 @@
     out.push('ISO-10303-21;');
     out.push('HEADER;');
     const partial = partialNote();   // 1.6.2: damaged load -> second FILE_DESCRIPTION string (ASCII, no quotes); else byte-identical
-    out.push(partial ? `FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214','${partial.replace(/'/g, "''")}'),'2;1');`
+    out.push(partial ? `FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214','${stepEncode(partial)}'),'2;1');`
       : "FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');");
-    out.push(`FILE_NAME('${(state.fileName || 'assembly').replace(/\.pdf$/i, '')}.stp','2026-10-23T12:00:00',('Steven Moran'),('CAD Engineering Workbench'),'3D PDF Geometry Extractor','1.0','');`);
+    out.push(`FILE_NAME('${stepEncode((state.fileName || 'assembly').replace(/\.pdf$/i, '') + '.stp')}','2026-10-23T12:00:00',('Steven Moran'),('CAD Engineering Workbench'),'3D PDF Geometry Extractor','1.0','');`);
     out.push("FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));");
     out.push('ENDSEC;');
     out.push('DATA;');
@@ -2920,13 +2942,13 @@
       if (advFaceIds.length === 0) continue;
 
       if (isPartSolid) {
-        const shellId = add(`CLOSED_SHELL('${part.name}_ClosedShell',(${advFaceIds.join(',')}))`);
-        const msbId = add(`MANIFOLD_SOLID_BREP('${part.name}',#${shellId})`);
+        const shellId = add(`CLOSED_SHELL('${stepEncode(part.name + '_ClosedShell')}',(${advFaceIds.join(',')}))`);
+        const msbId = add(`MANIFOLD_SOLID_BREP('${stepEncode(part.name)}',#${shellId})`);
         repItems.push(msbId);
       } else {
         hasOpenShell = true;
-        const openShellId = add(`OPEN_SHELL('${part.name}_OpenShell',(${advFaceIds.join(',')}))`);
-        const sbsmId = add(`SHELL_BASED_SURFACE_MODEL('${part.name}',(#${openShellId}))`);
+        const openShellId = add(`OPEN_SHELL('${stepEncode(part.name + '_OpenShell')}',(${advFaceIds.join(',')}))`);
+        const sbsmId = add(`SHELL_BASED_SURFACE_MODEL('${stepEncode(part.name)}',(#${openShellId}))`);
         repItems.push(sbsmId);
       }
     }

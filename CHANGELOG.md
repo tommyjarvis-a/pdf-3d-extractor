@@ -22,7 +22,9 @@
   (`part_partial.x_t`). New **`result.suggestedName`** (= `filename`), **`PDF3D.suggestedFileName(format, opts)`** (the
   default name before exporting, `_partial` while damaged) and **`PDF3D.partialNote()`**. STEP (mesh, fitted, both) gets
   the second `FILE_DESCRIPTION` string `'PARTIAL: some 3D data in the source PDF could not be read; check against the
-  drawing'`, IGES the same note as extra Start-section lines; XT, STL, OBJ and raw are unchanged. Undamaged exports are
+  drawing'`, IGES the same note as extra Start-section lines, Parasolid `.x_t` two free-text header lines under
+  `**PART3;` right above `**END_OF_HEADER` (split at the `;`, each ≤ 80 characters; the size estimate counts them); STL,
+  OBJ and raw are unchanged. Undamaged exports are
   byte-identical to before. `saveAttachment` is unaffected (embedded files do not depend on the 3D decode).
   `test/run.js` checks every format both ways on x05 and x10, and that the same export with `damaged` cleared differs
   only by the note.
@@ -46,6 +48,14 @@
   `DECODE_ERROR` to `'ok'` (81 parts, `damaged` set) for the same reason; its expect entry is updated.
 
 ### Fixed
+- **STEP strings are encoded per ISO 10303-21** in every STEP writer (mesh, fitted, Both, step-merge): `FILE_NAME`,
+  `FILE_DESCRIPTION` and the mesh writer's part names double `'` and `\` and write other non-printable-ASCII characters
+  as `\X2\…\X0\` (`\X4\…\X0\` beyond the BMP). A PDF named `O'Brien bracket – ø20 ü.pdf` produced an unterminated
+  string in `FILE_NAME`, and PRC part names holding a raw 0x01 or a LaTeX `\frac` (g02, g06, g10) wrote control characters
+  or bad escapes into `DATA`. step-merge also no longer expands `$&` / `$'` in a file name (`String.replace` pattern).
+  Plain-ASCII names are unchanged (byte-identical files). `test/run.js` loads the sample as `O'Brien bracket – ø20 ü.pdf`
+  and as `back\slash 😀 $& $1.pdf`, parses the STEP header strings and decodes them back to the name (mesh, `mergeSTEP`,
+  `mergeSTEPChunks`).
 - **Encrypted PDFs: strings are decrypted.** Attachment names, descriptions and name-tree keys were ciphertext, so an
   embedded `.step` got a garbage name and `isCAD: false`. Strings now use the string crypt filter (`/StrF`; RC4/AES
   by object), except in object streams, the `/Encrypt` dictionary and XRef streams.

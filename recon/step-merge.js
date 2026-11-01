@@ -33,14 +33,28 @@
     out.push(text.slice(seg, dataEnd));
     return { header, data: out.join(''), maxId };
   }
+  // 1.6.2: ISO 10303-21 string contents (no surrounding quotes). Printable ASCII passes through, except ' -> '' and
+  // \ -> \\; runs of other BMP code points (incl. control chars) -> \X2\HHHH...\X0\, beyond the BMP -> \X4\HHHHHHHH...\X0\.
+  // Plain-ASCII names come out unchanged (byte-identical files); same encoder as app.js stepEncode.
+  function stepEncode(s) {
+    let out = '', mode = 0;   // 0 = ASCII, 2 = inside \X2\, 4 = inside \X4\
+    for (const ch of String(s)) {
+      const c = ch.codePointAt(0);
+      const m = c >= 0x20 && c <= 0x7e ? 0 : c > 0xffff ? 4 : 2;
+      if (m !== mode) { if (mode) out += '\\X0\\'; if (m) out += m === 2 ? '\\X2\\' : '\\X4\\'; mode = m; }
+      if (m === 0) out += ch === "'" ? "''" : ch === '\\' ? '\\\\' : ch;
+      else out += c.toString(16).toUpperCase().padStart(m === 2 ? 4 : 8, '0');
+    }
+    return mode ? out + '\\X0\\' : out;
+  }
+  const q = (s) => "'" + stepEncode(s) + "'";
   // texts: array of STEP strings. opts.fileName / opts.description (string or array of strings) replace FILE_NAME / FILE_DESCRIPTION in the first header.
   function mergeSTEP(texts, opts) {
     opts = opts || {}; let offset = 0, header = null; const parts = [];
     for (const t of texts) { if (!t) continue; const s = scan(t, offset); if (header === null) header = s.header; parts.push(s.data.replace(/^\s*\n?/, '').replace(/\s*$/, '\n')); offset = Math.max(offset, s.maxId); }
     if (header === null) throw new Error('STEP merge: no input');
-    const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${[].concat(opts.description).map(q).join(',')}),'2;1');`);
-    if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
+    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, () => `FILE_DESCRIPTION((${[].concat(opts.description).map(q).join(',')}),'2;1');`);
+    if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, () => `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
     return header.replace(/\s*$/, '\n') + 'DATA;\n' + parts.join('') + 'ENDSEC;\nEND-ISO-10303-21;\n';
   }
   // Chunked variant for big inputs (the app's buildSTEPAP214 returns an array of line-aligned string chunks above
@@ -87,9 +101,8 @@
     out.push(text.slice(seg)); return { text: out.join(''), maxId, inStr };
   }
   function fixHeader(header, opts) {
-    const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${[].concat(opts.description).map(q).join(',')}),'2;1');`);
-    if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
+    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, () => `FILE_DESCRIPTION((${[].concat(opts.description).map(q).join(',')}),'2;1');`);
+    if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, () => `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
     return header;
   }
   const api = { mergeSTEP, mergeSTEPChunks, scan };
