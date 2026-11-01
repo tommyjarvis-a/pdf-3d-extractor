@@ -73,7 +73,7 @@ options, then **Save**. Advanced mode keeps its export bar unchanged.
   (**Save mesh STEP instead**, the default) or left out (**Leave unfitted parts out**).
 - **Saving:** Chrome and Edge open the system Save dialog first; cancelling it does nothing. Safari and Firefox show a
   file-name field and save to the Downloads folder.
-- **Parasolid:** listed as "Faceted solid, flat faces"; one merged faceted body, no body or mode choice.
+- **Parasolid:** listed as "Faceted body, flat faces"; one merged faceted body, no body or mode choice.
 - **Result card:** every export ends with a card: saved, partly fitted (one line per part), fell back to mesh, nothing saved, cancelled or failed.
   A Parasolid sheet body or open model gets an amber "Parasolid sheet body exported (open model)" card; a model with no
   faces gets "Nothing to export" and no file is saved.
@@ -98,8 +98,8 @@ const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', pa
 
 // Delivery. exportFormat never downloads or opens a dialog itself:
 //   no opts.writable -> r.blob, r.delivery = 'download', r.size (the caller saves the Blob)
-//   opts.writable    -> a FileSystemWritableFileStream (showSaveFilePicker() then handle.createWritable()): the file is written
-//                       into it part by part (~8 MB writes, never one large Blob) -> r.blob = null, r.delivery = 'picker', r.size.
+//   opts.writable    -> a FileSystemWritableFileStream (showSaveFilePicker() then handle.createWritable()): the file is streamed
+//                       into it as it is made (~1 MB Uint8Array writes, no Blob at all) -> r.blob = null, r.delivery = 'picker', r.size.
 //                       A failed write -> r.status = 'error', r.reasonCode = 'WRITE_FAILED'. exportFormat never calls close()
 //                       or abort(): call close() when r.delivery === 'picker' && r.status is not 'error'/'skipped'/'cancelled',
 //                       otherwise abort() (and remove the empty file if you can).

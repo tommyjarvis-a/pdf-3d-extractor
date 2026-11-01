@@ -25,7 +25,7 @@ PDF3D.canExportCadSurfaces(partIds)
   // sync, cheap, never loads the kernel
   // -> { ok, reason: null|'unavailable'|'too_large'|'no_parts', message,
   //      estimate: { tris, kernelBytes, kernelCached, mode: 'fit'|'mesh_only' } }
-PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal })
+PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal, noBlob })   // noBlob: _parts (STEP text chunks) instead of a Blob
   // -> Promise<{ blob, filename, status: 'solid'|'shell'|'mesh_only'|'skipped'|'cancelled', reason, reasonCode,
   //              summary: { faces, byType, closed, valid, unfitFaces, meshFallback, timings, tris, parts, wasmHeapPeak } }>
 onProgress({ stage: 'kernel'|'segment'|'fit'|'build'|'validate'|'write', pct, done, total, bytes, totalBytes, label })

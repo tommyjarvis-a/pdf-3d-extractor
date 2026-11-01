@@ -485,21 +485,34 @@
       if (handle && (err || writeFailed(res))) throw new SaveError(err);
       out = describe(f, opts, res, err);
       if (out.blob) {
-        if (handle) {
-          const w = run.writable || await handle.createWritable();
+        // the file goes where the flow actually put it: into the picked file (card "Saved as"), or, only when no
+        // writable could be opened on the picked file, into Downloads ("Sent to Downloads as"). result.delivery is not
+        // used for the wording: a 'download' result with a picker just means the writer handed back a blob, which we write.
+        let w = run.writable, dl = !handle;
+        if (handle && !w) {
+          // first createWritable() failed (or no hook): try once more; if that fails too and we hold the whole file,
+          // download it and drop the empty file the picker left behind
+          try { w = await handle.createWritable(); } catch (e) { if (out.blob === STREAMED) throw e; w = null; }
           run.writable = w;
+          if (!w) { cleanup = await discard(handle, run); dl = true; }
+        }
+        if (w) {
           if (out.blob !== STREAMED) await w.write(out.blob);    // writer returned a blob (old hook / fallback): we write it
           await w.close();                                       // green only once close() has resolved
           run.writable = null;
         } else download(out.blob, name);
         out.saved = name;
-        // downloads can't be confirmed; Chrome silently cancels very large blob downloads (0-byte file)
-        const dl = !handle || (res && res.delivery === 'download');
         if (dl) out.fileVerb = 'Sent to Downloads as';
-        const bytes = dl && out.tone === 'ok' ? bytesOf(res, out.blob) : 0;
+        // downloads can't be confirmed; Chrome silently cancels very large blob downloads (0-byte file). Any card that
+        // went to Downloads: green becomes the amber check card; an amber card keeps its title and lines and gets the
+        // check as its first line. Never on picker saves.
+        const bytes = dl ? bytesOf(res, out.blob) : 0;
         if (bytes > BIG) {
-          out = Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished',
-            lines: ['Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If it\u2019s missing or 0 bytes in Downloads, try Chrome or Edge, or hide some parts.', f.id === 'xt' ? XT_UNITS : null] });
+          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If it\u2019s missing or 0 bytes in Downloads, try Chrome or Edge, or hide some parts.';
+          out = out.tone === 'ok'
+            ? Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished', lines: [chk, f.id === 'xt' ? XT_UNITS : null] })
+            : Object.assign({}, out, { lines: ['Check that the download finished. ' + chk].concat(out.lines || []) });
+          out.check = 'download';
         }
       } else if (handle) {
         cleanup = await discard(handle, run);                    // no file (0 faces, too large, cancelled, engine error)
@@ -512,6 +525,7 @@
     out.format = f.id;
     finish(out, t);
     ui.result.dataset.cleanup = cleanup;                         // 'removed' | 'truncated' | 'failed' | '' (nothing to clean)
+    ui.result.dataset.check = out.check || '';                   // 'download': big download, check card or check line
   }
   // marker blob: the writer streamed the file into opts.writable itself (result { blob: null, delivery: 'picker' })
   const STREAMED = { streamed: true, size: 0 };
@@ -757,7 +771,7 @@
     const meshLine = allMesh ? (n > 1 ? 'Every part\u2019s mesh body is in the file too.' : 'The mesh body is included too.') : null;
     if (fit === 0) {
       return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
-        lines: ['No part could be fitted' + (why ? ' (' + why + ')' : '') + ', so the file has only mesh bodies.'] };
+        lines: ['No part could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
     }
     if (solids === n) {
       return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
@@ -830,7 +844,7 @@
       }
       if (fit === 0) {
         return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
-          lines: ['No part could be fitted' + (why ? ' (' + why + ')' : '') + ', so the mesh STEP was saved instead.'] };
+          lines: ['No part could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
       }
       const tail = [mesh ? mesh + ' saved as mesh' : null, out ? out + ' left out' : null].filter(Boolean).join(', ');
       return { tone: 'warn', status: 'partial', blob, parts: list, title: 'Partly fitted: ' + fit + ' of ' + n + ' parts fitted' + (tail ? ', ' + tail : ''),

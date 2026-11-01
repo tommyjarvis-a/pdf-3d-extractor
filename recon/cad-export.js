@@ -3,7 +3,9 @@
  *
  *   PDF3D.canExportCadSurfaces(partIds)  (sync, cheap, never loads the kernel)
  *     -> { ok, reason: null|'unavailable'|'too_large'|'no_parts', message, estimate: { tris, kernelBytes, kernelCached, mode } }
- *   PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal })
+ *   PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal, noBlob })
+ *     noBlob: no Blob is made; the file is returned as _parts (STEP text chunks, strings) + _type with blob: null
+ *     (PDF3D.exportFormat writing into a FileSystemWritableFileStream)
  *     -> Promise<{ blob, filename, status: 'solid'|'shell'|'mesh_only'|'skipped'|'cancelled', reason, reasonCode,
  *                  summary: { faces, byType, closed, valid, unfitFaces, meshFallback, timings, tris, parts, wasmHeapPeak } }>
  *   partIds: indices into CAD3DExtractor.getState().parts; null/undefined = all visible parts.
@@ -15,7 +17,9 @@
   // the single-file build inlines this script (no src): no worker/kernel files next to it -> 'unavailable'
   const SRC = cs && cs.src ? cs.src : null;
   const VER = SRC ? (new URL(SRC).searchParams.get('v') || '') : '';
-  const WORKER_URL = SRC ? new URL('cad-worker.js' + (VER ? '?v=' + encodeURIComponent(VER) : ''), SRC).href : null;
+  // cad-worker.js has its own cache key: bump WORKER_REV when the worker changes within a release
+  const WORKER_REV = '2';
+  const WORKER_URL = SRC ? new URL('cad-worker.js?v=' + encodeURIComponent((VER || '0') + '-w' + WORKER_REV), SRC).href : null;
 
   const LIMITS = {
     maxTris: 1000000,    // above: 'too_large' (skipped) - the WASM heap would run out (2-4 GB limit)
@@ -108,6 +112,17 @@
     return { ok: true, reason: null, message: sel.why || '', estimate };
   }
 
+  // UTF-8 byte length of a string (lone surrogates count 3, as TextEncoder writes U+FFFD)
+  function utf8Length(str) {
+    let n = 0;
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      if (c < 0x80) n += 1; else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length && (str.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
   const zeroTypes = () => ({ plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, revolution: 0, bspline: 0 });
   let running = false;
 
@@ -171,11 +186,15 @@
       const t = performance.now();
       const fittedText = wres && wres.fittedStep ? new TextDecoder().decode(wres.fittedStep) : null;
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
-      const blob = new Blob(chunks, { type: 'application/step' });
+      let size = 0;
+      if (o.noBlob) for (const c of chunks) size += utf8Length(c);
+      const blob = o.noBlob ? null : new Blob(chunks, { type: 'application/step' });
+      if (blob) size = blob.size;
       timings.write = Math.round(performance.now() - t) + (timings.meshWrite || 0) + ((wres && wres.timings.writeFitted) || 0);
       timings.total = Math.round(performance.now() - T0);
-      emit({ stage: 'write', pct: 100, label: 'Done', bytes: blob.size, totalBytes: blob.size });
+      emit({ stage: 'write', pct: 100, label: 'Done', bytes: size, totalBytes: size });
       if (signal && signal.aborted) return cancelled();
+      if (!blob) return { blob: null, _parts: chunks, _type: 'application/step', size, filename, status, reason, reasonCode, summary: summarize(parts, wres, sel, !fittedOnly, timings) };
       return { blob, filename, status, reason, reasonCode, summary: summarize(parts, wres, sel, !fittedOnly, timings) };
     } finally { running = false; }
   }

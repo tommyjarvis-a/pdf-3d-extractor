@@ -13,7 +13,7 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
     with **Leave unfitted parts out**.
   - **Save dialog:** Chrome and Edge ask where to save before the export runs (cancel = nothing happens). Safari and
     Firefox show a file-name field and save to Downloads.
-  - **Parasolid:** listed as *Faceted solid, flat faces*, with no body or mode choice (one merged faceted body).
+  - **Parasolid:** listed as *Faceted body, flat faces*, with no body or mode choice (one merged faceted body).
   - **Result card after every export:** saved, partly fitted (one line per part with its reason), fell back to the mesh
     STEP, nothing saved, cancelled, or failed. A Parasolid file that is a sheet body or has open edges gets an amber
     "Parasolid sheet body exported (open model)" card. If there are no faces, the card says "Nothing to export" and no
@@ -41,11 +41,18 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   big-file warnings. For Parasolid it runs the writer's counting pre-pass only (XT nodes × 92 bytes, the figure behind
   `XT_TOO_LARGE`) and returns the estimated size in bytes as a number; other formats, or nothing to export, return `null`.
 - **`exportFormat(format, {writable})`**: given a `FileSystemWritableFileStream` (from the save dialog), the file is
-  written into it part by part (about 8 MB per write) and no single large Blob is built, so very large Parasolid files
-  (r08, 554 MB) save through the dialog. The result is `{blob: null, delivery: 'picker', size}`. A failed write returns
+  streamed into it while it is being made: every writer (Parasolid, STEP, STL, OBJ, IGES; raw and fitted STEP too)
+  hands over ~1 MB pieces, each UTF-8 encoded and awaited with `writable.write(Uint8Array)` before the writer goes on.
+  No Blob is created or read back on this path, so only a few MB are buffered and very large Parasolid files (r08,
+  554 MB, which Chrome could not hold as Blob parts) save through the dialog. The bytes are the same as the download. The result is `{blob: null, delivery: 'picker', size}`. A failed write returns
   `status: 'error'`, `reasonCode: 'WRITE_FAILED'`. `exportFormat` never calls `close()` or `abort()`; the caller does.
   Without `writable` the result is the Blob as before, now with `delivery: 'download'` and `size`. This applies to every
   format, including fitted STEP.
+- `recon/cad-worker.js` is loaded with its own cache key (`?v=1.6.0-w2`), so a browser never runs a cached older worker.
+- `test/run.js`: a corpus file with no `test/expect.json` entry, or one that decodes to 0 triangles (unless its entry
+  has `"allowZeroTris": true`), fails; an empty corpus dir fails; without a corpus the last line says that only the
+  built-in checks ran (no `ALL OK`). `--exports` checks that the writable path gives the same bytes as the download for
+  every format and creates no Blob; `--identity` repeats that on every corpus file.
 - `exportFormat('step', {body: 'fitted' | 'both'})` in a browser without Web Workers or WebAssembly
   (`cadSurfacesReason: 'browser_unsupported'`) returns the mesh STEP with `status: 'mesh_only'`,
   `reasonCode: 'browser_unsupported'` (per part too); with `onNoFit: 'omit'` it is skipped with that code.
@@ -62,6 +69,11 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   It says "Parasolid download started: screw.x_t". Above about 300 MB it adds: "This file is about 1.1 GB. Chrome can
   cancel downloads this large without a message; if it isn't in your Downloads, hide some parts or use Reduce detail
   and export again."
+- Export card (Designer's `export-flow.js`, 1dbed0a): after a save-dialog file that needed a second try to open, the
+  card says "Saved as" (it was "Sent to Downloads as"); only a real fallback to Downloads says "Sent to Downloads as",
+  and the empty picked file is then removed. Every downloaded file over about 300 MB gets the size check, including
+  amber cards (as their first line); saves through the dialog never do. A part that could not be fitted gives its
+  reason as its own sentence, without nested parentheses.
 - Sizes under 1 GB in Parasolid messages are shown in MB (was "0.0 GB").
 - The page title lists Parasolid .x_t.
 

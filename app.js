@@ -2019,13 +2019,24 @@
   // line-aligned chunks (or Blob parts in the browser), so no exporter ever holds a giant lines[] array.
   // result() == lines.join('\n') exactly: a single string below TEXT_SINGLE_LIMIT, else a chunk array.
   // -------------------------------------------------------------------------
-  const SINK_FLUSH = 1 << 23;
+  // Stream mode (TextSink('stream'), used by PDF3D.exportFormat with opts.writable): ~1 Mi-char string chunks, never
+  // Blobs; the writer generators hand them out at their checkpoints (`if (out.pending) yield out.take()`) and the caller
+  // encodes and writes each one before the writer continues, so only about one chunk is held at a time.
+  const SINK_FLUSH = 1 << 23, SINK_STREAM_FLUSH = 1 << 20;
   class TextSink {
-    constructor(blob) { this.buf = []; this.bufLen = 0; this.chunks = []; this.total = 0; this.blob = !!blob && typeof Blob !== 'undefined'; this.lines = 0; }
+    constructor(mode) {
+      this.buf = []; this.bufLen = 0; this.chunks = []; this.total = 0; this.lines = 0;
+      this.stream = mode === 'stream';
+      this.blob = !this.stream && !!mode && typeof Blob !== 'undefined';
+      this.limit = this.stream ? SINK_STREAM_FLUSH : SINK_FLUSH;
+    }
     push(line) {
       this.buf.push(line); this.bufLen += line.length + 1; this.lines++;
-      if (this.bufLen >= SINK_FLUSH) this._flush(true);
+      if (this.bufLen >= this.limit) this._flush(true);
     }
+    // stream mode: flushed chunks are waiting to be written
+    get pending() { return this.stream && this.chunks.length > 0; }
+    take() { const c = this.chunks; this.chunks = []; return c; }
     // keepLast: retain the last line so result() can omit the final '\n' without touching chunks
     _flush(keepLast) {
       const n = keepLast ? this.buf.length - 1 : this.buf.length;
@@ -2050,13 +2061,15 @@
       this.buf = []; this.bufLen = 0;
       const total = this.total + last.length;
       const chunks = this.chunks; this.chunks = []; this.total = 0;
-      if (this.blob) { chunks.push(last); return chunks; }
+      if (this.blob || this.stream) { chunks.push(last); return chunks; }
       if (total < TEXT_SINGLE_LIMIT) { chunks.push(last); return chunks.length === 1 ? chunks[0] : chunks.join(''); }
       if (last.length) chunks.push(last);
       else if (chunks.length) chunks[chunks.length - 1] = chunks[chunks.length - 1].slice(0, -1);
       return chunks;
     }
   }
+  // Runs a writer generator to the end (its checkpoints yield nothing outside stream mode) and returns its result.
+  function runWriter(gen) { let r; do { r = gen.next(); } while (!r.done); return r.value; }
   // Parts to export: visible ones, optionally replaced by a reduced-detail copy (state.exportDetail < 1).
   function exportPartList(parts, options) {
     const detail = options && options.detail != null ? options.detail : (state.exportDetail || 1);
@@ -2165,7 +2178,10 @@
     end() { if (this.pendFmt) { this.put(this.pendIdx, this.type, this.pendFmt(this.pendPrev, 0)); this.pendFmt = null; } }
   }
 
-  function buildParasolidXT(parts, options = {}) {
+  function buildParasolidXT(parts, options = {}) { return runWriter(parasolidXTWriter(parts, options)); }
+  // options.stream: write into a stream-mode TextSink and yield its chunks (see TextSink). options.stats is filled with the
+  // summary right after the counting pass (before any record is written) and again, with counts, at the end.
+  function* parasolidXTWriter(parts, options = {}) {
     const visibleParts = exportPartList(parts, options);
     const brepMode = options.brepMode || state.brepMode || 'merged';
     const useMerged = brepMode !== 'faceted';
@@ -2176,7 +2192,7 @@
     const fileName = options.fileName || state.fileName || 'assembly';
 
     // NX 2512 header (Siemens NX imports exactly this form: verified on screw_parasolid_test.x_t).
-    const out = new TextSink(options.blob);
+    const out = new TextSink(options.stream ? 'stream' : options.blob);
     for (const l of xtNxHeaderLines(xtKeyName(fileName))) out.push(l + '\r');
     const xs = new XTNxStream(out);
     xs.write(xtNxStreamPrefix());
@@ -2380,6 +2396,11 @@
       throw err;
     }
 
+    if (options.stats && typeof options.stats === 'object') {
+      Object.assign(options.stats, { schema: XT_NX_SCHEMA, faces: plan.faces, bodies: plan.faces ? 1 : 0, bodyType: isSolidBody ? 'solid' : 'sheet',
+        sewn: isSolidBody, openEdges: isSolidBody ? 0 : plan.edges, viewerFaces: plan.mergedFaces, splitFaces: plan.splitFaces,
+        splitTris: plan.splitInto, estimatedBytes: estBytes });
+    }
     const bodyIdx = 1, regVoidIdx = 2;
     const bodyTypeCode = isSolidBody ? 1 : 3;
     const countType = (t) => { xtStats.counts[t] = (xtStats.counts[t] || 0) + 1; };
@@ -2406,7 +2427,7 @@
 
     // Write one part's records in index order. Entity lists are each in ascending index order.
     const K_FACE = 1, K_LOOP = 2, K_FIN = 3, K_EDGE = 4, K_VERT = 5, K_PLANE = 6, K_LINE = 7, K_POINT = 8, K_SHELL = 9, K_LUMP = 10;
-    function writePart(info, ents) {
+    function* writePart(info, ents) {
       const n = info.nIdx, base = info.start;
       const kind = new Uint8Array(n), ref = new Int32Array(n);
       const mark = (list, k, key) => { for (let i = 0; i < list.length; i++) { const j = list[i][key] - base; kind[j] = k; ref[j] = i; } };
@@ -2419,6 +2440,7 @@
       const prevOf = (list, i, key, t) => (i > 0 ? list[i - 1][key] : last[t]);
       const nextOf = (list, i, key, t) => (i + 1 < list.length ? list[i + 1][key] : info.next[t]);
       for (let j = 0; j < n; j++) {
+        if (out.pending) yield out.take();
         const i = ref[j], idx = base + j;
         switch (kind[j]) {
           case K_FACE: { const f = ents.faces[i];
@@ -2617,7 +2639,7 @@
         }
       }
       if (nextIdx !== info.start + info.nIdx || ents.faces.length !== info.faces) throw new Error('XT writer: index plan mismatch');
-      writePart(info, ents);
+      yield* writePart(info, ents);
     }
     planCache = null;
     if (nodeIdCounter !== highestNodeId) throw new Error('XT writer: node id plan mismatch');
@@ -2686,7 +2708,8 @@
   // -------------------------------------------------------------------------
   // 7. STEP AP214 (ISO-10303-21 .stp) Solid & Open-Shell Surface B-Rep Exporter
   // -------------------------------------------------------------------------
-  function buildSTEPAP214(parts, options = {}) {
+  function buildSTEPAP214(parts, options = {}) { return runWriter(stepAP214Writer(parts, options)); }
+  function* stepAP214Writer(parts, options = {}) {
     const visibleParts = exportPartList(parts, options);
     const brepMode = options.brepMode || state.brepMode || 'merged';
     const useMerged = brepMode !== 'faceted';
@@ -2694,7 +2717,7 @@
     const units = options.units || state.units || 'mm';
     const unitScale = getScaleFromMM(units);
 
-    const out = new TextSink(options.blob);
+    const out = new TextSink(options.stream ? 'stream' : options.blob);
     out.push('ISO-10303-21;');
     out.push('HEADER;');
     out.push("FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');");
@@ -2791,6 +2814,7 @@
       const advFaceIds = [];
 
       for (const sf of sourceFaces) {
+        if (out.pending) yield out.take();
         const bounds = [];
         for (let li = 0; li < sf.loops.length; li++) {
           const loop = sf.loops[li];
@@ -2895,15 +2919,55 @@
     return new Uint8Array(buf);
   }
 
-  function buildASCIISTL(parts, units = 'mm', options = {}) {
+  // Binary STL for the writable path: the same bytes as buildBinarySTL, yielded as ~1 MB Uint8Array pieces.
+  function* binarySTLWriter(parts, units = 'mm', options = {}) {
     const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
-    const out = new TextSink(options.blob);
+    let totalTris = 0;
+    for (const p of visibleParts) totalTris += p.brep.nt;
+    const head = new Uint8Array(84); const hv = new DataView(head.buffer);
+    const hdr = `3D PDF CAD Extractor Binary STL (${units}) - ${visibleParts.length} solids`;
+    for (let i = 0; i < 80; i++) hv.setUint8(i, i < hdr.length ? hdr.charCodeAt(i) : 32);
+    hv.setUint32(80, totalTris, true);
+    yield [head];
+    const PER = 20000;   // triangles per piece (50 B each)
+    let buf = new ArrayBuffer(PER * 50), dv = new DataView(buf), offset = 0;
+    const n = [0, 0, 0];
+    for (const p of visibleParts) {
+      const { vx, tv, nt } = p.brep;
+      for (let t = 0; t < nt; t++) {
+        if (offset === PER * 50) { yield [new Uint8Array(buf)]; buf = new ArrayBuffer(PER * 50); dv = new DataView(buf); offset = 0; }
+        const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
+        triNormalInto(vx, a, b, c, n);
+        dv.setFloat32(offset, n[0], true);
+        dv.setFloat32(offset + 4, n[1], true);
+        dv.setFloat32(offset + 8, n[2], true);
+        offset += 12;
+        for (let k = 0; k < 3; k++) {
+          const v3 = 3 * (k === 0 ? a : k === 1 ? b : c);
+          dv.setFloat32(offset, vx[v3] * scale, true);
+          dv.setFloat32(offset + 4, vx[v3 + 1] * scale, true);
+          dv.setFloat32(offset + 8, vx[v3 + 2] * scale, true);
+          offset += 12;
+        }
+        dv.setUint16(offset, 0, true);
+        offset += 2;
+      }
+    }
+    return offset ? [new Uint8Array(buf, 0, offset)] : [];
+  }
+
+  function buildASCIISTL(parts, units = 'mm', options = {}) { return runWriter(asciiSTLWriter(parts, units, options)); }
+  function* asciiSTLWriter(parts, units = 'mm', options = {}) {
+    const visibleParts = exportPartList(parts, options);
+    const scale = getScaleFromMM(units);
+    const out = new TextSink(options.stream ? 'stream' : options.blob);
     out.push('solid CAD_3D_PDF_Assembly');
     const n = [0, 0, 0];
     for (const p of visibleParts) {
       const { vx, tv, nt } = p.brep;
       for (let t = 0; t < nt; t++) {
+        if (out.pending) yield out.take();
         const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
         triNormalInto(vx, a, b, c, n);
         out.push(`  facet normal ${fmtNum(n[0])} ${fmtNum(n[1])} ${fmtNum(n[2])}`);
@@ -2921,10 +2985,11 @@
     return out.result();
   }
 
-  function buildWavefrontOBJ(parts, units = 'mm', options = {}) {
+  function buildWavefrontOBJ(parts, units = 'mm', options = {}) { return runWriter(wavefrontOBJWriter(parts, units, options)); }
+  function* wavefrontOBJWriter(parts, units = 'mm', options = {}) {
     const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
-    const out = new TextSink(options.blob);
+    const out = new TextSink(options.stream ? 'stream' : options.blob);
     out.push('# 3D PDF Geometry Extractor - Multi-Body CAD Mesh (.obj)');
     out.push(`# Units: ${units}`);
     out.push('');
@@ -2936,13 +3001,16 @@
       out.push(`o ${p.name}`);
       out.push(`g ${p.name}`);
       for (let i = 0; i < nv; i++) {
+        if (out.pending) yield out.take();
         out.push(`v ${fmtNum(vx[3 * i] * scale)} ${fmtNum(vx[3 * i + 1] * scale)} ${fmtNum(vx[3 * i + 2] * scale)}`);
       }
       for (let t = 0; t < nt; t++) {
+        if (out.pending) yield out.take();
         triNormalInto(vx, tv[3 * t], tv[3 * t + 1], tv[3 * t + 2], n);
         out.push(`vn ${fmtNum(n[0])} ${fmtNum(n[1])} ${fmtNum(n[2])}`);
       }
       for (let t = 0; t < nt; t++) {
+        if (out.pending) yield out.take();
         const ni = nOffset + t;
         out.push(`f ${tv[3 * t] + vOffset}//${ni} ${tv[3 * t + 1] + vOffset}//${ni} ${tv[3 * t + 2] + vOffset}//${ni}`);
       }
@@ -2953,7 +3021,10 @@
     return out.result();
   }
 
-  function buildIGESWireframe(parts, units = 'mm', options = {}) {
+  function buildIGESWireframe(parts, units = 'mm', options = {}) { return runWriter(igesWireframeWriter(parts, units, options)); }
+  // One sink, two passes over the feature edges: the D section (2 lines per edge), then the P section (1 line per edge).
+  // Edge k (0-based) has D lines 2k+1, 2k+2 and P line k+1, so both sections are known without holding either one.
+  function* igesWireframeWriter(parts, units = 'mm', options = {}) {
     const visibleParts = exportPartList(parts, options);
     const scale = getScaleFromMM(units);
     const pad72 = (s) => s.slice(0, 72).padEnd(72, ' ');
@@ -2966,19 +3037,28 @@
       line80('1H,,1H;,14H3D_PDF_CAD_ASM,14H3D_PDF_CAD.igs,10H3D_PDF_EXT,5H1.0.0,32,38,', 'G', 1),
       line80('6,308,15,14H3D_PDF_CAD_ASM,1.0,2,2HMM,1,0.01,13H261023.120000;', 'G', 2)
     ];
-    const dSink = new TextSink(options.blob), pSink = new TextSink(options.blob);
+    const out = new TextSink(options.stream ? 'stream' : options.blob);
+    for (const l of sLines) out.push(l);
+    for (const l of gLines) out.push(l);
     let dSeq = 1, pSeq = 1;
-
+    for (const p of visibleParts) {
+      const { fev } = p.brep;
+      for (let e = 0; e < fev.length; e += 2) {
+        if (out.pending) yield out.take();
+        const pStart = pSeq++;
+        out.push(line80(`     110${String(pStart).padStart(8, ' ')}       0       0       1       0       0       000000001`, 'D', dSeq++));
+        out.push(line80('     110       0       2       1       0                        LINE   1', 'D', dSeq++));
+      }
+    }
+    pSeq = 1; let dIdx = 1;
     for (const p of visibleParts) {
       const { vx, fev } = p.brep;
       for (let e = 0; e < fev.length; e += 2) {
+        if (out.pending) yield out.take();
         const u3 = 3 * fev[e], v3 = 3 * fev[e + 1];
         const pStr = `110,${(vx[u3] * scale).toFixed(5)},${(vx[u3 + 1] * scale).toFixed(5)},${(vx[u3 + 2] * scale).toFixed(5)},${(vx[v3] * scale).toFixed(5)},${(vx[v3 + 1] * scale).toFixed(5)},${(vx[v3 + 2] * scale).toFixed(5)};`;
-        const pStart = pSeq;
-        const dIdx = dSeq;
-        pSink.push(`${pad72(pStr).slice(0, 64)}${String(dIdx).padStart(8, ' ')}P${String(pSeq++).padStart(7, ' ')}`);
-        dSink.push(line80(`     110${String(pStart).padStart(8, ' ')}       0       0       1       0       0       000000001`, 'D', dSeq++));
-        dSink.push(line80('     110       0       2       1       0                        LINE   1', 'D', dSeq++));
+        out.push(`${pad72(pStr).slice(0, 64)}${String(dIdx).padStart(8, ' ')}P${String(pSeq++).padStart(7, ' ')}`);
+        dIdx += 2;
       }
     }
 
@@ -2987,11 +3067,6 @@
       'T',
       1
     );
-    const out = new TextSink(options.blob);
-    for (const l of sLines) out.push(l);
-    for (const l of gLines) out.push(l);
-    out.append(dSink);
-    out.append(pSink);
     out.push(tLine);
     out.push('');
     return out.result();
@@ -3974,7 +4049,7 @@
         const b = document.createElement('button');
         b.className = 'btn';
         b.id = 'btnExportXT';
-        b.title = 'Faceted solid, flat faces. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
+        b.title = 'Faceted body, flat faces. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
         b.textContent = 'Export Parasolid (.x_t)';
         stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
       }
@@ -4342,6 +4417,7 @@
     const units = o.units || state.units;
     const detail = o.detail != null && o.detail !== '' ? (Number(o.detail) || 1) : (state.exportDetail || 1);
     const progress = (p) => { if (typeof o.onProgress === 'function') { try { o.onProgress(p); } catch (e) { /* UI callback */ } } };
+    const streaming = !!o.writable;   // exportFormat writes the writer's chunks into opts.writable as they are made
 
     if (fmt === 'raw') {
       const st = state.streams[state.activeStreamIdx];
@@ -4357,12 +4433,25 @@
       return r; }
     const wo = { detail };   // writers read state.exportDetail when detail is omitted; passing it gives the same value
     let content, filename, mime;
+    if (streaming && fmt !== 'xt') {
+      // writable: a writer generator in stream mode; nothing is written here (exportFormat drives it). Same arguments as below.
+      const so = { ...wo, stream: true }; let gen, type;
+      if (fmt === 'step') { gen = stepAP214Writer(sel.parts, { brepMode: o.brepMode || state.brepMode, units, ...so }); filename = `${stem}.stp`; type = 'application/step;charset=utf-8'; }
+      else if (fmt === 'stl' && o.encoding === 'ascii') { gen = asciiSTLWriter(sel.parts, units, so); filename = `${stem}-ascii.stl`; type = 'text/plain;charset=utf-8'; }
+      else if (fmt === 'stl') { gen = binarySTLWriter(sel.parts, units, wo); filename = `${stem}.stl`; type = 'application/sla'; }
+      else if (fmt === 'obj') { gen = wavefrontOBJWriter(sel.parts, units, so); filename = `${stem}.obj`; type = 'text/plain;charset=utf-8'; }
+      else { gen = igesWireframeWriter(sel.parts, units, so); filename = `${stem}.igs`; type = 'text/plain;charset=utf-8'; }
+      return { blob: null, _gen: gen, _type: type, filename, status: 'ok', reasonCode: null, reason: null, summary: { parts: meshPartsSummary(sel) } };
+    }
     if (fmt === 'xt') {
       if (!(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return exportSkipped('unavailable', 'Parasolid export is not available in this version');
       // Same call as the Advanced button (exportParasolidXT); the writer fills `st` with its own summary.
-      const st = {};
+      const st = {}; let gen = null, first = null;
+      const xo = { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, stats: st, ...wo, ...(o.maxBytes != null ? { maxBytes: o.maxBytes } : {}) };
       try {
-        content = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, stats: st, ...wo, ...(o.maxBytes != null ? { maxBytes: o.maxBytes } : {}) });
+        // writable: run the generator to its first checkpoint (counting pass done, st filled, no record written yet)
+        if (streaming) { gen = parasolidXTWriter(sel.parts, { ...xo, stream: true }); first = gen.next(); }
+        else content = buildParasolidXT(sel.parts, { ...xo, blob: true });
       } catch (e) {
         const tooLarge = e && e.code === 'XT_TOO_LARGE';
         const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
@@ -4378,7 +4467,8 @@
       const xs = { parts, faces: st.faces || 0, bodies: st.bodies || 0, bodyType: st.bodyType || null, sewn: st.sewn !== false, openEdges: st.openEdges || 0,
         viewerFaces: st.viewerFaces, splitFaces: st.splitFaces, estimatedBytes: st.estimatedBytes,
         schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
-      if (!xs.faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
+      if (!xs.faces) { if (gen) gen.return(); return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } }; }
+      if (gen) return { blob: null, _gen: gen, _first: first, _type: 'text/plain;charset=utf-8', _estimate: st.estimatedBytes || null, filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
       progress({ stage: 'write', pct: 100, label: 'Done' });
       return { ...fileParts(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
     }
@@ -4408,13 +4498,15 @@
       if (m.status !== 'ok') return m;
       return { ...m, status: 'mesh_only', reasonCode: 'browser_unsupported', reason: why + ', so the mesh STEP was saved instead', meshStep: true, summary: { parts, faces: 0 } };
     }
-    const r = await cad(o.partIds == null ? null : o.partIds, { fittedOnly, solidsOnly: fittedOnly, onProgress: progress, signal });
+    // writable: noBlob -> the engine returns its STEP text chunks as _parts (no Blob is made)
+    const r = await cad(o.partIds == null ? null : o.partIds, { fittedOnly, solidsOnly: fittedOnly, onProgress: progress, signal, ...(o.writable ? { noBlob: true } : {}) });
+    const hasFile = !!(r && (r.blob || r._parts));
     if (!r || r.status === 'cancelled') return r || exportCancelled();
     // preflight refusals (unavailable here, nothing to export, model too large): whole-file result, no per-part list
     if (r.status === 'skipped' && /^(unavailable|no_parts|too_large)$/.test(r.reasonCode || '')) return r;
     const s = r.summary || {}; const sel = exportSelection(o.partIds);
     // no per-part list (not the bundled engine): keep its whole-file result as it is
-    if (!(Array.isArray(s.parts) && s.parts.length) && r.blob) {
+    if (!(Array.isArray(s.parts) && s.parts.length) && hasFile) {
       const one = sel.ids.length === 1;
       const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: r.status, faces: one ? (+s.faces || 0) : undefined,
         reasonCode: r.status === 'solid' ? null : (r.reasonCode || null), written: r.status === 'solid' ? 'solid' : 'mesh' }));
@@ -4433,7 +4525,7 @@
         reason: wp ? (wp.reason || null) : null, tris: wp ? wp.tris : undefined, check: wp ? wp.check : undefined, written };
       // both: the bodies actually in the file - '<name>_fitted' for a solid or open shell (the worker writes no other), and
       // '<name>_mesh' for every part
-      if (!fittedOnly && r.blob) { const nm = wp ? wp.name : sel.chosen[k].name; q.fittedBody = status === 'solid' || status === 'shell' ? nm + '_fitted' : null; q.meshBody = nm + '_mesh'; }
+      if (!fittedOnly && hasFile) { const nm = wp ? wp.name : sel.chosen[k].name; q.fittedBody = status === 'solid' || status === 'shell' ? nm + '_fitted' : null; q.meshBody = nm + '_mesh'; }
       return q;
     });
     const solids = parts.filter((p) => p.written === 'solid');
@@ -4446,14 +4538,14 @@
     if (!solids.length && !left.length) {
       return { blob: null, filename: null, status: 'skipped', reasonCode: engineCode || 'no_fit', reason: cleanReason, summary };
     }
-    let blob = r.blob || null;
+    let blob = r._parts ? { _parts: r._parts, _type: r._type || 'application/step' } : (r.blob || null);
     if (left.length) {
       if (signal && signal.aborted) return exportCancelled();
       progress({ stage: 'write', pct: 99, label: 'Writing mesh bodies…' });
       await new Promise((res) => setTimeout(res, 0));
       const meshParts = left.map((p) => { const ap = state.parts[p.index]; return Object.assign(Object.create(Object.getPrototypeOf(ap)), ap, { name: `${p.name}_mesh`, visible: true }); });
       const meshText = buildSTEPAP214(meshParts, { units: 'mm', brepMode: 'merged', detail: 1 });   // same mesh body as the 'both' file
-      const fittedText = blob ? await blob.text() : null;
+      const fittedText = !blob ? null : blob._parts ? blob._parts.join('') : await blob.text();
       if (signal && signal.aborted) return exportCancelled();
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
       blob = { _parts: chunks, _type: 'application/step' };   // exportFormat makes the Blob or writes the chunks
@@ -4461,7 +4553,7 @@
     const bsize = blob._parts ? null : blob.size;
     progress({ stage: 'write', pct: 100, label: 'Done', bytes: bsize, totalBytes: bsize });
     const status = solids.length === parts.length ? 'solid' : solids.length ? 'partial' : 'mesh_only';
-    return { ...(blob._parts ? { blob: null, ...blob } : { blob }), filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
+    return { ...(blob._parts ? { ...blob, blob: null } : { blob }), filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
       reasonCode: status === 'solid' ? null : (engineCode || (parts.some((p) => p.status === 'shell') ? 'open_shell' : 'no_fit')),
       reason: status === 'solid' ? null : cleanReason, summary };
   }
@@ -4469,63 +4561,90 @@
   const fileParts = (content, mimeType) => (content instanceof Uint8Array
     ? { blob: null, _parts: [content], _type: mimeType }
     : { blob: null, _parts: textChunks(content), _type: `${mimeType};charset=utf-8` });   // same Blob as exportBlob / triggerDownload
-  // Writes Blob parts to a FileSystemWritableFileStream in ~8 MB writes (strings UTF-8 encoded one by one, as a Blob does), so no
-  // single large Blob is built. Returns bytes written. Does not close or abort the stream (the caller owns it).
-  const WRITE_BATCH = 8 << 20;
-  async function writeParts(w, parts, signal, progress) {
-    const enc = new TextEncoder(); let buf = [], bufLen = 0, size = 0; let total = 0;
-    for (const p of parts) total += typeof p === 'string' ? p.length : (p.byteLength != null ? p.byteLength : p.size || 0);
-    const flush = async () => {
-      if (!bufLen) return;
-      let u8;
-      if (buf.length === 1) u8 = buf[0];
-      else { u8 = new Uint8Array(bufLen); let off = 0; for (const b of buf) { u8.set(b, off); off += b.length; } }
-      buf = []; bufLen = 0;
+  // Writable path: writes the file into a FileSystemWritableFileStream as it is produced. Small pieces are merged and big
+  // ones cut, so each write() is about 1 MB: strings in 1 Mi-char slices, UTF-8 encoded as a Blob would (a surrogate
+  // pair is never split), binary pieces in 1 MiB slices. Each write is awaited before the writer goes on, so only about
+  // one ~1 MB chunk (plus the piece being merged) is held at a time. No Blob is created or read. Returns bytes written.
+  // Does not close or abort the stream (the caller owns it).
+  const WRITE_SLICE = 1 << 20;
+  async function writeStreamed(w, res, signal, progress) {
+    const enc = new TextEncoder(); let size = 0; const est = res._estimate || null;
+    const check = () => { if (signal && signal.aborted) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' }); };
+    const send = async (u8) => {
       await w.write(u8); size += u8.length;
-      progress({ stage: 'write', pct: 100, label: 'Saving…', bytes: size, totalBytes: total });
-      if (signal && signal.aborted) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' });
+      progress({ stage: 'write', pct: est ? Math.min(99, Math.round(size / est * 100)) : undefined, label: 'Saving\u2026', bytes: size, totalBytes: est });
+      check();
     };
-    const push = async (u8) => { buf.push(u8); bufLen += u8.length; if (bufLen >= WRITE_BATCH) await flush(); };
-    for (const p of parts) {
-      if (typeof p === 'string') {
-        for (let i = 0; i < p.length;) {   // slice on UTF-16 code units, keeping a surrogate pair together
-          let j = Math.min(p.length, i + WRITE_BATCH);
-          if (j < p.length) { const c = p.charCodeAt(j - 1); if (c >= 0xd800 && c <= 0xdbff) j++; }
-          await push(enc.encode(i === 0 && j === p.length ? p : p.slice(i, j))); i = j;
-        }
-      } else if (p instanceof Uint8Array) {
-        for (let i = 0; i < p.length; i += WRITE_BATCH) { await flush(); await w.write(p.subarray(i, i + WRITE_BATCH)); size += Math.min(WRITE_BATCH, p.length - i); }
-      } else if (p && typeof p.stream === 'function') {   // a Blob (fitted STEP from the CAD worker): read it in pieces
-        const rd = p.stream().getReader();
-        for (;;) { const { done, value } = await rd.read(); if (done) break; await push(value); }
+    let text = ''; let bin = null; let binLen = 0;
+    const flushText = async (all) => {
+      while (text.length >= WRITE_SLICE || (all && text.length)) {
+        let j = Math.min(text.length, WRITE_SLICE);
+        if (j < text.length) { const c = text.charCodeAt(j - 1); if (c >= 0xd800 && c <= 0xdbff) j++; }
+        const piece = j === text.length ? text : text.slice(0, j); text = j === text.length ? '' : text.slice(j);
+        await send(enc.encode(piece));
       }
-    }
-    await flush();
+    };
+    const flushBin = async () => { if (binLen) { const u8 = bin.slice(0, binLen); binLen = 0; await send(u8); } };
+    const put = async (p) => {
+      if (typeof p === 'string') {
+        await flushBin();
+        text += p; await flushText(false);
+      } else if (ArrayBuffer.isView(p)) {
+        await flushText(true);
+        const all = p instanceof Uint8Array ? p : new Uint8Array(p.buffer, p.byteOffset, p.byteLength);
+        if (!bin) bin = new Uint8Array(WRITE_SLICE);
+        for (let i = 0; i < all.length;) {
+          const n = Math.min(all.length - i, WRITE_SLICE - binLen);
+          bin.set(all.subarray(i, i + n), binLen); binLen += n; i += n;
+          if (binLen === WRITE_SLICE) await flushBin();
+        }
+      } else if (p && typeof p.stream === 'function') {
+        // only a third-party CAD engine that ignores noBlob hands over a Blob; the bundled writers and engine never do
+        await flushText(true); await flushBin();
+        const rd = p.stream().getReader();
+        for (;;) { const { done, value } = await rd.read(); if (done) break; await send(value); }
+      } else if (p != null) throw new Error('Unknown file part');
+    };
+    if (res._gen) {
+      let r = res._first || null;
+      for (;;) {
+        if (!r) r = res._gen.next();
+        if (r.value) for (const c of r.value) await put(c);
+        if (r.done) break;
+        r = null; check();
+      }
+    } else for (const p of res._parts) await put(p);
+    await flushText(true); await flushBin();
+    progress({ stage: 'write', pct: 100, label: 'Done', bytes: size, totalBytes: size });
     return size;
   }
 
   // PDF3D.exportFormat(format, opts): see exportFormatCore. Delivery:
   //   no opts.writable -> { blob, delivery: 'download', size } (the caller saves the Blob)
-  //   opts.writable (FileSystemWritableFileStream from showSaveFilePicker().createWritable()) -> the file is written part by
-  //     part into it (no single large Blob) -> { blob: null, delivery: 'picker', size }. A failed write -> status 'error',
-  //     reasonCode 'WRITE_FAILED' (nothing else changed). exportFormat never calls close() or abort(): the caller does
+  //   opts.writable (FileSystemWritableFileStream from showSaveFilePicker().createWritable()) -> every writer streams into it:
+  //     each ~1 MB piece is UTF-8 encoded and awaited with writable.write(Uint8Array) as it is produced; no Blob is created
+  //     or read back -> { blob: null, delivery: 'picker', size }. A failed write -> status 'error', reasonCode 'WRITE_FAILED'
+  //     (the file is partly written). exportFormat never calls close() or abort(): the caller does
   //     (close on a result with delivery 'picker', abort + remove the file otherwise).
   async function exportFormat(format, opts) {
     const o = opts || {}; const w = o.writable || null;
     const res = await exportFormatCore(format, o);
     if (!res) return res;
+    const hasData = !!(res._gen || res._parts || res.blob);
     const parts = res._parts || (res.blob ? [res.blob] : null); const type = res._type;
-    delete res._parts; delete res._type;
-    if (!parts) return res;
+    const stream = { _gen: res._gen, _first: res._first, _parts: res._parts || (res.blob ? [res.blob] : null), _estimate: res._estimate };
+    for (const k of ['_parts', '_type', '_gen', '_first', '_estimate']) delete res[k];
+    if (!hasData) return res;
     if (!w) {
       if (!res.blob) res.blob = new Blob(parts, { type });
       return Object.assign(res, { delivery: 'download', size: res.blob.size });
     }
     const progress = (p) => { if (typeof o.onProgress === 'function') { try { o.onProgress(p); } catch (e) { /* UI callback */ } } };
     try {
-      const size = await writeParts(w, parts, o.signal, progress);
+      const size = await writeStreamed(w, stream, o.signal, progress);
       return Object.assign(res, { blob: null, delivery: 'picker', size });
     } catch (e) {
+      if (stream._gen) { try { stream._gen.return(); } catch (e2) { /* done */ } }
       if (e && e.name === 'AbortError' && o.signal && o.signal.aborted) return exportCancelled();
       return Object.assign(res, { blob: null, delivery: 'picker', size: null, status: 'error', reasonCode: 'WRITE_FAILED',
         reason: 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, '') });
