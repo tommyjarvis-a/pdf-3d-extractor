@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.6.1 (alpha) — 2026-11-01
+
+### Fixed
+- **Save as on a retried `createWritable()` no longer builds one huge Blob (export-flow, Designer).** The flow opens the
+  writable before the export (one retry) and always passes it as `opts.writable`, so the file is streamed to disk even when
+  the first `createWritable()` fails. Also from Designer: a whole-model fitting-limit card ("Saved as mesh STEP" / "Too large
+  to fit surfaces in the browser (429k triangles, limit 200k).") with no per-part rows, the free-space line only for a full
+  disk, and download wording that never names a folder.
+- **Damaged 3D data reports a decode error instead of crashing or "unsupported".** A damaged PRC stream (bad section
+  sizes, garbage after inflate) no longer hits the V8 invalid-size crash: oversized allocations are refused and the load
+  ends with `DECODE_ERROR`. A PRC whose decode failures leave no body is `DECODE_ERROR`, not `UNSUPPORTED_MESH`
+  ("exact geometry without tessellation"). A damaged RHAdobeMeshResource (VEA) mesh is `DECODE_ERROR` with the block
+  and offset in `detail` (partly damaged models still load what decodes, with a warning). A `/3D` stream of random
+  bytes is `DECODE_ERROR`; `NO_3D` is reserved for PDFs that really have no 3D stream.
+- **A damaged classic U3D stream no longer hangs the page.** A corrupted count (e.g. a GroupNode's parent count)
+  could make the bit reader read zeros past the end of a block for minutes (also in 1.6.0). Reads past a block's end
+  now throw. A U3D stream that is truncated or whose blocks fail to decode and yields no mesh is `DECODE_ERROR` (with the
+  block and offset in `detail`), not `UNSUPPORTED_MESH`. When some meshes still decode, they load with a
+  "damaged data skipped" warning.
+- **Info overlay:** the previous file's stream name no longer stays on screen after loading a PDF with no 3D or one that fails.
+- **Fitted STEP is streamed in chunks** from the CAD worker result (4 MiB pieces), instead of being decoded into one
+  string, so very large fitted files no longer need a second whole-file copy in memory.
+- **Simple mode:** the Parasolid option reads "Faceted body, flat faces".
+- **Export summary part count:** worker parts are de-duplicated by index, so the per-part summary can never list more
+  parts than the bodies that were extracted (r08: 5415).
+
+### Added
+- **`WRITE_FAILED` results carry `errorName`** (the write error's name) and **`quota`** (`true` for `QuotaExceededError`), so
+  the card shows the free-space advice only when the disk is actually full.
+- **`lastLoad.attachments` / `lastLoad.attachmentDetails` on every load result**, not only `NO_3D` (see README "Load result").
+- **`summary.fitSkippedReason`** on STEP Fitted / Both exports: `'too_many_tris'` (with `fitSkippedTris` and
+  `fitSkippedLimit`), `'no_face_data'`, `'browser_unsupported'`, or `null` when fitting ran. One model-wide reason the
+  export card can show instead of one row per part.
+- **Regression corpus:** `tools/make-damaged-fixtures.js` builds `x01_damaged_prc`, `x02_damaged_vea_mesh`,
+  `x03_random_bytes_3d`, `x04_attachments_only` and `x05_u3d_damaged_node_count` (the U3D hang above); `test/run.js` checks an entry's `lastLoad` keys (status,
+  reasonCode, attachments) when expect.json gives them.
+
+### Changed
+- CAD worker cache key `1.6.1-w1`.
+
 ## 1.6.0 (alpha) — 2026-10-25
 
 Alpha: the new Simple-mode Export menu is ready for testing, and its wording and options may still change.

@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.0
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.1
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.6.0';
+  const APP_VERSION = '1.6.1';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -458,6 +458,9 @@
       }
 
       this.bitPos = 0;
+      // 1.6.1: reading more than 64 bytes past the block end means the counts came from damaged data; throw (DECODE_ERROR)
+      // instead of looping on zero bits (a damaged count could otherwise spin for minutes)
+      this.bitLimit = (byteLen + 64) * 8;
       this.high = 0x0000ffff;
       this.low = 0x00000000;
       this.underflowCount = 0;
@@ -493,7 +496,12 @@
       return (w >>> (bp & 31)) & 1;
     }
 
+    overrun() {
+      throw new Error(`U3D: read past the end of a ${this.byteLen}-byte block at offset ${this.startOffset} (damaged data)`);
+    }
+
     readBit() {
+      if (this.bitPos > this.bitLimit) this.overrun();
       const b = this.peekBitAt(this.bitPos);
       this.bitPos += 1;
       return b >>> 0;
@@ -567,6 +575,7 @@
         this.low = (this.low << 1) & 0x7fff;
         this.high = ((this.high << 1) & 0x7fff) | 0x8001;
       }
+      if (this.bitPos > this.bitLimit) this.overrun();
       return uValue >>> 0;
     }
 
@@ -845,6 +854,7 @@
     r.warnings = r.warnings || [];
     const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
     r.decodePath = tris ? 'U3D' : 'none';
+    if (tris && r.damage && r.damage.length) r.warnings.push(`U3D: damaged data skipped (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
     if (!tris) {
       // Vendor mesh "RHAdobeMeshResource" (Adobe Acrobat SDK 8.1 U3D supplement; decoder by QA/Tester)
       const RH = getModule('RHAdobeMesh', 'u3d-rhadobe-mesh.js');
@@ -869,7 +879,12 @@
             return r;
           }
           for (const w of rr.warnings || []) r.warnings.push(w);
-        } catch (e) { r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+          // declared RHAdobeMeshResource mesh block(s) exist but none decoded: the mesh data is damaged (DECODE_ERROR), not an unsupported format
+          if (rr.meshErrors && rr.meshErrors.length) { const e0 = rr.meshErrors[0]; const err = new Error(`RHAdobeMeshResource mesh is damaged (${rr.meshErrors.length} block${rr.meshErrors.length > 1 ? 's' : ''}; block at ${e0.offset}: ${e0.message})`); err.rhDamaged = true; throw err; }
+        } catch (e) { if (e && e.rhDamaged) throw e; r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+      }
+      if (r.damage && r.damage.length) {
+        throw new Error(`U3D stream is damaged (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
       }
       const G = getModule('U3DGuard', 'u3d-guard.js');
       const sc = G ? G.scanU3D(u8) : { types: {}, newTypes: [] };
@@ -903,6 +918,9 @@
     const materials = new Map();
     const meshDecls = new Map();
     const meshes = new Map();
+    // 1.6.1: decode failures the parser recovers from (a block nested in a modifier chain, a progressive-mesh step);
+    // parseU3DStream reports a stream with damage and no mesh as DECODE_ERROR instead of UNSUPPORTED_MESH
+    const damage = [];
 
     // Parse a single U3D block at [dataStart, dataStart + dataSize)
     function parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, blockOffset, isNested = false) {
@@ -958,7 +976,8 @@
                   const subMetaStart = subDataStart + pad4(subDataSize);
                   const subNext = subMetaStart + pad4(subMetaSize);
                   if (subNext > chainEnd + 4) break;
-                  parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true);
+                  try { parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true); }
+                  catch (e) { damage.push(`block ${blockTypeName(subType)} at ${subOff}: ${e && e.message}`); throw e; }
                   subOff = subNext;
                 }
               }
@@ -1352,8 +1371,9 @@
               pm.addFace(tri[0], tri[1], tri[2], meta.shId);
             }
           }
-        } catch (_) {
+        } catch (e) {
           // Keep progressive mesh decoded up to the last complete resolution step
+          damage.push(`progressive mesh block at ${blockOffset}: ${e && e.message}`);
         }
       }
     }
@@ -1366,7 +1386,10 @@
       const dataStart = offset + 12;
       const metaStart = dataStart + pad4(dataSize);
       const nextBlockOffset = metaStart + pad4(metaSize);
-      if (dataStart + dataSize > u8.length) break;
+      if (dataStart + dataSize > u8.length) {   // truncated stream or a damaged block size
+        damage.push(`block 0x${(blockType >>> 0).toString(16)} at ${offset} declares ${dataSize} data bytes but the stream ends ${u8.length - dataStart} bytes later`);
+        break;
+      }
 
       parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, offset, false);
       offset = nextBlockOffset;
@@ -1465,6 +1488,7 @@
       profileId,
       unitsScalingFactor,
       blocks,
+      damage,
       parts
     };
   }
@@ -1540,6 +1564,10 @@
       positions: mm === 1 ? w.positions : w.positions.map(toMM), polylines: w.polylines || []
     }));
     const fsInfo = (r.info && r.info.fileStructures) || [];
+    // nothing decoded and the decoder caught decode failures: a damaged stream (DECODE_ERROR), not an unsupported one
+    if (!parts.length && r.damage && r.damage.length) {
+      throw new Error(`PRC stream is damaged (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
+    }
     const exactParts = parts.filter((p) => p.source === 'brep').length;
     const decodePath = !parts.length ? 'none' : exactParts === parts.length ? 'PRC exact B-Rep' : exactParts ? 'PRC tess + exact B-Rep' : 'PRC tess';
     let unsupportedDetail;
@@ -3764,16 +3792,16 @@
     // Viewport HUD
     const activeStream = state.streams[state.activeStreamIdx];
     const hudStreamTitle = document.getElementById('hudStreamTitle');
-    if (hudStreamTitle && activeStream) {
-      hudStreamTitle.textContent = `Stream: ${activeStream.title} (${activeStream.subtype === 'PRC' ? 'ISO 14739-1' : 'ECMA-363'})`;
+    if (hudStreamTitle) { // cleared when the view is cleared / a load finds no 3D (no stale stream name)
+      hudStreamTitle.textContent = activeStream ? `Stream: ${activeStream.title} (${activeStream.subtype === 'PRC' ? 'ISO 14739-1' : 'ECMA-363'})` : '';
     }
     const hudAssemblyStats = document.getElementById('hudAssemblyStats');
     if (hudAssemblyStats) {
       hudAssemblyStats.textContent = `Solids: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
     }
     const hudBounds = document.getElementById('hudBounds');
-    if (hudBounds && bounds.size) {
-      hudBounds.textContent = `Bounds: ${bounds.size.map((v) => (+v).toFixed(1)).join(' \u00d7 ')} ${state.units}`;
+    if (hudBounds) {
+      hudBounds.textContent = bounds.size && state.parts.length ? `Bounds: ${bounds.size.map((v) => (+v).toFixed(1)).join(' \u00d7 ')} ${state.units}` : '';
     }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
@@ -3869,6 +3897,7 @@
     const st = state.streams[idx];
     if (!st.parsed) {
       try {
+        if (st.badHeader) throw new Error(st.badHeader); // pdf-extract: declared 3D stream that is not U3D/PRC data
         if (st.subtype === 'PRC') {
           st.parsed = await parsePRCStream(st.rawBytes, { typed: true });
         } else {
@@ -3907,7 +3936,14 @@
     return { status: 'unsupported', reasonCode: 'UNSUPPORTED_MESH', ...base, detail, wires: (p.wires || []).length,
       message: `This PDF has a 3D model, but it's stored in a format the app can't read yet (${st.subtype}, ${detail}).` };
   }
-  function setLastLoad(r) { (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r; }
+  // every lastLoad (1.6.1) carries the PDF's embedded files: attachments = names (as NO_3D had since 1.5.3),
+  // attachmentDetails = [{ name, ext, isCAD, size, description, error }] (no bytes; the Attachments panel downloads them)
+  function setLastLoad(r) {
+    const atts = state.attachments || [];
+    r.attachments = atts.map((a) => a.name);
+    r.attachmentDetails = atts.map((a) => ({ name: a.name, ext: a.ext || '', isCAD: !!a.isCAD, size: a.size || 0, description: a.description || '', error: a.error || null }));
+    (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r;
+  }
 
   async function loadPDFBuffer(u8, fileName) {
     state.fileName = fileName || 'document-3d.pdf';
@@ -3915,15 +3951,16 @@
     const streams = await extract3DStreamsFromPDF(u8, state.fileName);
     state.attachments = (streams && streams.attachments) || [];
     if (streams.length === 0) {
-      setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0, attachments: state.attachments.map((a) => a.name),
+      setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0,
         message: state.attachments.length ? 'No 3D model in this PDF; it has embedded file attachments.' : 'No 3D model (U3D / PRC) in this PDF.' });
       // Simple mode shows the NO_3D load card in the empty viewport instead of an alert (Advanced keeps the alert)
       const simpleUI = typeof document !== 'undefined' && document.body && document.body.classList.contains('sm-simple');
+      // clear the previous model in every NO_3D case (the file name already changed; the HUD stream name must not linger)
+      state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
+      state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
+      refreshAllUI();
       if (state.attachments.length || simpleUI) {
         // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
-        state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
-        state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
-        refreshAllUI();
         return;
       }
       alert('No embedded /3D (U3D / PRC) streams or file attachments found in this file.');
@@ -4493,10 +4530,10 @@
       if (!sel.ids.length) return exportSkipped('no_parts', 'No visible part to export');
       const why = 'This browser can\u2019t run surface fitting (no Web Workers or WebAssembly)';
       const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: 0, reasonCode: 'browser_unsupported', reason: why, written: omit ? 'omitted' : 'mesh' }));
-      if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0 } };
+      if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0, fitSkippedReason: 'browser_unsupported' } };
       const m = await exportFormatCore('step', { ...o, body: 'mesh', fittedOnly: false });
       if (m.status !== 'ok') return m;
-      return { ...m, status: 'mesh_only', reasonCode: 'browser_unsupported', reason: why + ', so the mesh STEP was saved instead', meshStep: true, summary: { parts, faces: 0 } };
+      return { ...m, status: 'mesh_only', reasonCode: 'browser_unsupported', reason: why + ', so the mesh STEP was saved instead', meshStep: true, summary: { parts, faces: 0, fitSkippedReason: 'browser_unsupported' } };
     }
     // writable: noBlob -> the engine returns its STEP text chunks as _parts (no Blob is made)
     const r = await cad(o.partIds == null ? null : o.partIds, { fittedOnly, solidsOnly: fittedOnly, onProgress: progress, signal, ...(o.writable ? { noBlob: true } : {}) });
@@ -4545,7 +4582,7 @@
       await new Promise((res) => setTimeout(res, 0));
       const meshParts = left.map((p) => { const ap = state.parts[p.index]; return Object.assign(Object.create(Object.getPrototypeOf(ap)), ap, { name: `${p.name}_mesh`, visible: true }); });
       const meshText = buildSTEPAP214(meshParts, { units: 'mm', brepMode: 'merged', detail: 1 });   // same mesh body as the 'both' file
-      const fittedText = !blob ? null : blob._parts ? blob._parts.join('') : await blob.text();
+      const fittedText = !blob ? null : blob._parts ? blob._parts : await blob.text(); // chunk array: mergeSTEPChunks streams it (no join)
       if (signal && signal.aborted) return exportCancelled();
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
       blob = { _parts: chunks, _type: 'application/step' };   // exportFormat makes the Blob or writes the chunks
@@ -4624,7 +4661,7 @@
   //   opts.writable (FileSystemWritableFileStream from showSaveFilePicker().createWritable()) -> every writer streams into it:
   //     each ~1 MB piece is UTF-8 encoded and awaited with writable.write(Uint8Array) as it is produced; no Blob is created
   //     or read back -> { blob: null, delivery: 'picker', size }. A failed write -> status 'error', reasonCode 'WRITE_FAILED'
-  //     (the file is partly written). exportFormat never calls close() or abort(): the caller does
+  //     (the file is partly written; errorName = the thrown error's name, quota = errorName === 'QuotaExceededError'). exportFormat never calls close() or abort(): the caller does
   //     (close on a result with delivery 'picker', abort + remove the file otherwise).
   async function exportFormat(format, opts) {
     const o = opts || {}; const w = o.writable || null;
@@ -4646,8 +4683,11 @@
     } catch (e) {
       if (stream._gen) { try { stream._gen.return(); } catch (e2) { /* done */ } }
       if (e && e.name === 'AbortError' && o.signal && o.signal.aborted) return exportCancelled();
+      // errorName / quota (1.6.1): the card shows the free-space line only for a full disk (QuotaExceededError)
+      const errorName = (e && e.name) || null;
       return Object.assign(res, { blob: null, delivery: 'picker', size: null, status: 'error', reasonCode: 'WRITE_FAILED',
-        reason: 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, '') });
+        reason: 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, ''),
+        errorName, quota: errorName === 'QuotaExceededError' });
     }
   }
   PDF3D_NS.exportFormat = exportFormat;

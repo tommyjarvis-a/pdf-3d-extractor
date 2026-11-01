@@ -1622,7 +1622,7 @@ body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple s
     <div class="brand">
       <div class="brand-badge">3D</div>
       <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.6.0</span></div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.6.1</span></div>
         <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
       </div>
     </div>
@@ -2237,14 +2237,19 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
     if (doc.trailer.Encrypt && !doc.crypt) { await doc.initCrypt(); doc.cache.clear(); }
     if (doc.cryptError) { const e = new Error('Encrypted PDF: ' + doc.cryptError); e.code = 'PDF_ENCRYPTED'; throw e; }
 
-    const found = []; const seenObj = new Map();
+    const found = []; const seenObj = new Map(); const bad = []; // bad: 3D streams (a /3D annotation's /3DD, or a /Subtype /U3D|/PRC stream) that are not U3D/PRC data
+    const dictSubtype = (o) => (o && o.value ? (isName(o.value.Subtype, 'PRC') ? 'PRC' : isName(o.value.Subtype, 'U3D') ? 'U3D' : null) : null);
     const take = async (ref, meta, isEF) => {
       if (!(ref instanceof Ref)) return; const o = doc.getObj(ref.num); if (!o || !o.stream) return;
       if (seenObj.has(ref.num)) { seenObj.get(ref.num).refs.push(meta); return; }
-      let r; try { r = await doc.streamData(o, isEF); } catch (e) { doc.log.push(`obj ${ref.num}: ${e.message}`); return; }
+      const claims3D = meta.container === '/3D' || (meta.container === 'stream scan');
+      let r; try { r = await doc.streamData(o, isEF); } catch (e) { doc.log.push(`obj ${ref.num}: ${e.message}`);
+        if (claims3D) { seenObj.set(ref.num, { st: null, o, r: null, meta, refs: [meta] }); bad.push({ o, meta, data: new Uint8Array(0), why: `the 3D stream (obj ${ref.num}) could not be decoded: ${e.message}` }); } return; }
       const h = latin1(r.data, 0, 4); const st = h.startsWith('U3D') ? 'U3D' : h.startsWith('PRC') ? 'PRC' : null;
       const entry = { st, o, r, meta, refs: [meta] }; seenObj.set(ref.num, entry); if (st) found.push(entry);
-      else doc.log.push(`obj ${ref.num} (${meta.container}) is not U3D/PRC (head ${[...r.data.subarray(0, 4)].map((b) => b.toString(16)).join(' ')})`);
+      else { const hex = [...r.data.subarray(0, 4)].map((b) => b.toString(16)).join(' ');
+        doc.log.push(`obj ${ref.num} (${meta.container}) is not U3D/PRC (head ${hex})`);
+        if (claims3D) bad.push({ o, meta, r, data: r.data, why: `the 3D stream (obj ${ref.num}, ${r.data.length} bytes) is not U3D or PRC data (starts with ${hex || 'nothing'})` }); }
     };
     const pages = pagesOf(doc);
     for (let pi = 0; pi < pages.length; pi++) {
@@ -2285,6 +2290,13 @@ window.SAMPLE_3D_PDF_B64 = "JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxv
       for (const e of seenObj.values()) if (!e.st && e.meta && e.meta.container === '/RichMedia') { /* non-3D RichMedia assets (e.g. .swf/.js) are not CAD */ }
     } catch (e) { doc.log.push('attachments: ' + e.message); }
     const bySha = new Map();
+    if (!found.length && bad.length) { // 3D content is declared but unreadable: report it (the app shows DECODE_ERROR), not "no 3D"
+      const out = bad.map((e, i) => { const st = dictSubtype(e.o);
+        return { index: i, subtype: st || 'U3D', declaredSubtype: st, filter: e.r ? (e.r.filters.join(' + ') || 'None') : 'undecodable', compressedLength: doc.rawStream(e.o).length, rawBytes: e.data,
+          title: `${e.meta.title || '3D Stream'} #${i + 1} (damaged, ${e.meta.container}${e.meta.page ? ' p' + e.meta.page : ''})`, objNum: e.o.num, page: e.meta.page, annot: e.meta.annot,
+          container: e.meta.container, annotations: 1, encrypted: !!doc.crypt, sameAs: undefined, badHeader: e.why, log: i === 0 ? doc.log : undefined }; });
+      out.attachments = attachments; out.log = doc.log; return out;
+    }
     const out = found.map((e, i) => {
       const fp = e.r.data.length + ':' + latin1(e.r.data, 0, 64) + latin1(e.r.data, Math.max(0, e.r.data.length - 64)); const same = bySha.get(fp); if (same === undefined) bySha.set(fp, i);
       return { index: i, subtype: e.st, filter: e.r.filters.join(' + ') || 'None', compressedLength: doc.rawStream(e.o).length, rawBytes: e.r.data,
@@ -2406,16 +2418,18 @@ return { wrapParseU3D, scanU3D };
  */
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.RHAdobeMesh = factory(); })(typeof self !== 'undefined' ? self : this, function () {
   const GUID = '96a804a6-3fb9-43c5-b2df-2a31b5569340';
+  const MAX_COUNT = 1 << 24; // per-array element cap (16.7M faces/positions per mesh block)
   function Reader(u8, p, end) {
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     const R = { p, end,
       u8() { if (R.p >= R.end) throw new Error('RHAdobe: read past block end'); return u8[R.p++]; },
-      u16() { const v = dv.getUint16(R.p, true); R.p += 2; return v; },
-      u24() { const v = u8[R.p] | (u8[R.p + 1] << 8) | (u8[R.p + 2] << 16); R.p += 3; return v >>> 0; },
-      u32() { const v = dv.getUint32(R.p, true); R.p += 4; return v; },
-      f32() { const v = dv.getFloat32(R.p, true); R.p += 4; return v; },
+      need(k) { if (R.p + k > R.end) throw new Error('RHAdobe: read past block end'); },
+      u16() { R.need(2); const v = dv.getUint16(R.p, true); R.p += 2; return v; },
+      u24() { R.need(3); const v = u8[R.p] | (u8[R.p + 1] << 8) | (u8[R.p + 2] << 16); R.p += 3; return v >>> 0; },
+      u32() { R.need(4); const v = dv.getUint32(R.p, true); R.p += 4; return v; },
+      f32() { R.need(4); const v = dv.getFloat32(R.p, true); R.p += 4; return v; },
       n(bytes) { return bytes === 1 ? R.u8() : bytes === 2 ? R.u16() : bytes === 3 ? R.u24() : R.u32(); },
-      str() { const L = R.u16(); const s = new TextDecoder().decode(u8.subarray(R.p, R.p + L)); R.p += L; return s; } };
+      str() { const L = R.u16(); R.need(L); const s = new TextDecoder().decode(u8.subarray(R.p, R.p + L)); R.p += L; return s; } };
     return R;
   }
   function rh39(R, count, end) {
@@ -2478,6 +2492,7 @@ return { wrapParseU3D, scanU3D };
     if (t === 0) return new Uint32Array(count);
     if (t === 1) return new Uint32Array(count).fill(R.u32());
     const size = R.n((b >> 6) + 1), start = R.p, end = start + size; let out;
+    if (end > R.end) throw new Error('RHAdobe: UINT block of ' + size + ' bytes overruns the mesh block');
     if (t === 2) { out = new Uint32Array(count); let b4 = 0; for (let i = 0; i < count; i++) { if (!(i & 1)) b4 = R.u8(); out[i] = i & 1 ? b4 >> 4 : b4 & 15; } }
     else if (t >= 3 && t <= 6) { out = new Uint32Array(count); for (let i = 0; i < count; i++) out[i] = R.n(t - 2); }
     else if (t === 7) out = rh39(R, count, end);
@@ -2512,6 +2527,7 @@ return { wrapParseU3D, scanU3D };
     const flags = R.u8(); if (flags & 15) throw new Error('RHAdobe: chunk version ' + (flags & 15) + ' != 0');
     if (flags & 16) throw new Error('RHAdobe: subchunk extension data not supported');
     const mcEnc = flags >> 6; const nMat = mcEnc === 0 ? 1 : R.n([0, 1, 2, 4][mcEnc]);
+    if (nMat > size) throw new Error('RHAdobe: bad material count ' + nMat);
     const materials = [];
     for (let m = 0; m < nMat; m++) {
       const mf = R.u8(); const layers = R.n(((mf >> 4) & 3) + 1); const shadingId = R.n(((mf >> 2) & 3) + 1);
@@ -2520,6 +2536,8 @@ return { wrapParseU3D, scanU3D };
     }
     const vf = R.u8(), vs = (vf >> 6) + 1; const cnt = {};
     ['faces', 'positions', 'normals', 'diffuse', 'specular', 'texCoords'].forEach((k, b) => { cnt[k] = vf & (1 << b) ? R.n(vs) : 0; });
+    // counts come from the stream and size the typed arrays below; anything past MAX_COUNT is a damaged block
+    for (const k in cnt) if (cnt[k] > MAX_COUNT) throw new Error(`RHAdobe: implausible ${k} count ${cnt[k]}`);
     const F = cnt.faces;
     const P = floatArray(R, cnt.positions, 3, info);
     const N = cnt.normals ? floatArray(R, cnt.normals, 3, info) : null;
@@ -2549,7 +2567,7 @@ return { wrapParseU3D, scanU3D };
   function scan(u8) {
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); const td = new TextDecoder();
     const str = (o) => { const L = dv.getUint16(o, true); return [td.decode(u8.subarray(o + 2, o + 2 + L)), o + 2 + L]; };
-    const decls = new Map(), meshes = [], nodes = [], warnings = [];
+    const decls = new Map(), meshes = [], nodes = [], warnings = [], meshErrors = [];
     function block(o, lim) {
       const type = dv.getUint32(o, true), ds = dv.getUint32(o + 4, true), ms = dv.getUint32(o + 8, true); const d0 = o + 12;
       if (d0 + ds > lim) throw new Error('U3D block overruns stream at ' + o);
@@ -2565,7 +2583,7 @@ return { wrapParseU3D, scanU3D };
       } else if (type >= 0x100 && type <= 0xFFFFFF && type !== 0x00443355) {
         const dcl = decls.get(type);
         if (dcl && dcl.name === 'RHAdobeMeshResource') {
-          try { meshes.push(decodeBlock(u8, d0, ds)); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); }
+          try { meshes.push(decodeBlock(u8, d0, ds)); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); meshErrors.push({ offset: o, message: e.message }); }
         } else warnings.push(`New Object Block type 0x${type.toString(16)} at ${o} has no RHAdobeMeshResource declaration`);
       } else if (type === 0xFFFFFF21 || type === 0xFFFFFF22) { // group/model node: name, parents{name, 4x4 col-major}, [resource]
         let [name, q] = str(d0); const np = dv.getUint32(q, true); q += 4; const parents = [];
@@ -2576,7 +2594,7 @@ return { wrapParseU3D, scanU3D };
       return d0 + p4(ds) + p4(ms);
     }
     let o = 0; while (o + 12 <= u8.length) o = block(o, u8.length);
-    return { decls, meshes, nodes, warnings };
+    return { decls, meshes, nodes, warnings, meshErrors };
   }
   const mul = (a, b) => { const r = new Float64Array(16); for (let c = 0; c < 4; c++) for (let rr = 0; rr < 4; rr++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + rr] * b[c * 4 + k]; r[c * 4 + rr] = s; } return r; };
   const I = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
@@ -2600,7 +2618,7 @@ return { wrapParseU3D, scanU3D };
           get faces() { return m.facesAoA(); }, analyticFeatures: [] });
       }
     }
-    return { format: 'U3D (ECMA-363) + RHAdobeMeshResource', parts, meshes: sc.meshes, nodes: sc.nodes, warnings: sc.warnings, decodePath: 'U3D/RHAdobeMeshResource' };
+    return { format: 'U3D (ECMA-363) + RHAdobeMeshResource', parts, meshes: sc.meshes, nodes: sc.nodes, warnings: sc.warnings, meshErrors: sc.meshErrors, decodePath: 'U3D/RHAdobeMeshResource' };
   }
   return { GUID, decodeBlock, scan, parseU3D, _rh39: rh39, _uic1: uic1, _uintBlock: uintBlock, Reader };
 });
@@ -3327,9 +3345,11 @@ function huffBuild(lens){ // canonical; returns {count,symbol}
   for(let s=0;s<lens.length;s++) if(lens[s]) symbol[offs[lens[s]]++]=s;
   return {count,symbol};
 }
+const INFLATE_MAX=1<<30; // 1 GiB: larger output is treated as a damaged stream (guards the V8 allocation limit)
 function inflateRaw(src, pos){
-  let out=new Uint8Array(Math.max(1024,src.length*4)), op=0, bitbuf=0, bitcnt=0, p=pos;
-  const need=n=>{ if(op+n>out.length){ let m=out.length*2; while(m<op+n)m*=2; const o=new Uint8Array(m); o.set(out.subarray(0,op)); out=o; } };
+  if(!(pos>=0&&pos<src.length)) throw new Error('inflate: offset '+pos+' outside the data');
+  let out=new Uint8Array(Math.min(INFLATE_MAX,Math.max(1024,src.length*4))), op=0, bitbuf=0, bitcnt=0, p=pos;
+  const need=n=>{ if(op+n>out.length){ if(op+n>INFLATE_MAX) throw new Error('inflate: output exceeds 1 GiB (damaged stream)'); let m=out.length*2; while(m<op+n)m*=2; m=Math.min(m,INFLATE_MAX); const o=new Uint8Array(m); o.set(out.subarray(0,op)); out=o; } };
   const bits=n=>{ while(bitcnt<n){ if(p>=src.length) throw new Error('inflate: unexpected end of data'); bitbuf|=src[p++]<<bitcnt; bitcnt+=8; } const v=bitbuf&((1<<n)-1); bitbuf>>>=n; bitcnt-=n; return v; };
   const decode=h=>{ let code=0,first=0,index=0; for(let len=1;len<16;len++){ code|=bits(1); const c=h.count[len]; if(code-c<first) return h.symbol[index+(code-first)]; index+=c; first+=c; first<<=1; code<<=1; } throw new Error('inflate: bad huffman code'); };
   let fixedL=null, fixedD=null, last=0;
@@ -3380,7 +3400,9 @@ class BitReader{
   ushort(){ const lo=this.bits(8), hi=this.bits(8); return lo|(hi<<8); }
   uint(){ let r=0,m=1; while(this.bit()){ r+=this.char()*m; m*=256; if(m>2**40) throw new Error('PRC: bad UnsignedInteger at bit '+this.p); } return r; }
   int(){ let r=0,j=0; while(this.bit() && j<4){ r|=this.char()<<(8*j); j++; } if(j>0&&j<4){ const s=32-8*j; r=(r<<s)>>s; } return r|0; }
-  str(){ if(!this.bit()) return null; const n=this.uint(); if(n>this.n) throw new Error('PRC: bad string length'); const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=this.char(); return utf8(a); }
+  // A count read from the stream must fit in the bits left in this section (minBits per element); checked before allocating.
+  count(n, minBits, what){ if(!(n>=0) || n*(minBits||1)>this.n-this.p) throw new Error('PRC: bad '+(what||'array')+' count '+n+' at bit '+this.p); return n; }
+  str(){ if(!this.bit()) return null; const n=this.uint(); if(n*8>this.n-this.p) throw new Error('PRC: bad string length'); const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=this.char(); return utf8(a); }
   dbl(){
     const T=dtab(); let code=0, e=null;
     for(let i=1;i<=22;i++){ code=code*2+this.bit(); e=T.get(i*16777216+code); if(e) break; }
@@ -3497,7 +3519,7 @@ class Reader{
   expect(type, what){ const t=this.r.uint(); if(t!==type) throw new Error(`PRC: expected ${what||type} (type ${type}) got ${t} at bit ${this.r.p}`); }
   schema(type){ this.ctx.vm.evalType(this.r, type, 0); }
   userData(){ const n=this.r.uint(); if(n>this.r.n-this.r.p) throw new Error('PRC: bad UserData size'); this.r.p+=n; return n; }
-  arr(n, f){ const a=new Array(n); for(let i=0;i<n;i++) a[i]=f(i); return a; }
+  arr(n, f){ this.r.count(n,1); const a=new Array(n); for(let i=0;i<n;i++) a[i]=f(i); return a; }
   uid(){ return [this.r.uint(),this.r.uint(),this.r.uint(),this.r.uint()]; }
   /* ---- base classes */
   attrEntry(){ const r=this.r; return r.bool()? {key:r.uint()} : {key:r.str()}; }
@@ -3671,9 +3693,9 @@ class Reader{
     this.schema(T.ASM_FileStructure); this.schema(T.ASM_FileStructureTree); this.userData();
     return {parts, products, internal:fs}; }
   /* ---- tessellation */
-  baseTess(){ const r=this.r; const calc=r.bool(); const n=r.uint(); const c=new Float64Array(n); for(let i=0;i<n;i++) c[i]=r.dbl(); return {isCalculated:calc, coordinates:c}; }
-  uintArr(){ const r=this.r, n=r.uint(); const a=new Uint32Array(n); for(let i=0;i<n;i++) a[i]=r.uint(); return a; }
-  dblArr(){ const r=this.r, n=r.uint(); const a=new Float64Array(n); for(let i=0;i<n;i++) a[i]=r.dbl(); return a; }
+  baseTess(){ const r=this.r; const calc=r.bool(); const n=r.count(r.uint(),1,'coordinate'); const c=new Float64Array(n); for(let i=0;i<n;i++) c[i]=r.dbl(); return {isCalculated:calc, coordinates:c}; }
+  uintArr(){ const r=this.r, n=r.count(r.uint(),1,'integer'); const a=new Uint32Array(n); for(let i=0;i<n;i++) a[i]=r.uint(); return a; }
+  dblArr(){ const r=this.r, n=r.count(r.uint(),1,'double'); const a=new Float64Array(n); for(let i=0;i<n;i++) a[i]=r.dbl(); return a; }
   vertexColors(nColors, inWire){ const r=this.r; const rgba=r.bool(); if(inWire) r.bool(); const opt=r.bool(); if(opt) return; const k=rgba?4:3;
     for(let j=0;j<k;j++) r.char(); for(let i=1;i<nColors;i++) if(!r.bool()) for(let j=0;j<k;j++) r.char(); }
   tessFace(){ this.expect(T.TESS_Face,'TESS_Face'); const r=this.r, f={};
@@ -3719,8 +3741,9 @@ function facePrimitives(f, cb){
     const textured=fl>=0x200, base=textured? fl>>8 : fl;
     const kind=(base===0x2||base===0x20)?'tri':(base===0x4||base===0x40)?'fan':'strip';
     const one=(base===0x20||base===0x40||base===0x80);
+    if(k>=s.length) throw new Error('PRC: face sizes array too short');
     if(kind==='tri'){ const n=s[k++]; cb(kind,one,textured,n*3,false); }
-    else { const cnt=s[k++]; for(let i=0;i<cnt;i++){ const v=s[k++]; cb(kind,one,textured,v&SIZE_MASK, !!(v&NORMAL_SINGLE)); } }
+    else { const cnt=s[k++]; if(cnt>s.length-k) throw new Error('PRC: bad face strip/fan count '+cnt); for(let i=0;i<cnt;i++){ const v=s[k++]; cb(kind,one,textured,v&SIZE_MASK, !!(v&NORMAL_SINGLE)); } }
   }
 }
 function faceVertexCount(f){ let n=0; facePrimitives(f,(k,o,t,nv)=>{ n+=nv; }); return n; }
@@ -3772,6 +3795,7 @@ function huffDecode(bytes, nbits){
   const map=new Map(); let zeroLen=null;
   for(let i=0;i<nl;i++){ const s=rb(nbits), l=rb(ml), c=rb(l); if(l===0) zeroLen=s; else map.set(2**l+c, s); }
   const cnt=rb(32); if(cnt>1e8) throw new Error('PRC: Huffman element count too large');
+  if(map.size && cnt>NB-bp) throw new Error('PRC: Huffman element count '+cnt+' exceeds the data'); // each element takes at least one bit
   const out=new Array(cnt);
   if(zeroLen!==null && !map.size){ out.fill(zeroLen); return out; }
   for(let k=0;k<cnt;k++){ let acc=0, len=0, v;
@@ -3810,18 +3834,19 @@ function readTess3dCompressed(rd){
   const nRef=r.uint(); if(nRef>r.n-r.p) throw new Error('PRC: bad reference array size');
   const isRef=new Uint8Array(nRef); let nTrue=0; for(let i=0;i<nRef;i++){ isRef[i]=r.bit(); nTrue+=isRef[i]; }
   t.isRef=isRef; t.pointRefs=compressedIndiceArray(r,false,nTrue);
-  const T=t.triFace.length; let nf=0; for(const f of t.triFace) if(f+1>nf) nf=f+1; t.numFaces=nf;
+  const T=t.triFace.length; let nf=0; for(const f of t.triFace){ if(!(f>=0)) throw new Error('PRC: bad face index '+f); if(f+1>nf) nf=f+1; } t.numFaces=nf;
+  if(nf>T) throw new Error('PRC: face index '+(nf-1)+' exceeds the triangle count '+T);
   t.mustRecalcNormals=r.bool();
   if(t.mustRecalcNormals){ const a=new Uint8Array(T); for(let i=0;i<T;i++) a[i]=r.bit(); t.normalIsReversed=a; t.creaseAngle=r.dbl(); r.char(); }
   else { t.normalAngleBits=r.char(); const ns=r.uint(); if(ns>r.n-r.p) throw new Error('PRC: bad normal data size');
     const nb=new Uint8Array(ns); for(let i=0;i<ns;i++) nb[i]=r.bit(); t.normalBits=nb;
     t.normalAngles=huffArray(r,t.normalAngleBits,true,0,true);
-    const pl=new Uint8Array(nf); for(let i=0;i<nf;i++) pl[i]=r.bit(); t.facePlanar=pl; }
+    r.count(nf,1,'face'); const pl=new Uint8Array(nf); for(let i=0;i<nf;i++) pl[i]=r.bit(); t.facePlanar=pl; }
   if(r.bool()){ const n=t.hasFaces?nf:1; for(let i=0;i<n;i++) r.bit(); t.pointColors=huffArray(r,8,true); }
-  t.multipleLineAttr=r.bool(); if(t.multipleLineAttr){ const n=t.hasFaces?nf:1; const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=r.bit(); t.lineAttrOnFace=a; }
+  t.multipleLineAttr=r.bool(); if(t.multipleLineAttr){ const n=r.count(t.hasFaces?nf:1,1,'line attribute'); const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=r.bit(); t.lineAttrOnFace=a; }
   t.lineAttributes=huffArray(r,16,true,0,true);
   if(!r.bool()){ // CompressedTextureParameter (skipped)
-    const bs=r.uint(); for(let i=0;i<4*bs;i++) r.char(); r.uint(); // binary data: size counted in 32-bit words
+    const bs=r.count(r.uint(),32,'texture word'); for(let i=0;i<4*bs;i++) r.char(); r.uint(); // binary data: size counted in 32-bit words
     const nr=r.uint(); for(let i=0;i<nr;i++){ const nb=r.bits(5); r.bits(nb); }
     r.dbl(); const tp=r.uint(); for(let i=0;i<tp;i++) f32le(r);
     if(!r.bool()) for(let i=0;i<nf;i++) r.bit();
@@ -3970,16 +3995,22 @@ function isIdentity(m){ const I=identity(); return m.every((v,i)=>Math.abs(v-I[i
 function u32(d,o){ return (d[o]|(d[o+1]<<8)|(d[o+2]<<16)|(d[o+3]<<24))>>>0; }
 function readFileHeader(d){
   if(d[0]!==0x50||d[1]!==0x52||d[2]!==0x43) throw new Error('PRC: missing "PRC" magic');
-  let o=3; const h={minVersion:u32(d,o), authoringVersion:u32(d,o+4)}; o+=8;
-  const uid=()=>{ const a=[u32(d,o),u32(d,o+4),u32(d,o+8),u32(d,o+12)]; o+=16; return a; };
-  h.fileUid=uid(); h.appUid=uid(); const n=u32(d,o); o+=4; h.fileStructures=[];
-  for(let i=0;i<n;i++){ const fs={uid:uid(), reserved:u32(d,o)}; o+=4; const sc=u32(d,o); o+=4; fs.offsets=[]; for(let j=0;j<sc;j++){ fs.offsets.push(u32(d,o)); o+=4; } h.fileStructures.push(fs); }
-  h.modelFileStart=u32(d,o); h.modelFileEnd=u32(d,o+4); o+=8;
-  const nu=u32(d,o); o+=4; h.uncompressedFiles=[]; for(let i=0;i<nu;i++){ const sz=u32(d,o); o+=4; h.uncompressedFiles.push(d.subarray(o,o+sz)); o+=sz; }
+  const L=d.length; const need=(o,k,what)=>{ if(o+k>L) throw new Error('PRC: file header truncated ('+what+')'); };
+  const off=(v,what)=>{ if(!(v<L)) throw new Error('PRC: '+what+' offset '+v+' outside the stream ('+L+' bytes)'); return v; };
+  let o=3; need(o,8,'version'); const h={minVersion:u32(d,o), authoringVersion:u32(d,o+4)}; o+=8;
+  const uid=()=>{ need(o,16,'uid'); const a=[u32(d,o),u32(d,o+4),u32(d,o+8),u32(d,o+12)]; o+=16; return a; };
+  h.fileUid=uid(); h.appUid=uid(); need(o,4,'structure count'); const n=u32(d,o); o+=4; h.fileStructures=[];
+  if(n<1 || n*24>L-o) throw new Error('PRC: bad file structure count '+n);
+  for(let i=0;i<n;i++){ const fs={uid:uid(), reserved:(need(o,8,'structure'),u32(d,o))}; o+=4; const sc=u32(d,o); o+=4;
+    if(sc<6 || sc*4>L-o) throw new Error('PRC: bad section count '+sc+' in file structure '+i);
+    fs.offsets=[]; for(let j=0;j<sc;j++){ fs.offsets.push(off(u32(d,o),'section')); o+=4; } h.fileStructures.push(fs); }
+  need(o,12,'model file'); h.modelFileStart=off(u32(d,o),'model file'); h.modelFileEnd=u32(d,o+4); o+=8;
+  const nu=u32(d,o); o+=4; if(nu*4>L-o) throw new Error('PRC: bad uncompressed file count '+nu);
+  h.uncompressedFiles=[]; for(let i=0;i<nu;i++){ need(o,4,'uncompressed file'); const sz=u32(d,o); o+=4; if(sz>L-o) throw new Error('PRC: bad uncompressed file size '+sz); h.uncompressedFiles.push(d.subarray(o,o+sz)); o+=sz; }
   return h;
 }
 function readFSHeader(d,o){ // uncompressed file-structure header
-  if(d[o]!==0x50||d[o+1]!==0x52||d[o+2]!==0x43) throw new Error('PRC: bad file structure header at '+o);
+  if(!(o+11<=d.length)) throw new Error('PRC: file structure header outside the stream'); if(d[o]!==0x50||d[o+1]!==0x52||d[o+2]!==0x43) throw new Error('PRC: bad file structure header at '+o);
   const h={minVersion:u32(d,o+3), authoringVersion:u32(d,o+7)}; return h; }
 function section(d, off){ const r=inflateRaw(d, off+2); return r.data; }
 
@@ -4023,6 +4054,9 @@ function parsePRC(input, opts){
   let d=input instanceof Uint8Array? input : new Uint8Array(input);
   if(d[0]===0x25&&d[1]===0x50&&d[2]===0x44&&d[3]===0x46) d=extractPRCFromPDF(d)[0]; // %PDF
   const hdr=readFileHeader(d);
+  // damage (1.6.1): decode failures caught below (unreadable exact geometry / topology context, undecodable tessellation);
+  // a stream that yields no body and has damage is reported as damaged by the app (DECODE_ERROR), not as unsupported
+  const damage=(opts.damage=[]);
   const fss=hdr.fileStructures.map((fsd,fi)=>{
     const o=fsd.offsets; const fsh=readFSHeader(d,o[0]);
     const ctx={authoringVersion:fsh.authoringVersion||hdr.authoringVersion, curName:null, graphics:{layer:-1,lineStyle:-1,behavior:1}, numFileStructures:hdr.fileStructures.length};
@@ -4036,8 +4070,8 @@ function parsePRC(input, opts){
       if(id===T.ASM_FileStructureGeometry){ const rr=new Reader(r,ctx); rr.prcBase();
         const B=getBrep(); fs.geometry.topoContexts=r.peekUint();
         if(B && fs.geometry.topoContexts && opts.exact!==false){ const wl=opts.warnings=opts.warnings||[];
-          try{ fs.geometry.contexts=B.readExactGeometry(r, ctx, m=>wl.push('FS'+fi+' exact geometry: '+m)); }
-          catch(e){ wl.push('FS'+fi+' exact geometry unreadable: '+e.message); } } } }
+          try{ fs.geometry.contexts=B.readExactGeometry(r, ctx, m=>{ wl.push('FS'+fi+' exact geometry: '+m); if(/^topo context \d+: /.test(m)) damage.push('FS'+fi+' exact geometry: '+m); }); }
+          catch(e){ wl.push('FS'+fi+' exact geometry unreadable: '+e.message); damage.push('FS'+fi+' exact geometry unreadable: '+e.message); } } } }
     { const g=section(d,o[5]); fs.extraGeometry={sizeBytes:g.length}; }
     return fs; });
   let model;
@@ -4059,7 +4093,7 @@ function resolveColor(g, styleIdx){
 }
 
 function assemble(hdr, fss, model, opts){
-  const parts=[], wires=[], treeOut=[]; const warnings=(opts.warnings=opts.warnings||[]);
+  const parts=[], wires=[], treeOut=[]; const warnings=(opts.warnings=opts.warnings||[]); const damage=(opts.damage=opts.damage||[]);
   const nameCount=new Map();
   const uniq=n=>{ const c=(nameCount.get(n)||0)+1; nameCount.set(n,c); return c===1? n : n+'_'+c; };
   const uidKey=u=>u.join(','); const fsMap=new Map(fss.map(f=>[uidKey(f.uid),f]));
@@ -4106,7 +4140,7 @@ function assemble(hdr, fss, model, opts){
         const mkPos=()=>{ const pos=[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]])); return pos; };
         if(tess.kind==='compressed'){
           if(!tess.decoded){ try{ tess.decoded=decodeTess3dCompressed(tess, w=>warnings.push('tess #'+ri.tessIndex+': '+w)); }
-            catch(e){ tess.decoded={coordinates:[],tris:[],faceOf:[],error:e.message}; warnings.push('tess #'+ri.tessIndex+' ('+label+'): '+e.message); } }
+            catch(e){ tess.decoded={coordinates:[],tris:[],faceOf:[],error:e.message}; warnings.push('tess #'+ri.tessIndex+' ('+label+'): '+e.message); damage.push('tess #'+ri.tessIndex+': '+e.message); } }
           const D=tess.decoded; if(!D.tris.length) return;
           const cc=D.coordinates; let cpos=null, cidx=null;
           if(T){ cpos=applyFlat(RM,cc); cidx=D._idx||(D._idx=packTris(D.tris,(cc.length/3)|0)); }
@@ -4174,7 +4208,7 @@ function assemble(hdr, fss, model, opts){
   }
   const unitsInMM=model.unitsInMM;
   const unitName= Math.abs(unitsInMM-1)<1e-9?'mm': Math.abs(unitsInMM-25.4)<1e-9?'in': Math.abs(unitsInMM-10)<1e-9?'cm': Math.abs(unitsInMM-1000)<1e-9?'m': String(unitsInMM)+' mm';
-  return { parts, wires, units:{unitsInMM, name:unitName, fromCAD:model.unitsFromCAD}, tree:treeOut,
+  return { parts, wires, damage, units:{unitsInMM, name:unitName, fromCAD:model.unitsFromCAD}, tree:treeOut,
     info:{ minVersion:hdr.minVersion, authoringVersion:hdr.authoringVersion, fileStructures:fss.map(f=>({schemaTypes:f.schemaTypes, numParts:f.tree.parts.length, numProducts:f.tree.products.length,
       tessellations:f.tessellations.map(t=>({kind:t.kind, numCoords:t.coordinates?t.coordinates.length:(t.points?t.points.length:0), numFaces:t.faces?t.faces.length:0})), geometry:f.geometry, extraGeometry:f.extraGeometry,
       colors:f.globals.colors.length, styles:f.globals.styles.length, materials:f.globals.materials.length, coordinateSystems:f.globals.coordinateSystems.length})),
@@ -4953,7 +4987,7 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.0
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.1
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -4970,7 +5004,7 @@ void main() { gl_FragColor = uRGBA; }`;
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.6.0';
+  const APP_VERSION = '1.6.1';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -5412,6 +5446,9 @@ void main() { gl_FragColor = uRGBA; }`;
       }
 
       this.bitPos = 0;
+      // 1.6.1: reading more than 64 bytes past the block end means the counts came from damaged data; throw (DECODE_ERROR)
+      // instead of looping on zero bits (a damaged count could otherwise spin for minutes)
+      this.bitLimit = (byteLen + 64) * 8;
       this.high = 0x0000ffff;
       this.low = 0x00000000;
       this.underflowCount = 0;
@@ -5447,7 +5484,12 @@ void main() { gl_FragColor = uRGBA; }`;
       return (w >>> (bp & 31)) & 1;
     }
 
+    overrun() {
+      throw new Error(`U3D: read past the end of a ${this.byteLen}-byte block at offset ${this.startOffset} (damaged data)`);
+    }
+
     readBit() {
+      if (this.bitPos > this.bitLimit) this.overrun();
       const b = this.peekBitAt(this.bitPos);
       this.bitPos += 1;
       return b >>> 0;
@@ -5521,6 +5563,7 @@ void main() { gl_FragColor = uRGBA; }`;
         this.low = (this.low << 1) & 0x7fff;
         this.high = ((this.high << 1) & 0x7fff) | 0x8001;
       }
+      if (this.bitPos > this.bitLimit) this.overrun();
       return uValue >>> 0;
     }
 
@@ -5799,6 +5842,7 @@ void main() { gl_FragColor = uRGBA; }`;
     r.warnings = r.warnings || [];
     const tris = (r.parts || []).reduce((n, p) => n + ((p.faces && p.faces.length) || 0), 0);
     r.decodePath = tris ? 'U3D' : 'none';
+    if (tris && r.damage && r.damage.length) r.warnings.push(`U3D: damaged data skipped (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
     if (!tris) {
       // Vendor mesh "RHAdobeMeshResource" (Adobe Acrobat SDK 8.1 U3D supplement; decoder by QA/Tester)
       const RH = getModule('RHAdobeMesh', 'u3d-rhadobe-mesh.js');
@@ -5823,7 +5867,12 @@ void main() { gl_FragColor = uRGBA; }`;
             return r;
           }
           for (const w of rr.warnings || []) r.warnings.push(w);
-        } catch (e) { r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+          // declared RHAdobeMeshResource mesh block(s) exist but none decoded: the mesh data is damaged (DECODE_ERROR), not an unsupported format
+          if (rr.meshErrors && rr.meshErrors.length) { const e0 = rr.meshErrors[0]; const err = new Error(`RHAdobeMeshResource mesh is damaged (${rr.meshErrors.length} block${rr.meshErrors.length > 1 ? 's' : ''}; block at ${e0.offset}: ${e0.message})`); err.rhDamaged = true; throw err; }
+        } catch (e) { if (e && e.rhDamaged) throw e; r.warnings.push(`RHAdobeMeshResource: ${e.message}`); }
+      }
+      if (r.damage && r.damage.length) {
+        throw new Error(`U3D stream is damaged (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
       }
       const G = getModule('U3DGuard', 'u3d-guard.js');
       const sc = G ? G.scanU3D(u8) : { types: {}, newTypes: [] };
@@ -5857,6 +5906,9 @@ void main() { gl_FragColor = uRGBA; }`;
     const materials = new Map();
     const meshDecls = new Map();
     const meshes = new Map();
+    // 1.6.1: decode failures the parser recovers from (a block nested in a modifier chain, a progressive-mesh step);
+    // parseU3DStream reports a stream with damage and no mesh as DECODE_ERROR instead of UNSUPPORTED_MESH
+    const damage = [];
 
     // Parse a single U3D block at [dataStart, dataStart + dataSize)
     function parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, blockOffset, isNested = false) {
@@ -5912,7 +5964,8 @@ void main() { gl_FragColor = uRGBA; }`;
                   const subMetaStart = subDataStart + pad4(subDataSize);
                   const subNext = subMetaStart + pad4(subMetaSize);
                   if (subNext > chainEnd + 4) break;
-                  parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true);
+                  try { parseSingleBlock(subType, subDataStart, subDataSize, subMetaStart, subMetaSize, subOff, true); }
+                  catch (e) { damage.push(`block ${blockTypeName(subType)} at ${subOff}: ${e && e.message}`); throw e; }
                   subOff = subNext;
                 }
               }
@@ -6306,8 +6359,9 @@ void main() { gl_FragColor = uRGBA; }`;
               pm.addFace(tri[0], tri[1], tri[2], meta.shId);
             }
           }
-        } catch (_) {
+        } catch (e) {
           // Keep progressive mesh decoded up to the last complete resolution step
+          damage.push(`progressive mesh block at ${blockOffset}: ${e && e.message}`);
         }
       }
     }
@@ -6320,7 +6374,10 @@ void main() { gl_FragColor = uRGBA; }`;
       const dataStart = offset + 12;
       const metaStart = dataStart + pad4(dataSize);
       const nextBlockOffset = metaStart + pad4(metaSize);
-      if (dataStart + dataSize > u8.length) break;
+      if (dataStart + dataSize > u8.length) {   // truncated stream or a damaged block size
+        damage.push(`block 0x${(blockType >>> 0).toString(16)} at ${offset} declares ${dataSize} data bytes but the stream ends ${u8.length - dataStart} bytes later`);
+        break;
+      }
 
       parseSingleBlock(blockType, dataStart, dataSize, metaStart, metaSize, offset, false);
       offset = nextBlockOffset;
@@ -6419,6 +6476,7 @@ void main() { gl_FragColor = uRGBA; }`;
       profileId,
       unitsScalingFactor,
       blocks,
+      damage,
       parts
     };
   }
@@ -6494,6 +6552,10 @@ void main() { gl_FragColor = uRGBA; }`;
       positions: mm === 1 ? w.positions : w.positions.map(toMM), polylines: w.polylines || []
     }));
     const fsInfo = (r.info && r.info.fileStructures) || [];
+    // nothing decoded and the decoder caught decode failures: a damaged stream (DECODE_ERROR), not an unsupported one
+    if (!parts.length && r.damage && r.damage.length) {
+      throw new Error(`PRC stream is damaged (${r.damage[0]}${r.damage.length > 1 ? `; ${r.damage.length - 1} more` : ''})`);
+    }
     const exactParts = parts.filter((p) => p.source === 'brep').length;
     const decodePath = !parts.length ? 'none' : exactParts === parts.length ? 'PRC exact B-Rep' : exactParts ? 'PRC tess + exact B-Rep' : 'PRC tess';
     let unsupportedDetail;
@@ -8718,16 +8780,16 @@ void main() { gl_FragColor = uRGBA; }`;
     // Viewport HUD
     const activeStream = state.streams[state.activeStreamIdx];
     const hudStreamTitle = document.getElementById('hudStreamTitle');
-    if (hudStreamTitle && activeStream) {
-      hudStreamTitle.textContent = `Stream: ${activeStream.title} (${activeStream.subtype === 'PRC' ? 'ISO 14739-1' : 'ECMA-363'})`;
+    if (hudStreamTitle) { // cleared when the view is cleared / a load finds no 3D (no stale stream name)
+      hudStreamTitle.textContent = activeStream ? `Stream: ${activeStream.title} (${activeStream.subtype === 'PRC' ? 'ISO 14739-1' : 'ECMA-363'})` : '';
     }
     const hudAssemblyStats = document.getElementById('hudAssemblyStats');
     if (hudAssemblyStats) {
       hudAssemblyStats.textContent = `Solids: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
     }
     const hudBounds = document.getElementById('hudBounds');
-    if (hudBounds && bounds.size) {
-      hudBounds.textContent = `Bounds: ${bounds.size.map((v) => (+v).toFixed(1)).join(' \u00d7 ')} ${state.units}`;
+    if (hudBounds) {
+      hudBounds.textContent = bounds.size && state.parts.length ? `Bounds: ${bounds.size.map((v) => (+v).toFixed(1)).join(' \u00d7 ')} ${state.units}` : '';
     }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
@@ -8823,6 +8885,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const st = state.streams[idx];
     if (!st.parsed) {
       try {
+        if (st.badHeader) throw new Error(st.badHeader); // pdf-extract: declared 3D stream that is not U3D/PRC data
         if (st.subtype === 'PRC') {
           st.parsed = await parsePRCStream(st.rawBytes, { typed: true });
         } else {
@@ -8861,7 +8924,14 @@ void main() { gl_FragColor = uRGBA; }`;
     return { status: 'unsupported', reasonCode: 'UNSUPPORTED_MESH', ...base, detail, wires: (p.wires || []).length,
       message: `This PDF has a 3D model, but it's stored in a format the app can't read yet (${st.subtype}, ${detail}).` };
   }
-  function setLastLoad(r) { (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r; }
+  // every lastLoad (1.6.1) carries the PDF's embedded files: attachments = names (as NO_3D had since 1.5.3),
+  // attachmentDetails = [{ name, ext, isCAD, size, description, error }] (no bytes; the Attachments panel downloads them)
+  function setLastLoad(r) {
+    const atts = state.attachments || [];
+    r.attachments = atts.map((a) => a.name);
+    r.attachmentDetails = atts.map((a) => ({ name: a.name, ext: a.ext || '', isCAD: !!a.isCAD, size: a.size || 0, description: a.description || '', error: a.error || null }));
+    (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r;
+  }
 
   async function loadPDFBuffer(u8, fileName) {
     state.fileName = fileName || 'document-3d.pdf';
@@ -8869,15 +8939,16 @@ void main() { gl_FragColor = uRGBA; }`;
     const streams = await extract3DStreamsFromPDF(u8, state.fileName);
     state.attachments = (streams && streams.attachments) || [];
     if (streams.length === 0) {
-      setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0, attachments: state.attachments.map((a) => a.name),
+      setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0,
         message: state.attachments.length ? 'No 3D model in this PDF; it has embedded file attachments.' : 'No 3D model (U3D / PRC) in this PDF.' });
       // Simple mode shows the NO_3D load card in the empty viewport instead of an alert (Advanced keeps the alert)
       const simpleUI = typeof document !== 'undefined' && document.body && document.body.classList.contains('sm-simple');
+      // clear the previous model in every NO_3D case (the file name already changed; the HUD stream name must not linger)
+      state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
+      state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
+      refreshAllUI();
       if (state.attachments.length || simpleUI) {
         // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
-        state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
-        state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
-        refreshAllUI();
         return;
       }
       alert('No embedded /3D (U3D / PRC) streams or file attachments found in this file.');
@@ -9447,10 +9518,10 @@ void main() { gl_FragColor = uRGBA; }`;
       if (!sel.ids.length) return exportSkipped('no_parts', 'No visible part to export');
       const why = 'This browser can\u2019t run surface fitting (no Web Workers or WebAssembly)';
       const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: 0, reasonCode: 'browser_unsupported', reason: why, written: omit ? 'omitted' : 'mesh' }));
-      if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0 } };
+      if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0, fitSkippedReason: 'browser_unsupported' } };
       const m = await exportFormatCore('step', { ...o, body: 'mesh', fittedOnly: false });
       if (m.status !== 'ok') return m;
-      return { ...m, status: 'mesh_only', reasonCode: 'browser_unsupported', reason: why + ', so the mesh STEP was saved instead', meshStep: true, summary: { parts, faces: 0 } };
+      return { ...m, status: 'mesh_only', reasonCode: 'browser_unsupported', reason: why + ', so the mesh STEP was saved instead', meshStep: true, summary: { parts, faces: 0, fitSkippedReason: 'browser_unsupported' } };
     }
     // writable: noBlob -> the engine returns its STEP text chunks as _parts (no Blob is made)
     const r = await cad(o.partIds == null ? null : o.partIds, { fittedOnly, solidsOnly: fittedOnly, onProgress: progress, signal, ...(o.writable ? { noBlob: true } : {}) });
@@ -9499,7 +9570,7 @@ void main() { gl_FragColor = uRGBA; }`;
       await new Promise((res) => setTimeout(res, 0));
       const meshParts = left.map((p) => { const ap = state.parts[p.index]; return Object.assign(Object.create(Object.getPrototypeOf(ap)), ap, { name: `${p.name}_mesh`, visible: true }); });
       const meshText = buildSTEPAP214(meshParts, { units: 'mm', brepMode: 'merged', detail: 1 });   // same mesh body as the 'both' file
-      const fittedText = !blob ? null : blob._parts ? blob._parts.join('') : await blob.text();
+      const fittedText = !blob ? null : blob._parts ? blob._parts : await blob.text(); // chunk array: mergeSTEPChunks streams it (no join)
       if (signal && signal.aborted) return exportCancelled();
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
       blob = { _parts: chunks, _type: 'application/step' };   // exportFormat makes the Blob or writes the chunks
@@ -9578,7 +9649,7 @@ void main() { gl_FragColor = uRGBA; }`;
   //   opts.writable (FileSystemWritableFileStream from showSaveFilePicker().createWritable()) -> every writer streams into it:
   //     each ~1 MB piece is UTF-8 encoded and awaited with writable.write(Uint8Array) as it is produced; no Blob is created
   //     or read back -> { blob: null, delivery: 'picker', size }. A failed write -> status 'error', reasonCode 'WRITE_FAILED'
-  //     (the file is partly written). exportFormat never calls close() or abort(): the caller does
+  //     (the file is partly written; errorName = the thrown error's name, quota = errorName === 'QuotaExceededError'). exportFormat never calls close() or abort(): the caller does
   //     (close on a result with delivery 'picker', abort + remove the file otherwise).
   async function exportFormat(format, opts) {
     const o = opts || {}; const w = o.writable || null;
@@ -9600,8 +9671,11 @@ void main() { gl_FragColor = uRGBA; }`;
     } catch (e) {
       if (stream._gen) { try { stream._gen.return(); } catch (e2) { /* done */ } }
       if (e && e.name === 'AbortError' && o.signal && o.signal.aborted) return exportCancelled();
+      // errorName / quota (1.6.1): the card shows the free-space line only for a full disk (QuotaExceededError)
+      const errorName = (e && e.name) || null;
       return Object.assign(res, { blob: null, delivery: 'picker', size: null, status: 'error', reasonCode: 'WRITE_FAILED',
-        reason: 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, '') });
+        reason: 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, ''),
+        errorName, quota: errorName === 'QuotaExceededError' });
     }
   }
   PDF3D_NS.exportFormat = exportFormat;
@@ -9751,7 +9825,7 @@ void main() { gl_FragColor = uRGBA; }`;
   const SRC = cs && cs.src ? cs.src : null;
   const VER = SRC ? (new URL(SRC).searchParams.get('v') || '') : '';
   // cad-worker.js has its own cache key: bump WORKER_REV when the worker changes within a release
-  const WORKER_REV = '2';
+  const WORKER_REV = '1';
   const WORKER_URL = SRC ? new URL('cad-worker.js?v=' + encodeURIComponent((VER || '0') + '-w' + WORKER_REV), SRC).href : null;
 
   const LIMITS = {
@@ -9812,7 +9886,11 @@ void main() { gl_FragColor = uRGBA; }`;
     if (!fittable) { mode = 'mesh_only'; cause = noFaceDataCause(stream); }
     else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; cause = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + ')'; }
     // why: the preflight / mesh_only text; cause: the same without the mesh clause (fitted-only skips write nothing)
-    return { st, ids, parts, tris, stream, mode, cause, why: cause && cause + ', so only the mesh body is exported' };
+    // model-wide reason no part was fitted (1.6.1, summary.fitSkippedReason): the card can show one line instead of per-part rows
+    const skip = mode === 'fit' ? { fitSkippedReason: null }
+      : fittable ? { fitSkippedReason: 'too_many_tris', fitSkippedTris: tris, fitSkippedLimit: LIMITS.maxFitTris }
+        : { fitSkippedReason: 'no_face_data' };
+    return { st, ids, parts, tris, stream, mode, cause, skip, why: cause && cause + ', so only the mesh body is exported' };
   }
   // the source format of the active stream: payload magic first (the /Subtype can lie), then the decoder's format, then /Subtype
   const sourceFormat = (stream) => {
@@ -9845,6 +9923,14 @@ void main() { gl_FragColor = uRGBA; }`;
     return { ok: true, reason: null, message: sel.why || '', estimate };
   }
 
+  // UTF-8 bytes -> string chunks of ~size bytes each (a streaming decode keeps multi-byte characters whole).
+  // buf: the worker's fittedStep, an ArrayBuffer (transferred), or any typed-array view
+  function decodeChunks(buf, size) {
+    const u8 = buf instanceof Uint8Array ? buf : ArrayBuffer.isView(buf) ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) : new Uint8Array(buf);
+    size = size || (4 << 20); const td = new TextDecoder('utf-8'); const out = [];
+    for (let o = 0; o < u8.length; o += size) out.push(td.decode(u8.subarray(o, Math.min(u8.length, o + size)), { stream: o + size < u8.length }));
+    return out;
+  }
   // UTF-8 byte length of a string (lone surrogates count 3, as TextEncoder writes U+FFFD)
   function utf8Length(str) {
     let n = 0;
@@ -9869,7 +9955,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const pre = canExportCadSurfaces(partIds); const sel = selection(partIds);
     const stem = ((sel.st && sel.st.fileName) || 'cad-3d-pdf-assembly').replace(/\.(pdf|u3d|prc)$/i, '');
     const filename = stem + (fittedOnly ? '-surfaces-only.stp' : '-surfaces.stp');
-    const blank = (extra) => ({ faces: 0, byType: zeroTypes(), closed: false, valid: false, unfitFaces: [], meshFallback: false, timings, tris: sel.tris, parts: [], wasmHeapPeak: 0, ...extra });
+    const blank = (extra) => ({ faces: 0, byType: zeroTypes(), closed: false, valid: false, unfitFaces: [], meshFallback: false, timings, tris: sel.tris, parts: [], wasmHeapPeak: 0, ...sel.skip, ...extra });
     const cancelled = () => ({ blob: null, filename: null, status: 'cancelled', reason: 'Cancelled by user', reasonCode: 'cancelled', summary: null });
     if (!pre.ok) return { blob: null, filename: null, status: 'skipped', reason: pre.message, reasonCode: pre.reason, summary: blank() };
     if (signal && signal.aborted) return cancelled();
@@ -9917,7 +10003,8 @@ void main() { gl_FragColor = uRGBA; }`;
       if (signal && signal.aborted) return cancelled();
       emit({ stage: 'write', pct: 99, label: 'Writing STEP…' });
       const t = performance.now();
-      const fittedText = wres && wres.fittedStep ? new TextDecoder().decode(wres.fittedStep) : null;
+      // fitted STEP bytes -> 4 MiB string chunks (streamed decode; mergeSTEPChunks carries partial lines), never one big string
+      const fittedText = wres && wres.fittedStep ? decodeChunks(wres.fittedStep) : null;
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
       let size = 0;
       if (o.noBlob) for (const c of chunks) size += utf8Length(c);
@@ -9947,6 +10034,8 @@ void main() { gl_FragColor = uRGBA; }`;
   }
 
   function summarize(parts, wres, sel, meshFallback, timings) {
+    // one entry per body: the worker's list deduplicated by part index (never more rows than parts exported)
+    const seen = new Set(); parts = parts.filter((p) => !seen.has(p.idx) && seen.add(p.idx));
     const byType = zeroTypes(); let faces = 0; const unfit = [];
     for (const p of parts) { if (p.status === 'mesh_only') { for (const f of p.summary.unfitFaces || []) unfit.push({ part: p.idx, face: f }); continue; }
       faces += p.summary.faces; for (const k in p.summary.byType) byType[k] = (byType[k] || 0) + p.summary.byType[k];
@@ -9955,7 +10044,7 @@ void main() { gl_FragColor = uRGBA; }`;
     if (wres && wres.byType) { for (const k in byType) byType[k] = 0; for (const k in wres.byType) if (wres.byType[k] || byType[k] != null) byType[k] = wres.byType[k]; }
     const all = parts.length > 0 && parts.every((p) => p.status === 'solid');
     if (wres) for (const k of ['kernel', 'kernelDownload', 'decode', 'segment', 'fit', 'build', 'validate']) if (wres.timings[k] != null) timings[k] = wres.timings[k];
-    return { faces, byType, closed: all, valid: all, unfitFaces: unfit, meshFallback, timings, tris: sel.tris,
+    return { faces, byType, closed: all, valid: all, unfitFaces: unfit, meshFallback, timings, tris: sel.tris, ...sel.skip,
       parts: parts.map((p) => ({ index: p.idx, name: p.summary.name, status: p.status, reason: p.reason, faces: p.summary.faces, tris: p.summary.tris, check: p.summary.check })),
       wasmHeapPeak: (wres && wres.wasmHeapPeak) || 0 };
   }
@@ -10700,7 +10789,7 @@ void main() { gl_FragColor = uRGBA; }`;
     // Parasolid: only when the app writes the NX form (PDF3D.capabilities.parasolid) and its Advanced button exists.
     const caps = (window.PDF3D && window.PDF3D.capabilities) || {};
     const xt = $('btnExportXT');
-    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t', '', 'Faceted solid, flat faces']);
+    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t', '', 'Faceted body, flat faces']);
     for (const [id, label, ext, cls, sub] of list) {
       const orig = $(id);
       if (!orig || !isOwnShown(orig)) continue;
@@ -11458,12 +11547,16 @@ void main() { gl_FragColor = uRGBA; }`;
  *   Result extras (optional): delivery: 'picker'|'download', size (bytes; overrides blob.size), summary.estimatedBytes
  *       (fallback when there is no blob size). Downloaded (no picker, or delivery === 'download') and > 300 MB → the green
  *       card becomes amber "Check that the download finished" (Chrome can cancel huge blob downloads silently, 0-byte file).
- * Saving: showSaveFilePicker (Chrome/Edge) is called FIRST, inside the click gesture. With the hook, handle.createWritable() is
- *   passed as opts.writable: the writer streams parts into it and returns { blob: null, delivery: 'picker', size } without
- *   closing; we close() and only then show the green card. A returned blob (old writer / no hook) is written by us.
+ * Saving: showSaveFilePicker (Chrome/Edge) is called FIRST, inside the click gesture. Then handle.createWritable() (retried once
+ *   if it rejects) is opened BEFORE the export and passed as opts.writable: the writer streams parts into it and returns
+ *   { blob: null, delivery: 'picker', size } without closing; we close() and only then show the green card. A returned blob
+ *   (old writer / no hook) is written by us. Both createWritable() attempts fail → the empty picked file is removed and the
+ *   export goes out as a browser download ("Downloaded as {name}", > 300 MB check applies).
  *   WRITE_FAILED, a browser error while writing, or write()/close() rejecting → abort(), remove the file (handle.remove(),
- *   else truncate to 0 bytes) and an amber "Couldn’t finish saving {name}" card; raw browser text is never shown.
- * Elsewhere: an inline file-name field + <a download> ("Saves to your Downloads folder"; card says "Sent to Downloads as").
+ *   else truncate to 0 bytes) and an amber "Couldn’t finish saving {name}" card; raw browser text is never shown. The
+ *   free-space line only for QuotaExceededError / a quota-like writer result; otherwise "Try again, or export as a smaller format."
+ * Elsewhere: an inline file-name field + <a download> ("Your browser will download the file."; card says "Downloaded as").
+ * Wording never names a folder and never says whether a dialog appeared: the browser decides (Brave can ask where to save).
  * Picker cancel = quiet no-op.
  * Every export ends in a visible result card that stays until dismissed or the next export starts; it is hidden while the
  * Export popover is open (it would cover Save) and comes back if the popover closes without a new export.
@@ -11594,7 +11687,7 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.nameExt = h('span', { class: 'xf-name-ext' });
     ui.nameRow = h('div', { class: 'xf-name', 'data-xf': 'name-row' },
       h('label', { class: 'xf-field' }, h('span', { text: 'File name' }), h('span', { class: 'xf-name-box' }, ui.name, ui.nameExt)),
-      h('p', { class: 'xf-note', 'data-xf': 'downloads-note', text: 'Saves to your Downloads folder.' }));
+      h('p', { class: 'xf-note', 'data-xf': 'downloads-note', text: 'Your browser will download the file.' }));
     ui.go = h('button', { type: 'button', class: 'btn btn-primary xf-go', 'data-xf': 'save', text: 'Save as…' });
     ui.go.addEventListener('click', (ev) => { ev.stopPropagation(); doSave(); });
     ui.name.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); doSave(); } });
@@ -11903,42 +11996,40 @@ void main() { gl_FragColor = uRGBA; }`;
     const run = running = { ctrl: new AbortController(), format: f.id, t0: performance.now(), writable: null };
     progress(f, opts);
     document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'start', format: f.id } }));
-    // Save-as + Dev's hook: open the writable now and let the writer stream parts into it (one huge Blob can't be read
-    // in Chrome). The writer never closes it; this flow owns close() / abort().
-    if (handle && hasHook() && typeof handle.createWritable === 'function') {
-      try { run.writable = await handle.createWritable(); } catch (e) { run.writable = null; }
+    // Save-as: open the writable BEFORE the export (one retry if the first createWritable() fails), so Dev's hook gets it as
+    // opts.writable and streams parts into it (one huge Blob can't be read in Chrome, RECHECK-5e700b8 F1). The writer never
+    // closes it; this flow owns close() / abort(). Both attempts fail → the export goes out as a browser download instead:
+    // the empty file the picker created is removed first and the card says "Downloaded as {name}".
+    let cleanup = '', dl = !handle;
+    if (handle) {
+      run.writable = await openWritable(handle);
+      if (!run.writable) { cleanup = await discard(handle, run); handle = null; dl = true; }
     }
-    let res, err = null, cleanup = '';
+    let res, err = null;
     try { res = await runExport(f, opts, run); } catch (e) { err = e; }
     let out;
     try {
       if (handle && (err || writeFailed(res))) throw new SaveError(err);
       out = describe(f, opts, res, err);
       if (out.blob) {
-        // the file goes where the flow actually put it: into the picked file (card "Saved as"), or, only when no
-        // writable could be opened on the picked file, into Downloads ("Sent to Downloads as"). result.delivery is not
+        // the file goes where the flow actually put it: into the picked file (card "Saved as"), or, when there is no
+        // picker or neither createWritable() attempt worked, as a browser download ("Downloaded as"). result.delivery is not
         // used for the wording: a 'download' result with a picker just means the writer handed back a blob, which we write.
-        let w = run.writable, dl = !handle;
-        if (handle && !w) {
-          // first createWritable() failed (or no hook): try once more; if that fails too and we hold the whole file,
-          // download it and drop the empty file the picker left behind
-          try { w = await handle.createWritable(); } catch (e) { if (out.blob === STREAMED) throw e; w = null; }
-          run.writable = w;
-          if (!w) { cleanup = await discard(handle, run); dl = true; }
-        }
+        const w = handle ? run.writable : null;
         if (w) {
           if (out.blob !== STREAMED) await w.write(out.blob);    // writer returned a blob (old hook / fallback): we write it
           await w.close();                                       // green only once close() has resolved
           run.writable = null;
-        } else download(out.blob, name);
+        } else if (out.blob === STREAMED) throw new SaveError(null);
+        else download(out.blob, name);
         out.saved = name;
-        if (dl) out.fileVerb = 'Sent to Downloads as';
+        if (dl) out.fileVerb = 'Downloaded as';
         // downloads can't be confirmed; Chrome silently cancels very large blob downloads (0-byte file). Any card that
-        // went to Downloads: green becomes the amber check card; an amber card keeps its title and lines and gets the
+        // was a download: green becomes the amber check card; an amber card keeps its title and lines and gets the
         // check as its first line. Never on picker saves.
         const bytes = dl ? bytesOf(res, out.blob) : 0;
         if (bytes > BIG) {
-          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If it\u2019s missing or 0 bytes in Downloads, try Chrome or Edge, or hide some parts.';
+          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If the file is missing or 0 bytes, try Chrome or Edge, or hide some parts.';
           out = out.tone === 'ok'
             ? Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished', lines: [chk, f.id === 'xt' ? XT_UNITS : null] })
             : Object.assign({}, out, { lines: ['Check that the download finished. ' + chk].concat(out.lines || []) });
@@ -11956,17 +12047,45 @@ void main() { gl_FragColor = uRGBA; }`;
     finish(out, t);
     ui.result.dataset.cleanup = cleanup;                         // 'removed' | 'truncated' | 'failed' | '' (nothing to clean)
     ui.result.dataset.check = out.check || '';                   // 'download': big download, check card or check line
+    ui.result.dataset.limit = out.limit ? '1' : '';                  // whole-model fitting limit card (no part rows)
   }
   // marker blob: the writer streamed the file into opts.writable itself (result { blob: null, delivery: 'picker' })
   const STREAMED = { streamed: true, size: 0 };
   function SaveError(cause) { this.name = 'SaveError'; this.cause = cause; }
   const writeFailed = (r) => !!r && (normCode(r.reasonCode) === 'write_failed' || (r.status === 'error' && r.delivery === 'picker'));
   // Save-as failure (writer WRITE_FAILED / throw while streaming, write() or close() rejected): amber, own words only
-  // (no DOMException text). Engine errors that aren't about writing keep their own cards.
+  // (no DOMException text, no writer reason). Free space is blamed only when the failure is clearly about quota / disk space
+  // (QuotaExceededError, or a quota flag / reasonCode / reason from the writer); any other failure (Blob too big to read,
+  // NotReadableError, …) gets the neutral line. Engine errors that aren't about writing keep their own cards.
+  const WF_QUOTA = 'Nothing was kept. Check there\u2019s enough free space, then try again.';
+  const WF_OTHER = 'Nothing was kept. Try again, or export as a smaller format.';
   function writeFailedCard(name, f, o, res, e) {
     const cause = e instanceof SaveError ? e.cause : e;
     if (e instanceof SaveError && cause && !isBrowserErr(cause) && !writeFailed(res)) return Object.assign(describe(f, o, res, cause), { blob: null });
-    return { tone: 'warn', status: 'write_failed', title: 'Couldn\u2019t finish saving ' + name, lines: ['Nothing was kept. Check there\u2019s enough free space, then try again.'] };
+    const quota = isQuota(cause) || (writeFailed(res) && quotaResult(res));
+    return { tone: 'warn', status: 'write_failed', title: 'Couldn\u2019t finish saving ' + name, lines: [quota ? WF_QUOTA : WF_OTHER], quota };
+  }
+  const QUOTA_CODE = /quota|disk_?full|no_?space|out_?of_?space|storage_?full|insufficient_?space/;
+  const QUOTA_TEXT = /\bquota|QuotaExceeded|not enough (free |disk |storage )?space|(disk|drive|storage) (is )?full|no space left|out of (disk |storage )?space|insufficient (disk |storage )?space/i;
+  const isQuota = (e) => !!e && typeof e === 'object' && (e.name === 'QuotaExceededError' || (typeof DOMException !== 'undefined' && e instanceof DOMException && e.code === 22));
+  // writer result about quota: quota/quotaExceeded flag, errorName 'QuotaExceededError' (top level, summary or error/cause
+  // object), a quota-like reasonCode / errorCode, or a reason that clearly says so
+  function quotaResult(r) {
+    if (!r) return false;
+    const s = r.summary || {};
+    for (const x of [r, s]) {
+      if (x.quota === true || x.quotaExceeded === true) return true;
+      if (/^QuotaExceededError$/i.test(String(x.errorName || x.errorType || ''))) return true;
+      if (isQuota(x.error) || isQuota(x.cause)) return true;
+      for (const c of [x.reasonCode, x.errorCode]) if (c != null && c !== '' && QUOTA_CODE.test(String(normCode(c)))) return true;
+    }
+    return typeof r.reason === 'string' && QUOTA_TEXT.test(r.reason);
+  }
+  // createWritable() on the picked handle, once more if the first attempt rejects; null when both fail
+  async function openWritable(handle) {
+    if (typeof handle.createWritable !== 'function') return null;
+    for (let i = 0; i < 2; i++) { try { return await handle.createWritable(); } catch (e) { /* retry once */ } }
+    return null;
   }
   const isBrowserErr = (e) => !!e && ((typeof DOMException !== 'undefined' && e instanceof DOMException) || /^(NotReadableError|QuotaExceededError|InvalidStateError|NotAllowedError|NoModificationAllowedError|NotFoundError|TypeMismatchError|SecurityError|AbortError)$/.test(e.name || ''));
   // drop whatever the Save-as picker left behind: abort the open writable (errors ignored), then delete the file with
@@ -12146,7 +12265,7 @@ void main() { gl_FragColor = uRGBA; }`;
   const REASONS = {
     no_fit: 'surfaces couldn\u2019t be fitted cleanly',
     open_shell: 'fitted faces don\u2019t close into a solid',
-    fit_limit: 'too many faces to fit in the browser',
+    fit_limit: 'too many triangles to fit in the browser',
     no_face_data: 'no face data to fit',
     kernel_download: 'the CAD kernel didn\u2019t download',
     browser_unsupported: 'this browser can\u2019t run surface fitting',
@@ -12199,6 +12318,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const faces = parts.reduce((a, p) => a + (bothFitted(p) ? (+p.faces || 0) : 0), 0) || (res.summary && res.summary.faces);
     const allMesh = list.every((l) => l.kind !== 'omitted');
     const meshLine = allMesh ? (n > 1 ? 'Every part\u2019s mesh body is in the file too.' : 'The mesh body is included too.') : null;
+    if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
     if (fit === 0) {
       return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
         lines: ['No part could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
@@ -12217,6 +12337,28 @@ void main() { gl_FragColor = uRGBA; }`;
     return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
   }
 
+  // Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
+  // card says so once ("Saved as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
+  // lists no part rows. Triggers: top-level reasonCode fit_limit, every part fit_limit, or the engine's too-many-triangles text.
+  // Counts: summary.tris (else the reason text); limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).
+  const LIMIT_TEXT = /too many (triangles|faces) to fit/i;
+  function limitHit(res, parts) {
+    if (codeOf(res.reasonCode) === 'fit_limit' || LIMIT_TEXT.test(String(res.reason || ''))) return true;
+    return !!(parts && parts.length && parts.every((p) => normCode(p.reasonCode) === 'fit_limit'));
+  }
+  function numK(m) { if (!m) return NaN; const n = parseFloat(m[1].replace(/,/g, '')); const u = (m[2] || '').toLowerCase(); return n * (u === 'k' ? 1e3 : u === 'm' ? 1e6 : 1); }
+  const fmtK = (n) => (n >= 1e6 ? (Math.round(n / 1e5) / 10).toString().replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)));
+  function limitLine(res) {
+    const s = res.summary || {}, r = String(res.reason || '');
+    let tris = +s.tris > 0 ? +s.tris : numK(r.match(/(\d[\d.,]*)\s*([kKmM])?\s*triangles/));
+    const lim0 = NS().cadSurfaceLimits && NS().cadSurfaceLimits.maxFitTris;
+    let lim = +s.fitLimit > 0 ? +s.fitLimit : +lim0 > 0 ? +lim0 : numK(r.match(/limit\D{0,12}?(\d[\d.,]*)\s*([kKmM])?/i));
+    const bits = [isFinite(tris) && tris > 0 ? fmtK(tris) + ' triangles' : null, isFinite(lim) && lim > 0 ? 'limit ' + fmtK(lim) : null].filter(Boolean);
+    return 'Too large to fit surfaces in the browser' + (bits.length ? ' (' + bits.join(', ') + ')' : '') + '.';
+  }
+  const LIMIT_TITLE = 'Saved as mesh STEP';
+  // part rows only when the parts don't all share the one limit reason (some part has its own outcome)
+  const limitRows = (parts, list) => (parts.every((p) => normCode(p.reasonCode) === 'fit_limit' || p.reasonCode == null) ? undefined : list);
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
   const XT_UNITS = 'Stored in meters, opens at true size in NX.';
   const XT_NOTE = 'All parts merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
@@ -12272,6 +12414,7 @@ void main() { gl_FragColor = uRGBA; }`;
           title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
           lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.'] };
       }
+      if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
       if (fit === 0) {
         return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
           lines: ['No part could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
@@ -12282,6 +12425,7 @@ void main() { gl_FragColor = uRGBA; }`;
     }
 
     // whole-file results
+    if (blob && res.status === 'mesh_only' && limitHit(res, null)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, title: LIMIT_TITLE, lines: [limitLine(res)] };
     if (res.meshStep || (o.body === 'fitted' && o.onNoFit === 'mesh' && res.status === 'mesh_only' && blob)) {
       return { tone: 'warn', status: 'mesh_only', blob, title: 'Mesh STEP exported',
         lines: ['Surfaces couldn\u2019t be fitted' + (why ? ': ' + why : '') + '.', 'Saved the mesh STEP instead.'] };

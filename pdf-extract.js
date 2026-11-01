@@ -302,14 +302,19 @@
     if (doc.trailer.Encrypt && !doc.crypt) { await doc.initCrypt(); doc.cache.clear(); }
     if (doc.cryptError) { const e = new Error('Encrypted PDF: ' + doc.cryptError); e.code = 'PDF_ENCRYPTED'; throw e; }
 
-    const found = []; const seenObj = new Map();
+    const found = []; const seenObj = new Map(); const bad = []; // bad: 3D streams (a /3D annotation's /3DD, or a /Subtype /U3D|/PRC stream) that are not U3D/PRC data
+    const dictSubtype = (o) => (o && o.value ? (isName(o.value.Subtype, 'PRC') ? 'PRC' : isName(o.value.Subtype, 'U3D') ? 'U3D' : null) : null);
     const take = async (ref, meta, isEF) => {
       if (!(ref instanceof Ref)) return; const o = doc.getObj(ref.num); if (!o || !o.stream) return;
       if (seenObj.has(ref.num)) { seenObj.get(ref.num).refs.push(meta); return; }
-      let r; try { r = await doc.streamData(o, isEF); } catch (e) { doc.log.push(`obj ${ref.num}: ${e.message}`); return; }
+      const claims3D = meta.container === '/3D' || (meta.container === 'stream scan');
+      let r; try { r = await doc.streamData(o, isEF); } catch (e) { doc.log.push(`obj ${ref.num}: ${e.message}`);
+        if (claims3D) { seenObj.set(ref.num, { st: null, o, r: null, meta, refs: [meta] }); bad.push({ o, meta, data: new Uint8Array(0), why: `the 3D stream (obj ${ref.num}) could not be decoded: ${e.message}` }); } return; }
       const h = latin1(r.data, 0, 4); const st = h.startsWith('U3D') ? 'U3D' : h.startsWith('PRC') ? 'PRC' : null;
       const entry = { st, o, r, meta, refs: [meta] }; seenObj.set(ref.num, entry); if (st) found.push(entry);
-      else doc.log.push(`obj ${ref.num} (${meta.container}) is not U3D/PRC (head ${[...r.data.subarray(0, 4)].map((b) => b.toString(16)).join(' ')})`);
+      else { const hex = [...r.data.subarray(0, 4)].map((b) => b.toString(16)).join(' ');
+        doc.log.push(`obj ${ref.num} (${meta.container}) is not U3D/PRC (head ${hex})`);
+        if (claims3D) bad.push({ o, meta, r, data: r.data, why: `the 3D stream (obj ${ref.num}, ${r.data.length} bytes) is not U3D or PRC data (starts with ${hex || 'nothing'})` }); }
     };
     const pages = pagesOf(doc);
     for (let pi = 0; pi < pages.length; pi++) {
@@ -350,6 +355,13 @@
       for (const e of seenObj.values()) if (!e.st && e.meta && e.meta.container === '/RichMedia') { /* non-3D RichMedia assets (e.g. .swf/.js) are not CAD */ }
     } catch (e) { doc.log.push('attachments: ' + e.message); }
     const bySha = new Map();
+    if (!found.length && bad.length) { // 3D content is declared but unreadable: report it (the app shows DECODE_ERROR), not "no 3D"
+      const out = bad.map((e, i) => { const st = dictSubtype(e.o);
+        return { index: i, subtype: st || 'U3D', declaredSubtype: st, filter: e.r ? (e.r.filters.join(' + ') || 'None') : 'undecodable', compressedLength: doc.rawStream(e.o).length, rawBytes: e.data,
+          title: `${e.meta.title || '3D Stream'} #${i + 1} (damaged, ${e.meta.container}${e.meta.page ? ' p' + e.meta.page : ''})`, objNum: e.o.num, page: e.meta.page, annot: e.meta.annot,
+          container: e.meta.container, annotations: 1, encrypted: !!doc.crypt, sameAs: undefined, badHeader: e.why, log: i === 0 ? doc.log : undefined }; });
+      out.attachments = attachments; out.log = doc.log; return out;
+    }
     const out = found.map((e, i) => {
       const fp = e.r.data.length + ':' + latin1(e.r.data, 0, 64) + latin1(e.r.data, Math.max(0, e.r.data.length - 64)); const same = bySha.get(fp); if (same === undefined) bySha.set(fp, i);
       return { index: i, subtype: e.st, filter: e.r.filters.join(' + ') || 'None', compressedLength: doc.rawStream(e.o).length, rawBytes: e.r.data,

@@ -32,9 +32,11 @@ function huffBuild(lens){ // canonical; returns {count,symbol}
   for(let s=0;s<lens.length;s++) if(lens[s]) symbol[offs[lens[s]]++]=s;
   return {count,symbol};
 }
+const INFLATE_MAX=1<<30; // 1 GiB: larger output is treated as a damaged stream (guards the V8 allocation limit)
 function inflateRaw(src, pos){
-  let out=new Uint8Array(Math.max(1024,src.length*4)), op=0, bitbuf=0, bitcnt=0, p=pos;
-  const need=n=>{ if(op+n>out.length){ let m=out.length*2; while(m<op+n)m*=2; const o=new Uint8Array(m); o.set(out.subarray(0,op)); out=o; } };
+  if(!(pos>=0&&pos<src.length)) throw new Error('inflate: offset '+pos+' outside the data');
+  let out=new Uint8Array(Math.min(INFLATE_MAX,Math.max(1024,src.length*4))), op=0, bitbuf=0, bitcnt=0, p=pos;
+  const need=n=>{ if(op+n>out.length){ if(op+n>INFLATE_MAX) throw new Error('inflate: output exceeds 1 GiB (damaged stream)'); let m=out.length*2; while(m<op+n)m*=2; m=Math.min(m,INFLATE_MAX); const o=new Uint8Array(m); o.set(out.subarray(0,op)); out=o; } };
   const bits=n=>{ while(bitcnt<n){ if(p>=src.length) throw new Error('inflate: unexpected end of data'); bitbuf|=src[p++]<<bitcnt; bitcnt+=8; } const v=bitbuf&((1<<n)-1); bitbuf>>>=n; bitcnt-=n; return v; };
   const decode=h=>{ let code=0,first=0,index=0; for(let len=1;len<16;len++){ code|=bits(1); const c=h.count[len]; if(code-c<first) return h.symbol[index+(code-first)]; index+=c; first+=c; first<<=1; code<<=1; } throw new Error('inflate: bad huffman code'); };
   let fixedL=null, fixedD=null, last=0;
@@ -85,7 +87,9 @@ class BitReader{
   ushort(){ const lo=this.bits(8), hi=this.bits(8); return lo|(hi<<8); }
   uint(){ let r=0,m=1; while(this.bit()){ r+=this.char()*m; m*=256; if(m>2**40) throw new Error('PRC: bad UnsignedInteger at bit '+this.p); } return r; }
   int(){ let r=0,j=0; while(this.bit() && j<4){ r|=this.char()<<(8*j); j++; } if(j>0&&j<4){ const s=32-8*j; r=(r<<s)>>s; } return r|0; }
-  str(){ if(!this.bit()) return null; const n=this.uint(); if(n>this.n) throw new Error('PRC: bad string length'); const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=this.char(); return utf8(a); }
+  // A count read from the stream must fit in the bits left in this section (minBits per element); checked before allocating.
+  count(n, minBits, what){ if(!(n>=0) || n*(minBits||1)>this.n-this.p) throw new Error('PRC: bad '+(what||'array')+' count '+n+' at bit '+this.p); return n; }
+  str(){ if(!this.bit()) return null; const n=this.uint(); if(n*8>this.n-this.p) throw new Error('PRC: bad string length'); const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=this.char(); return utf8(a); }
   dbl(){
     const T=dtab(); let code=0, e=null;
     for(let i=1;i<=22;i++){ code=code*2+this.bit(); e=T.get(i*16777216+code); if(e) break; }
@@ -202,7 +206,7 @@ class Reader{
   expect(type, what){ const t=this.r.uint(); if(t!==type) throw new Error(`PRC: expected ${what||type} (type ${type}) got ${t} at bit ${this.r.p}`); }
   schema(type){ this.ctx.vm.evalType(this.r, type, 0); }
   userData(){ const n=this.r.uint(); if(n>this.r.n-this.r.p) throw new Error('PRC: bad UserData size'); this.r.p+=n; return n; }
-  arr(n, f){ const a=new Array(n); for(let i=0;i<n;i++) a[i]=f(i); return a; }
+  arr(n, f){ this.r.count(n,1); const a=new Array(n); for(let i=0;i<n;i++) a[i]=f(i); return a; }
   uid(){ return [this.r.uint(),this.r.uint(),this.r.uint(),this.r.uint()]; }
   /* ---- base classes */
   attrEntry(){ const r=this.r; return r.bool()? {key:r.uint()} : {key:r.str()}; }
@@ -376,9 +380,9 @@ class Reader{
     this.schema(T.ASM_FileStructure); this.schema(T.ASM_FileStructureTree); this.userData();
     return {parts, products, internal:fs}; }
   /* ---- tessellation */
-  baseTess(){ const r=this.r; const calc=r.bool(); const n=r.uint(); const c=new Float64Array(n); for(let i=0;i<n;i++) c[i]=r.dbl(); return {isCalculated:calc, coordinates:c}; }
-  uintArr(){ const r=this.r, n=r.uint(); const a=new Uint32Array(n); for(let i=0;i<n;i++) a[i]=r.uint(); return a; }
-  dblArr(){ const r=this.r, n=r.uint(); const a=new Float64Array(n); for(let i=0;i<n;i++) a[i]=r.dbl(); return a; }
+  baseTess(){ const r=this.r; const calc=r.bool(); const n=r.count(r.uint(),1,'coordinate'); const c=new Float64Array(n); for(let i=0;i<n;i++) c[i]=r.dbl(); return {isCalculated:calc, coordinates:c}; }
+  uintArr(){ const r=this.r, n=r.count(r.uint(),1,'integer'); const a=new Uint32Array(n); for(let i=0;i<n;i++) a[i]=r.uint(); return a; }
+  dblArr(){ const r=this.r, n=r.count(r.uint(),1,'double'); const a=new Float64Array(n); for(let i=0;i<n;i++) a[i]=r.dbl(); return a; }
   vertexColors(nColors, inWire){ const r=this.r; const rgba=r.bool(); if(inWire) r.bool(); const opt=r.bool(); if(opt) return; const k=rgba?4:3;
     for(let j=0;j<k;j++) r.char(); for(let i=1;i<nColors;i++) if(!r.bool()) for(let j=0;j<k;j++) r.char(); }
   tessFace(){ this.expect(T.TESS_Face,'TESS_Face'); const r=this.r, f={};
@@ -424,8 +428,9 @@ function facePrimitives(f, cb){
     const textured=fl>=0x200, base=textured? fl>>8 : fl;
     const kind=(base===0x2||base===0x20)?'tri':(base===0x4||base===0x40)?'fan':'strip';
     const one=(base===0x20||base===0x40||base===0x80);
+    if(k>=s.length) throw new Error('PRC: face sizes array too short');
     if(kind==='tri'){ const n=s[k++]; cb(kind,one,textured,n*3,false); }
-    else { const cnt=s[k++]; for(let i=0;i<cnt;i++){ const v=s[k++]; cb(kind,one,textured,v&SIZE_MASK, !!(v&NORMAL_SINGLE)); } }
+    else { const cnt=s[k++]; if(cnt>s.length-k) throw new Error('PRC: bad face strip/fan count '+cnt); for(let i=0;i<cnt;i++){ const v=s[k++]; cb(kind,one,textured,v&SIZE_MASK, !!(v&NORMAL_SINGLE)); } }
   }
 }
 function faceVertexCount(f){ let n=0; facePrimitives(f,(k,o,t,nv)=>{ n+=nv; }); return n; }
@@ -477,6 +482,7 @@ function huffDecode(bytes, nbits){
   const map=new Map(); let zeroLen=null;
   for(let i=0;i<nl;i++){ const s=rb(nbits), l=rb(ml), c=rb(l); if(l===0) zeroLen=s; else map.set(2**l+c, s); }
   const cnt=rb(32); if(cnt>1e8) throw new Error('PRC: Huffman element count too large');
+  if(map.size && cnt>NB-bp) throw new Error('PRC: Huffman element count '+cnt+' exceeds the data'); // each element takes at least one bit
   const out=new Array(cnt);
   if(zeroLen!==null && !map.size){ out.fill(zeroLen); return out; }
   for(let k=0;k<cnt;k++){ let acc=0, len=0, v;
@@ -515,18 +521,19 @@ function readTess3dCompressed(rd){
   const nRef=r.uint(); if(nRef>r.n-r.p) throw new Error('PRC: bad reference array size');
   const isRef=new Uint8Array(nRef); let nTrue=0; for(let i=0;i<nRef;i++){ isRef[i]=r.bit(); nTrue+=isRef[i]; }
   t.isRef=isRef; t.pointRefs=compressedIndiceArray(r,false,nTrue);
-  const T=t.triFace.length; let nf=0; for(const f of t.triFace) if(f+1>nf) nf=f+1; t.numFaces=nf;
+  const T=t.triFace.length; let nf=0; for(const f of t.triFace){ if(!(f>=0)) throw new Error('PRC: bad face index '+f); if(f+1>nf) nf=f+1; } t.numFaces=nf;
+  if(nf>T) throw new Error('PRC: face index '+(nf-1)+' exceeds the triangle count '+T);
   t.mustRecalcNormals=r.bool();
   if(t.mustRecalcNormals){ const a=new Uint8Array(T); for(let i=0;i<T;i++) a[i]=r.bit(); t.normalIsReversed=a; t.creaseAngle=r.dbl(); r.char(); }
   else { t.normalAngleBits=r.char(); const ns=r.uint(); if(ns>r.n-r.p) throw new Error('PRC: bad normal data size');
     const nb=new Uint8Array(ns); for(let i=0;i<ns;i++) nb[i]=r.bit(); t.normalBits=nb;
     t.normalAngles=huffArray(r,t.normalAngleBits,true,0,true);
-    const pl=new Uint8Array(nf); for(let i=0;i<nf;i++) pl[i]=r.bit(); t.facePlanar=pl; }
+    r.count(nf,1,'face'); const pl=new Uint8Array(nf); for(let i=0;i<nf;i++) pl[i]=r.bit(); t.facePlanar=pl; }
   if(r.bool()){ const n=t.hasFaces?nf:1; for(let i=0;i<n;i++) r.bit(); t.pointColors=huffArray(r,8,true); }
-  t.multipleLineAttr=r.bool(); if(t.multipleLineAttr){ const n=t.hasFaces?nf:1; const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=r.bit(); t.lineAttrOnFace=a; }
+  t.multipleLineAttr=r.bool(); if(t.multipleLineAttr){ const n=r.count(t.hasFaces?nf:1,1,'line attribute'); const a=new Uint8Array(n); for(let i=0;i<n;i++) a[i]=r.bit(); t.lineAttrOnFace=a; }
   t.lineAttributes=huffArray(r,16,true,0,true);
   if(!r.bool()){ // CompressedTextureParameter (skipped)
-    const bs=r.uint(); for(let i=0;i<4*bs;i++) r.char(); r.uint(); // binary data: size counted in 32-bit words
+    const bs=r.count(r.uint(),32,'texture word'); for(let i=0;i<4*bs;i++) r.char(); r.uint(); // binary data: size counted in 32-bit words
     const nr=r.uint(); for(let i=0;i<nr;i++){ const nb=r.bits(5); r.bits(nb); }
     r.dbl(); const tp=r.uint(); for(let i=0;i<tp;i++) f32le(r);
     if(!r.bool()) for(let i=0;i<nf;i++) r.bit();
@@ -675,16 +682,22 @@ function isIdentity(m){ const I=identity(); return m.every((v,i)=>Math.abs(v-I[i
 function u32(d,o){ return (d[o]|(d[o+1]<<8)|(d[o+2]<<16)|(d[o+3]<<24))>>>0; }
 function readFileHeader(d){
   if(d[0]!==0x50||d[1]!==0x52||d[2]!==0x43) throw new Error('PRC: missing "PRC" magic');
-  let o=3; const h={minVersion:u32(d,o), authoringVersion:u32(d,o+4)}; o+=8;
-  const uid=()=>{ const a=[u32(d,o),u32(d,o+4),u32(d,o+8),u32(d,o+12)]; o+=16; return a; };
-  h.fileUid=uid(); h.appUid=uid(); const n=u32(d,o); o+=4; h.fileStructures=[];
-  for(let i=0;i<n;i++){ const fs={uid:uid(), reserved:u32(d,o)}; o+=4; const sc=u32(d,o); o+=4; fs.offsets=[]; for(let j=0;j<sc;j++){ fs.offsets.push(u32(d,o)); o+=4; } h.fileStructures.push(fs); }
-  h.modelFileStart=u32(d,o); h.modelFileEnd=u32(d,o+4); o+=8;
-  const nu=u32(d,o); o+=4; h.uncompressedFiles=[]; for(let i=0;i<nu;i++){ const sz=u32(d,o); o+=4; h.uncompressedFiles.push(d.subarray(o,o+sz)); o+=sz; }
+  const L=d.length; const need=(o,k,what)=>{ if(o+k>L) throw new Error('PRC: file header truncated ('+what+')'); };
+  const off=(v,what)=>{ if(!(v<L)) throw new Error('PRC: '+what+' offset '+v+' outside the stream ('+L+' bytes)'); return v; };
+  let o=3; need(o,8,'version'); const h={minVersion:u32(d,o), authoringVersion:u32(d,o+4)}; o+=8;
+  const uid=()=>{ need(o,16,'uid'); const a=[u32(d,o),u32(d,o+4),u32(d,o+8),u32(d,o+12)]; o+=16; return a; };
+  h.fileUid=uid(); h.appUid=uid(); need(o,4,'structure count'); const n=u32(d,o); o+=4; h.fileStructures=[];
+  if(n<1 || n*24>L-o) throw new Error('PRC: bad file structure count '+n);
+  for(let i=0;i<n;i++){ const fs={uid:uid(), reserved:(need(o,8,'structure'),u32(d,o))}; o+=4; const sc=u32(d,o); o+=4;
+    if(sc<6 || sc*4>L-o) throw new Error('PRC: bad section count '+sc+' in file structure '+i);
+    fs.offsets=[]; for(let j=0;j<sc;j++){ fs.offsets.push(off(u32(d,o),'section')); o+=4; } h.fileStructures.push(fs); }
+  need(o,12,'model file'); h.modelFileStart=off(u32(d,o),'model file'); h.modelFileEnd=u32(d,o+4); o+=8;
+  const nu=u32(d,o); o+=4; if(nu*4>L-o) throw new Error('PRC: bad uncompressed file count '+nu);
+  h.uncompressedFiles=[]; for(let i=0;i<nu;i++){ need(o,4,'uncompressed file'); const sz=u32(d,o); o+=4; if(sz>L-o) throw new Error('PRC: bad uncompressed file size '+sz); h.uncompressedFiles.push(d.subarray(o,o+sz)); o+=sz; }
   return h;
 }
 function readFSHeader(d,o){ // uncompressed file-structure header
-  if(d[o]!==0x50||d[o+1]!==0x52||d[o+2]!==0x43) throw new Error('PRC: bad file structure header at '+o);
+  if(!(o+11<=d.length)) throw new Error('PRC: file structure header outside the stream'); if(d[o]!==0x50||d[o+1]!==0x52||d[o+2]!==0x43) throw new Error('PRC: bad file structure header at '+o);
   const h={minVersion:u32(d,o+3), authoringVersion:u32(d,o+7)}; return h; }
 function section(d, off){ const r=inflateRaw(d, off+2); return r.data; }
 
@@ -728,6 +741,9 @@ function parsePRC(input, opts){
   let d=input instanceof Uint8Array? input : new Uint8Array(input);
   if(d[0]===0x25&&d[1]===0x50&&d[2]===0x44&&d[3]===0x46) d=extractPRCFromPDF(d)[0]; // %PDF
   const hdr=readFileHeader(d);
+  // damage (1.6.1): decode failures caught below (unreadable exact geometry / topology context, undecodable tessellation);
+  // a stream that yields no body and has damage is reported as damaged by the app (DECODE_ERROR), not as unsupported
+  const damage=(opts.damage=[]);
   const fss=hdr.fileStructures.map((fsd,fi)=>{
     const o=fsd.offsets; const fsh=readFSHeader(d,o[0]);
     const ctx={authoringVersion:fsh.authoringVersion||hdr.authoringVersion, curName:null, graphics:{layer:-1,lineStyle:-1,behavior:1}, numFileStructures:hdr.fileStructures.length};
@@ -741,8 +757,8 @@ function parsePRC(input, opts){
       if(id===T.ASM_FileStructureGeometry){ const rr=new Reader(r,ctx); rr.prcBase();
         const B=getBrep(); fs.geometry.topoContexts=r.peekUint();
         if(B && fs.geometry.topoContexts && opts.exact!==false){ const wl=opts.warnings=opts.warnings||[];
-          try{ fs.geometry.contexts=B.readExactGeometry(r, ctx, m=>wl.push('FS'+fi+' exact geometry: '+m)); }
-          catch(e){ wl.push('FS'+fi+' exact geometry unreadable: '+e.message); } } } }
+          try{ fs.geometry.contexts=B.readExactGeometry(r, ctx, m=>{ wl.push('FS'+fi+' exact geometry: '+m); if(/^topo context \d+: /.test(m)) damage.push('FS'+fi+' exact geometry: '+m); }); }
+          catch(e){ wl.push('FS'+fi+' exact geometry unreadable: '+e.message); damage.push('FS'+fi+' exact geometry unreadable: '+e.message); } } } }
     { const g=section(d,o[5]); fs.extraGeometry={sizeBytes:g.length}; }
     return fs; });
   let model;
@@ -764,7 +780,7 @@ function resolveColor(g, styleIdx){
 }
 
 function assemble(hdr, fss, model, opts){
-  const parts=[], wires=[], treeOut=[]; const warnings=(opts.warnings=opts.warnings||[]);
+  const parts=[], wires=[], treeOut=[]; const warnings=(opts.warnings=opts.warnings||[]); const damage=(opts.damage=opts.damage||[]);
   const nameCount=new Map();
   const uniq=n=>{ const c=(nameCount.get(n)||0)+1; nameCount.set(n,c); return c===1? n : n+'_'+c; };
   const uidKey=u=>u.join(','); const fsMap=new Map(fss.map(f=>[uidKey(f.uid),f]));
@@ -811,7 +827,7 @@ function assemble(hdr, fss, model, opts){
         const mkPos=()=>{ const pos=[]; for(let i=0;i<c.length;i+=3) pos.push(apply(RM,[c[i],c[i+1],c[i+2]])); return pos; };
         if(tess.kind==='compressed'){
           if(!tess.decoded){ try{ tess.decoded=decodeTess3dCompressed(tess, w=>warnings.push('tess #'+ri.tessIndex+': '+w)); }
-            catch(e){ tess.decoded={coordinates:[],tris:[],faceOf:[],error:e.message}; warnings.push('tess #'+ri.tessIndex+' ('+label+'): '+e.message); } }
+            catch(e){ tess.decoded={coordinates:[],tris:[],faceOf:[],error:e.message}; warnings.push('tess #'+ri.tessIndex+' ('+label+'): '+e.message); damage.push('tess #'+ri.tessIndex+': '+e.message); } }
           const D=tess.decoded; if(!D.tris.length) return;
           const cc=D.coordinates; let cpos=null, cidx=null;
           if(T){ cpos=applyFlat(RM,cc); cidx=D._idx||(D._idx=packTris(D.tris,(cc.length/3)|0)); }
@@ -879,7 +895,7 @@ function assemble(hdr, fss, model, opts){
   }
   const unitsInMM=model.unitsInMM;
   const unitName= Math.abs(unitsInMM-1)<1e-9?'mm': Math.abs(unitsInMM-25.4)<1e-9?'in': Math.abs(unitsInMM-10)<1e-9?'cm': Math.abs(unitsInMM-1000)<1e-9?'m': String(unitsInMM)+' mm';
-  return { parts, wires, units:{unitsInMM, name:unitName, fromCAD:model.unitsFromCAD}, tree:treeOut,
+  return { parts, wires, damage, units:{unitsInMM, name:unitName, fromCAD:model.unitsFromCAD}, tree:treeOut,
     info:{ minVersion:hdr.minVersion, authoringVersion:hdr.authoringVersion, fileStructures:fss.map(f=>({schemaTypes:f.schemaTypes, numParts:f.tree.parts.length, numProducts:f.tree.products.length,
       tessellations:f.tessellations.map(t=>({kind:t.kind, numCoords:t.coordinates?t.coordinates.length:(t.points?t.points.length:0), numFaces:t.faces?t.faces.length:0})), geometry:f.geometry, extraGeometry:f.extraGeometry,
       colors:f.globals.colors.length, styles:f.globals.styles.length, materials:f.globals.materials.length, coordinateSystems:f.globals.coordinateSystems.length})),

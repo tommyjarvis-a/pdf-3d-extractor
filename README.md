@@ -13,7 +13,7 @@ Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECM
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.6.0 decodes
+## What 1.6.1 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|
@@ -43,8 +43,13 @@ After every load (`CAD3DExtractor.loadPDFBuffer`) and stream switch (`activateSt
 |---|---|---|---|
 | `'ok'` | `null` | the active stream produced triangles | `format` (`'U3D'`/`'PRC'`), `stream`, `streams`, `decodePath`, `parts`, `tris` |
 | `'unsupported'` | `'UNSUPPORTED_MESH'` | a U3D/PRC stream exists but yields no mesh (vendor block, missing tessellation, unimplemented encoding) | `format`, `stream`, `streams`, `decodePath` (`'none'`), `detail`, `wires`, `message` |
-| `'error'` | `'DECODE_ERROR'` | the stream decoder threw | `format`, `stream`, `streams`, `decodePath`, `detail` (error text), `message` |
-| `'no3d'` | `'NO_3D'` | no `/3D` or `/RichMedia` stream at all (attachment-only PDFs included) | `format: null`, `streams: 0`, `attachments` (names), `message` |
+| `'error'` | `'DECODE_ERROR'` | the stream decoder threw, or the stream is damaged: not U3D/PRC data at all (random bytes), a damaged RHAdobeMeshResource mesh, a truncated or damaged classic U3D stream with no decodable mesh, or a PRC whose decode failures left no body | `format`, `stream`, `streams`, `decodePath`, `detail` (error text), `message` |
+| `'no3d'` | `'NO_3D'` | no `/3D` or `/RichMedia` stream at all (attachment-only PDFs included) | `format: null`, `streams: 0`, `message` |
+
+Every result (1.6.1) also carries the PDF's embedded files: `attachments` (names, as `NO_3D` had since 1.5.3) and
+`attachmentDetails: [{ name, ext, isCAD, size, description, error }]` (`ext` lower-case without the dot, `isCAD` true for
+STEP/IGES/STL/OBJ/Parasolid/…, `size` in bytes, `description` from the file spec's `/Desc` or `''`, `error` null or the
+reason the file could not be read). Both are `[]` when the PDF has none.
 
 `detail` is the vendor New Object Type name(s) for U3D (e.g. `'RHAdobeMeshResource'`), otherwise
 `'no supported mesh blocks'`; for PRC it is `'exact geometry without tessellation'` or `'no tessellated representation'`.
@@ -88,6 +93,8 @@ const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', pa
 // r = { blob, filename, status, reasonCode, reason, summary: { parts: [{ index, name, status, faces, reasonCode, written: 'solid'|'mesh'|'omitted' }] } }
 // body: 'both' also gives each part fittedBody ('<name>_fitted' for a solid or open shell, else null) and meshBody ('<name>_mesh'),
 // the bodies actually in the file (`written` keeps the Fitted-mode meaning: 'solid' only for closed solids)
+// STEP 'fitted' / 'both' summary (1.6.1) adds a model-wide reason no part was fitted, so the card can show one line:
+//   fitSkippedReason: null (fitting ran) | 'too_many_tris' (with fitSkippedTris, fitSkippedLimit: 200000) | 'no_face_data' | 'browser_unsupported'
 // exportFormat('xt') summary adds: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, estimatedBytes }
 // too large for the Parasolid writer: { blob: null, status: 'error', reasonCode: 'XT_TOO_LARGE', summary: { estimatedBytes } }
 // PDF3D.capabilities.cadSurfaces: false with cadSurfacesReason 'single_file' | 'file_url' | 'browser_unsupported' | 'kernel_download'
@@ -100,7 +107,8 @@ const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', pa
 //   no opts.writable -> r.blob, r.delivery = 'download', r.size (the caller saves the Blob)
 //   opts.writable    -> a FileSystemWritableFileStream (showSaveFilePicker() then handle.createWritable()): the file is streamed
 //                       into it as it is made (~1 MB Uint8Array writes, no Blob at all) -> r.blob = null, r.delivery = 'picker', r.size.
-//                       A failed write -> r.status = 'error', r.reasonCode = 'WRITE_FAILED'. exportFormat never calls close()
+//                       A failed write -> r.status = 'error', r.reasonCode = 'WRITE_FAILED', r.errorName (the error's name),
+//                       r.quota (true for QuotaExceededError). exportFormat never calls close()
 //                       or abort(): call close() when r.delivery === 'picker' && r.status is not 'error'/'skipped'/'cancelled',
 //                       otherwise abort() (and remove the empty file if you can).
 const h = await showSaveFilePicker({ suggestedName: 'model.x_t' }); const w = await h.createWritable();

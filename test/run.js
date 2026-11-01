@@ -9,7 +9,8 @@
  * then drives the public API window.CAD3DExtractor (loadPDFBuffer / activateStream / getState).
  * Always runs: bundled sample PDF, a synthetic PDF with embedded CAD attachments, chunked-text helpers.
  * With a corpus dir (or $PDF3D_CORPUS): every *.pdf is decoded and compared with test/expect.json
- * (streams, decode path and triangles per stream); --update rewrites expect.json from this run. A corpus file with no
+ * (streams, decode path and triangles per stream; with a "lastLoad" object also window.PDF3D.lastLoad right after the
+ * load: each key the entry gives, e.g. status, reasonCode, attachments); --update rewrites expect.json from this run. A corpus file with no
  * expect.json entry fails, and so does one that decodes to 0 triangles unless its entry has "allowZeroTris": true.
  * A corpus dir with no matching *.pdf fails. Without a corpus only the built-in checks run and the last line says so.
  * --exports also builds every exporter on the sample, checks that PDF3D.exportFormat writes the same bytes into a
@@ -76,6 +77,7 @@ async function exportIdentity(window, ctx, label) {
 async function decodeFile(api, file) {
   const u8 = new Uint8Array(fs.readFileSync(file)); const t0 = Date.now();
   await api.loadPDFBuffer(u8, path.basename(file));
+  const lastLoad = api.getLastLoad ? api.getLastLoad() : null;   // outcome of the load itself, before other streams are activated
   const st = api.getState(); const streams = [];
   for (let i = 0; i < st.streams.length; i++) {
     await api.activateStream(i); const s = api.getState();
@@ -84,7 +86,7 @@ async function decodeFile(api, file) {
     streams.push({ format: s.streams[i].subtype, decodePath: p.decodePath || '?', parts: s.parts.length, tris, wires: (s.wires || []).length, warning: (p.warnings || [])[0] || '' });
     s.streams[i].parsed = null; // free memory between streams
   }
-  return { streams, attachments: (st.attachments || []).map((a) => a.name), ms: Date.now() - t0 };
+  return { streams, attachments: (st.attachments || []).map((a) => a.name), lastLoad, ms: Date.now() - t0 };
 }
 
 function syntheticAttachmentPDF() {
@@ -130,7 +132,14 @@ function syntheticAttachmentPDF() {
       const totalTris = r.streams.reduce((n, s) => n + s.tris, 0);
       if (!r.error && !totalTris && !(exp && exp.allowZeroTris)) ok = check(false, `${f}: 0 triangles (set "allowZeroTris": true in its expect.json entry if that is expected)`) && ok;
       if (exp && !update) ok = check(JSON.stringify(got) === JSON.stringify(exp.streams), `${f}: got ${JSON.stringify(got)} expected ${JSON.stringify(exp.streams)}`) && ok;
-      if (update) expect[f] = { ...(exp && exp.allowZeroTris ? { allowZeroTris: true } : {}), streams: got };
+      const ll = r.lastLoad || {};
+      if (exp && exp.lastLoad && !update) for (const k of Object.keys(exp.lastLoad))
+        ok = check(JSON.stringify(ll[k]) === JSON.stringify(exp.lastLoad[k]), `${f}: lastLoad.${k} ${JSON.stringify(ll[k])} expected ${JSON.stringify(exp.lastLoad[k])}`) && ok;
+      if (update) {   // keep (and refresh) the lastLoad keys an entry pins; pin status/reasonCode for a new file that does not load ok
+        const keys = exp && exp.lastLoad ? Object.keys(exp.lastLoad) : !exp && ll.status && ll.status !== 'ok' ? ['status', 'reasonCode'] : [];
+        expect[f] = { ...(exp && exp.allowZeroTris ? { allowZeroTris: true } : {}), streams: got,
+          ...(keys.length ? { lastLoad: Object.fromEntries(keys.map((k) => [k, ll[k] === undefined ? null : ll[k]])) } : {}) };
+      }
       if (r.error) check(false, `${f}: ${r.error}`);
       if (doExports && !r.error) {   // Parasolid .x_t for every file: the stream the UI would show first with geometry
         const si = r.streams.findIndex((s) => s.tris > 0);

@@ -267,5 +267,73 @@
     131532
    ]
   ]
+ },
+ "x01_damaged_prc.pdf": {
+  "allowZeroTris": true,
+  "streams": [
+   [
+    "PRC",
+    "none",
+    0
+   ]
+  ],
+  "lastLoad": {
+   "status": "error",
+   "reasonCode": "DECODE_ERROR"
+  }
+ },
+ "x02_damaged_vea_mesh.pdf": {
+  "allowZeroTris": true,
+  "streams": [
+   [
+    "U3D",
+    "none",
+    0
+   ]
+  ],
+  "lastLoad": {
+   "status": "error",
+   "reasonCode": "DECODE_ERROR"
+  }
+ },
+ "x03_random_bytes_3d.pdf": {
+  "allowZeroTris": true,
+  "streams": [
+   [
+    "U3D",
+    "none",
+    0
+   ]
+  ],
+  "lastLoad": {
+   "status": "error",
+   "reasonCode": "DECODE_ERROR"
+  }
+ },
+ "x04_attachments_only.pdf": {
+  "allowZeroTris": true,
+  "streams": [],
+  "lastLoad": {
+   "status": "no3d",
+   "reasonCode": "NO_3D",
+   "attachments": [
+    "bracket.step",
+    "notes.txt"
+   ]
+  }
+ },
+ "x05_u3d_damaged_node_count.pdf": {
+  "allowZeroTris": true,
+  "streams": [
+   [
+    "U3D",
+    "none",
+    0
+   ]
+  ],
+  "lastLoad": {
+   "status": "error",
+   "reasonCode": "DECODE_ERROR"
+  }
  }
 }

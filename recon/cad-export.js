@@ -18,7 +18,7 @@
   const SRC = cs && cs.src ? cs.src : null;
   const VER = SRC ? (new URL(SRC).searchParams.get('v') || '') : '';
   // cad-worker.js has its own cache key: bump WORKER_REV when the worker changes within a release
-  const WORKER_REV = '2';
+  const WORKER_REV = '1';
   const WORKER_URL = SRC ? new URL('cad-worker.js?v=' + encodeURIComponent((VER || '0') + '-w' + WORKER_REV), SRC).href : null;
 
   const LIMITS = {
@@ -79,7 +79,11 @@
     if (!fittable) { mode = 'mesh_only'; cause = noFaceDataCause(stream); }
     else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; cause = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + ')'; }
     // why: the preflight / mesh_only text; cause: the same without the mesh clause (fitted-only skips write nothing)
-    return { st, ids, parts, tris, stream, mode, cause, why: cause && cause + ', so only the mesh body is exported' };
+    // model-wide reason no part was fitted (1.6.1, summary.fitSkippedReason): the card can show one line instead of per-part rows
+    const skip = mode === 'fit' ? { fitSkippedReason: null }
+      : fittable ? { fitSkippedReason: 'too_many_tris', fitSkippedTris: tris, fitSkippedLimit: LIMITS.maxFitTris }
+        : { fitSkippedReason: 'no_face_data' };
+    return { st, ids, parts, tris, stream, mode, cause, skip, why: cause && cause + ', so only the mesh body is exported' };
   }
   // the source format of the active stream: payload magic first (the /Subtype can lie), then the decoder's format, then /Subtype
   const sourceFormat = (stream) => {
@@ -112,6 +116,14 @@
     return { ok: true, reason: null, message: sel.why || '', estimate };
   }
 
+  // UTF-8 bytes -> string chunks of ~size bytes each (a streaming decode keeps multi-byte characters whole).
+  // buf: the worker's fittedStep, an ArrayBuffer (transferred), or any typed-array view
+  function decodeChunks(buf, size) {
+    const u8 = buf instanceof Uint8Array ? buf : ArrayBuffer.isView(buf) ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength) : new Uint8Array(buf);
+    size = size || (4 << 20); const td = new TextDecoder('utf-8'); const out = [];
+    for (let o = 0; o < u8.length; o += size) out.push(td.decode(u8.subarray(o, Math.min(u8.length, o + size)), { stream: o + size < u8.length }));
+    return out;
+  }
   // UTF-8 byte length of a string (lone surrogates count 3, as TextEncoder writes U+FFFD)
   function utf8Length(str) {
     let n = 0;
@@ -136,7 +148,7 @@
     const pre = canExportCadSurfaces(partIds); const sel = selection(partIds);
     const stem = ((sel.st && sel.st.fileName) || 'cad-3d-pdf-assembly').replace(/\.(pdf|u3d|prc)$/i, '');
     const filename = stem + (fittedOnly ? '-surfaces-only.stp' : '-surfaces.stp');
-    const blank = (extra) => ({ faces: 0, byType: zeroTypes(), closed: false, valid: false, unfitFaces: [], meshFallback: false, timings, tris: sel.tris, parts: [], wasmHeapPeak: 0, ...extra });
+    const blank = (extra) => ({ faces: 0, byType: zeroTypes(), closed: false, valid: false, unfitFaces: [], meshFallback: false, timings, tris: sel.tris, parts: [], wasmHeapPeak: 0, ...sel.skip, ...extra });
     const cancelled = () => ({ blob: null, filename: null, status: 'cancelled', reason: 'Cancelled by user', reasonCode: 'cancelled', summary: null });
     if (!pre.ok) return { blob: null, filename: null, status: 'skipped', reason: pre.message, reasonCode: pre.reason, summary: blank() };
     if (signal && signal.aborted) return cancelled();
@@ -184,7 +196,8 @@
       if (signal && signal.aborted) return cancelled();
       emit({ stage: 'write', pct: 99, label: 'Writing STEP…' });
       const t = performance.now();
-      const fittedText = wres && wres.fittedStep ? new TextDecoder().decode(wres.fittedStep) : null;
+      // fitted STEP bytes -> 4 MiB string chunks (streamed decode; mergeSTEPChunks carries partial lines), never one big string
+      const fittedText = wres && wres.fittedStep ? decodeChunks(wres.fittedStep) : null;
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
       let size = 0;
       if (o.noBlob) for (const c of chunks) size += utf8Length(c);
@@ -214,6 +227,8 @@
   }
 
   function summarize(parts, wres, sel, meshFallback, timings) {
+    // one entry per body: the worker's list deduplicated by part index (never more rows than parts exported)
+    const seen = new Set(); parts = parts.filter((p) => !seen.has(p.idx) && seen.add(p.idx));
     const byType = zeroTypes(); let faces = 0; const unfit = [];
     for (const p of parts) { if (p.status === 'mesh_only') { for (const f of p.summary.unfitFaces || []) unfit.push({ part: p.idx, face: f }); continue; }
       faces += p.summary.faces; for (const k in p.summary.byType) byType[k] = (byType[k] || 0) + p.summary.byType[k];
@@ -222,7 +237,7 @@
     if (wres && wres.byType) { for (const k in byType) byType[k] = 0; for (const k in wres.byType) if (wres.byType[k] || byType[k] != null) byType[k] = wres.byType[k]; }
     const all = parts.length > 0 && parts.every((p) => p.status === 'solid');
     if (wres) for (const k of ['kernel', 'kernelDownload', 'decode', 'segment', 'fit', 'build', 'validate']) if (wres.timings[k] != null) timings[k] = wres.timings[k];
-    return { faces, byType, closed: all, valid: all, unfitFaces: unfit, meshFallback, timings, tris: sel.tris,
+    return { faces, byType, closed: all, valid: all, unfitFaces: unfit, meshFallback, timings, tris: sel.tris, ...sel.skip,
       parts: parts.map((p) => ({ index: p.idx, name: p.summary.name, status: p.status, reason: p.reason, faces: p.summary.faces, tris: p.summary.tris, check: p.summary.check })),
       wasmHeapPeak: (wres && wres.wasmHeapPeak) || 0 };
   }

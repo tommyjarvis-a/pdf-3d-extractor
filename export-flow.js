@@ -28,12 +28,16 @@
  *   Result extras (optional): delivery: 'picker'|'download', size (bytes; overrides blob.size), summary.estimatedBytes
  *       (fallback when there is no blob size). Downloaded (no picker, or delivery === 'download') and > 300 MB → the green
  *       card becomes amber "Check that the download finished" (Chrome can cancel huge blob downloads silently, 0-byte file).
- * Saving: showSaveFilePicker (Chrome/Edge) is called FIRST, inside the click gesture. With the hook, handle.createWritable() is
- *   passed as opts.writable: the writer streams parts into it and returns { blob: null, delivery: 'picker', size } without
- *   closing; we close() and only then show the green card. A returned blob (old writer / no hook) is written by us.
+ * Saving: showSaveFilePicker (Chrome/Edge) is called FIRST, inside the click gesture. Then handle.createWritable() (retried once
+ *   if it rejects) is opened BEFORE the export and passed as opts.writable: the writer streams parts into it and returns
+ *   { blob: null, delivery: 'picker', size } without closing; we close() and only then show the green card. A returned blob
+ *   (old writer / no hook) is written by us. Both createWritable() attempts fail → the empty picked file is removed and the
+ *   export goes out as a browser download ("Downloaded as {name}", > 300 MB check applies).
  *   WRITE_FAILED, a browser error while writing, or write()/close() rejecting → abort(), remove the file (handle.remove(),
- *   else truncate to 0 bytes) and an amber "Couldn’t finish saving {name}" card; raw browser text is never shown.
- * Elsewhere: an inline file-name field + <a download> ("Saves to your Downloads folder"; card says "Sent to Downloads as").
+ *   else truncate to 0 bytes) and an amber "Couldn’t finish saving {name}" card; raw browser text is never shown. The
+ *   free-space line only for QuotaExceededError / a quota-like writer result; otherwise "Try again, or export as a smaller format."
+ * Elsewhere: an inline file-name field + <a download> ("Your browser will download the file."; card says "Downloaded as").
+ * Wording never names a folder and never says whether a dialog appeared: the browser decides (Brave can ask where to save).
  * Picker cancel = quiet no-op.
  * Every export ends in a visible result card that stays until dismissed or the next export starts; it is hidden while the
  * Export popover is open (it would cover Save) and comes back if the popover closes without a new export.
@@ -164,7 +168,7 @@
     ui.nameExt = h('span', { class: 'xf-name-ext' });
     ui.nameRow = h('div', { class: 'xf-name', 'data-xf': 'name-row' },
       h('label', { class: 'xf-field' }, h('span', { text: 'File name' }), h('span', { class: 'xf-name-box' }, ui.name, ui.nameExt)),
-      h('p', { class: 'xf-note', 'data-xf': 'downloads-note', text: 'Saves to your Downloads folder.' }));
+      h('p', { class: 'xf-note', 'data-xf': 'downloads-note', text: 'Your browser will download the file.' }));
     ui.go = h('button', { type: 'button', class: 'btn btn-primary xf-go', 'data-xf': 'save', text: 'Save as…' });
     ui.go.addEventListener('click', (ev) => { ev.stopPropagation(); doSave(); });
     ui.name.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); doSave(); } });
@@ -473,42 +477,40 @@
     const run = running = { ctrl: new AbortController(), format: f.id, t0: performance.now(), writable: null };
     progress(f, opts);
     document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'start', format: f.id } }));
-    // Save-as + Dev's hook: open the writable now and let the writer stream parts into it (one huge Blob can't be read
-    // in Chrome). The writer never closes it; this flow owns close() / abort().
-    if (handle && hasHook() && typeof handle.createWritable === 'function') {
-      try { run.writable = await handle.createWritable(); } catch (e) { run.writable = null; }
+    // Save-as: open the writable BEFORE the export (one retry if the first createWritable() fails), so Dev's hook gets it as
+    // opts.writable and streams parts into it (one huge Blob can't be read in Chrome, RECHECK-5e700b8 F1). The writer never
+    // closes it; this flow owns close() / abort(). Both attempts fail → the export goes out as a browser download instead:
+    // the empty file the picker created is removed first and the card says "Downloaded as {name}".
+    let cleanup = '', dl = !handle;
+    if (handle) {
+      run.writable = await openWritable(handle);
+      if (!run.writable) { cleanup = await discard(handle, run); handle = null; dl = true; }
     }
-    let res, err = null, cleanup = '';
+    let res, err = null;
     try { res = await runExport(f, opts, run); } catch (e) { err = e; }
     let out;
     try {
       if (handle && (err || writeFailed(res))) throw new SaveError(err);
       out = describe(f, opts, res, err);
       if (out.blob) {
-        // the file goes where the flow actually put it: into the picked file (card "Saved as"), or, only when no
-        // writable could be opened on the picked file, into Downloads ("Sent to Downloads as"). result.delivery is not
+        // the file goes where the flow actually put it: into the picked file (card "Saved as"), or, when there is no
+        // picker or neither createWritable() attempt worked, as a browser download ("Downloaded as"). result.delivery is not
         // used for the wording: a 'download' result with a picker just means the writer handed back a blob, which we write.
-        let w = run.writable, dl = !handle;
-        if (handle && !w) {
-          // first createWritable() failed (or no hook): try once more; if that fails too and we hold the whole file,
-          // download it and drop the empty file the picker left behind
-          try { w = await handle.createWritable(); } catch (e) { if (out.blob === STREAMED) throw e; w = null; }
-          run.writable = w;
-          if (!w) { cleanup = await discard(handle, run); dl = true; }
-        }
+        const w = handle ? run.writable : null;
         if (w) {
           if (out.blob !== STREAMED) await w.write(out.blob);    // writer returned a blob (old hook / fallback): we write it
           await w.close();                                       // green only once close() has resolved
           run.writable = null;
-        } else download(out.blob, name);
+        } else if (out.blob === STREAMED) throw new SaveError(null);
+        else download(out.blob, name);
         out.saved = name;
-        if (dl) out.fileVerb = 'Sent to Downloads as';
+        if (dl) out.fileVerb = 'Downloaded as';
         // downloads can't be confirmed; Chrome silently cancels very large blob downloads (0-byte file). Any card that
-        // went to Downloads: green becomes the amber check card; an amber card keeps its title and lines and gets the
+        // was a download: green becomes the amber check card; an amber card keeps its title and lines and gets the
         // check as its first line. Never on picker saves.
         const bytes = dl ? bytesOf(res, out.blob) : 0;
         if (bytes > BIG) {
-          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If it\u2019s missing or 0 bytes in Downloads, try Chrome or Edge, or hide some parts.';
+          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If the file is missing or 0 bytes, try Chrome or Edge, or hide some parts.';
           out = out.tone === 'ok'
             ? Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished', lines: [chk, f.id === 'xt' ? XT_UNITS : null] })
             : Object.assign({}, out, { lines: ['Check that the download finished. ' + chk].concat(out.lines || []) });
@@ -526,17 +528,45 @@
     finish(out, t);
     ui.result.dataset.cleanup = cleanup;                         // 'removed' | 'truncated' | 'failed' | '' (nothing to clean)
     ui.result.dataset.check = out.check || '';                   // 'download': big download, check card or check line
+    ui.result.dataset.limit = out.limit ? '1' : '';                  // whole-model fitting limit card (no part rows)
   }
   // marker blob: the writer streamed the file into opts.writable itself (result { blob: null, delivery: 'picker' })
   const STREAMED = { streamed: true, size: 0 };
   function SaveError(cause) { this.name = 'SaveError'; this.cause = cause; }
   const writeFailed = (r) => !!r && (normCode(r.reasonCode) === 'write_failed' || (r.status === 'error' && r.delivery === 'picker'));
   // Save-as failure (writer WRITE_FAILED / throw while streaming, write() or close() rejected): amber, own words only
-  // (no DOMException text). Engine errors that aren't about writing keep their own cards.
+  // (no DOMException text, no writer reason). Free space is blamed only when the failure is clearly about quota / disk space
+  // (QuotaExceededError, or a quota flag / reasonCode / reason from the writer); any other failure (Blob too big to read,
+  // NotReadableError, …) gets the neutral line. Engine errors that aren't about writing keep their own cards.
+  const WF_QUOTA = 'Nothing was kept. Check there\u2019s enough free space, then try again.';
+  const WF_OTHER = 'Nothing was kept. Try again, or export as a smaller format.';
   function writeFailedCard(name, f, o, res, e) {
     const cause = e instanceof SaveError ? e.cause : e;
     if (e instanceof SaveError && cause && !isBrowserErr(cause) && !writeFailed(res)) return Object.assign(describe(f, o, res, cause), { blob: null });
-    return { tone: 'warn', status: 'write_failed', title: 'Couldn\u2019t finish saving ' + name, lines: ['Nothing was kept. Check there\u2019s enough free space, then try again.'] };
+    const quota = isQuota(cause) || (writeFailed(res) && quotaResult(res));
+    return { tone: 'warn', status: 'write_failed', title: 'Couldn\u2019t finish saving ' + name, lines: [quota ? WF_QUOTA : WF_OTHER], quota };
+  }
+  const QUOTA_CODE = /quota|disk_?full|no_?space|out_?of_?space|storage_?full|insufficient_?space/;
+  const QUOTA_TEXT = /\bquota|QuotaExceeded|not enough (free |disk |storage )?space|(disk|drive|storage) (is )?full|no space left|out of (disk |storage )?space|insufficient (disk |storage )?space/i;
+  const isQuota = (e) => !!e && typeof e === 'object' && (e.name === 'QuotaExceededError' || (typeof DOMException !== 'undefined' && e instanceof DOMException && e.code === 22));
+  // writer result about quota: quota/quotaExceeded flag, errorName 'QuotaExceededError' (top level, summary or error/cause
+  // object), a quota-like reasonCode / errorCode, or a reason that clearly says so
+  function quotaResult(r) {
+    if (!r) return false;
+    const s = r.summary || {};
+    for (const x of [r, s]) {
+      if (x.quota === true || x.quotaExceeded === true) return true;
+      if (/^QuotaExceededError$/i.test(String(x.errorName || x.errorType || ''))) return true;
+      if (isQuota(x.error) || isQuota(x.cause)) return true;
+      for (const c of [x.reasonCode, x.errorCode]) if (c != null && c !== '' && QUOTA_CODE.test(String(normCode(c)))) return true;
+    }
+    return typeof r.reason === 'string' && QUOTA_TEXT.test(r.reason);
+  }
+  // createWritable() on the picked handle, once more if the first attempt rejects; null when both fail
+  async function openWritable(handle) {
+    if (typeof handle.createWritable !== 'function') return null;
+    for (let i = 0; i < 2; i++) { try { return await handle.createWritable(); } catch (e) { /* retry once */ } }
+    return null;
   }
   const isBrowserErr = (e) => !!e && ((typeof DOMException !== 'undefined' && e instanceof DOMException) || /^(NotReadableError|QuotaExceededError|InvalidStateError|NotAllowedError|NoModificationAllowedError|NotFoundError|TypeMismatchError|SecurityError|AbortError)$/.test(e.name || ''));
   // drop whatever the Save-as picker left behind: abort the open writable (errors ignored), then delete the file with
@@ -716,7 +746,7 @@
   const REASONS = {
     no_fit: 'surfaces couldn\u2019t be fitted cleanly',
     open_shell: 'fitted faces don\u2019t close into a solid',
-    fit_limit: 'too many faces to fit in the browser',
+    fit_limit: 'too many triangles to fit in the browser',
     no_face_data: 'no face data to fit',
     kernel_download: 'the CAD kernel didn\u2019t download',
     browser_unsupported: 'this browser can\u2019t run surface fitting',
@@ -769,6 +799,7 @@
     const faces = parts.reduce((a, p) => a + (bothFitted(p) ? (+p.faces || 0) : 0), 0) || (res.summary && res.summary.faces);
     const allMesh = list.every((l) => l.kind !== 'omitted');
     const meshLine = allMesh ? (n > 1 ? 'Every part\u2019s mesh body is in the file too.' : 'The mesh body is included too.') : null;
+    if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
     if (fit === 0) {
       return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
         lines: ['No part could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
@@ -787,6 +818,28 @@
     return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
   }
 
+  // Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
+  // card says so once ("Saved as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
+  // lists no part rows. Triggers: top-level reasonCode fit_limit, every part fit_limit, or the engine's too-many-triangles text.
+  // Counts: summary.tris (else the reason text); limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).
+  const LIMIT_TEXT = /too many (triangles|faces) to fit/i;
+  function limitHit(res, parts) {
+    if (codeOf(res.reasonCode) === 'fit_limit' || LIMIT_TEXT.test(String(res.reason || ''))) return true;
+    return !!(parts && parts.length && parts.every((p) => normCode(p.reasonCode) === 'fit_limit'));
+  }
+  function numK(m) { if (!m) return NaN; const n = parseFloat(m[1].replace(/,/g, '')); const u = (m[2] || '').toLowerCase(); return n * (u === 'k' ? 1e3 : u === 'm' ? 1e6 : 1); }
+  const fmtK = (n) => (n >= 1e6 ? (Math.round(n / 1e5) / 10).toString().replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)));
+  function limitLine(res) {
+    const s = res.summary || {}, r = String(res.reason || '');
+    let tris = +s.tris > 0 ? +s.tris : numK(r.match(/(\d[\d.,]*)\s*([kKmM])?\s*triangles/));
+    const lim0 = NS().cadSurfaceLimits && NS().cadSurfaceLimits.maxFitTris;
+    let lim = +s.fitLimit > 0 ? +s.fitLimit : +lim0 > 0 ? +lim0 : numK(r.match(/limit\D{0,12}?(\d[\d.,]*)\s*([kKmM])?/i));
+    const bits = [isFinite(tris) && tris > 0 ? fmtK(tris) + ' triangles' : null, isFinite(lim) && lim > 0 ? 'limit ' + fmtK(lim) : null].filter(Boolean);
+    return 'Too large to fit surfaces in the browser' + (bits.length ? ' (' + bits.join(', ') + ')' : '') + '.';
+  }
+  const LIMIT_TITLE = 'Saved as mesh STEP';
+  // part rows only when the parts don't all share the one limit reason (some part has its own outcome)
+  const limitRows = (parts, list) => (parts.every((p) => normCode(p.reasonCode) === 'fit_limit' || p.reasonCode == null) ? undefined : list);
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
   const XT_UNITS = 'Stored in meters, opens at true size in NX.';
   const XT_NOTE = 'All parts merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
@@ -842,6 +895,7 @@
           title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
           lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.'] };
       }
+      if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
       if (fit === 0) {
         return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
           lines: ['No part could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
@@ -852,6 +906,7 @@
     }
 
     // whole-file results
+    if (blob && res.status === 'mesh_only' && limitHit(res, null)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, title: LIMIT_TITLE, lines: [limitLine(res)] };
     if (res.meshStep || (o.body === 'fitted' && o.onNoFit === 'mesh' && res.status === 'mesh_only' && blob)) {
       return { tone: 'warn', status: 'mesh_only', blob, title: 'Mesh STEP exported',
         lines: ['Surfaces couldn\u2019t be fitted' + (why ? ': ' + why : '') + '.', 'Saved the mesh STEP instead.'] };

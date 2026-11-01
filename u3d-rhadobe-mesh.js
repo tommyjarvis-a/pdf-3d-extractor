@@ -48,16 +48,18 @@
  */
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.RHAdobeMesh = factory(); })(typeof self !== 'undefined' ? self : this, function () {
   const GUID = '96a804a6-3fb9-43c5-b2df-2a31b5569340';
+  const MAX_COUNT = 1 << 24; // per-array element cap (16.7M faces/positions per mesh block)
   function Reader(u8, p, end) {
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     const R = { p, end,
       u8() { if (R.p >= R.end) throw new Error('RHAdobe: read past block end'); return u8[R.p++]; },
-      u16() { const v = dv.getUint16(R.p, true); R.p += 2; return v; },
-      u24() { const v = u8[R.p] | (u8[R.p + 1] << 8) | (u8[R.p + 2] << 16); R.p += 3; return v >>> 0; },
-      u32() { const v = dv.getUint32(R.p, true); R.p += 4; return v; },
-      f32() { const v = dv.getFloat32(R.p, true); R.p += 4; return v; },
+      need(k) { if (R.p + k > R.end) throw new Error('RHAdobe: read past block end'); },
+      u16() { R.need(2); const v = dv.getUint16(R.p, true); R.p += 2; return v; },
+      u24() { R.need(3); const v = u8[R.p] | (u8[R.p + 1] << 8) | (u8[R.p + 2] << 16); R.p += 3; return v >>> 0; },
+      u32() { R.need(4); const v = dv.getUint32(R.p, true); R.p += 4; return v; },
+      f32() { R.need(4); const v = dv.getFloat32(R.p, true); R.p += 4; return v; },
       n(bytes) { return bytes === 1 ? R.u8() : bytes === 2 ? R.u16() : bytes === 3 ? R.u24() : R.u32(); },
-      str() { const L = R.u16(); const s = new TextDecoder().decode(u8.subarray(R.p, R.p + L)); R.p += L; return s; } };
+      str() { const L = R.u16(); R.need(L); const s = new TextDecoder().decode(u8.subarray(R.p, R.p + L)); R.p += L; return s; } };
     return R;
   }
   function rh39(R, count, end) {
@@ -120,6 +122,7 @@
     if (t === 0) return new Uint32Array(count);
     if (t === 1) return new Uint32Array(count).fill(R.u32());
     const size = R.n((b >> 6) + 1), start = R.p, end = start + size; let out;
+    if (end > R.end) throw new Error('RHAdobe: UINT block of ' + size + ' bytes overruns the mesh block');
     if (t === 2) { out = new Uint32Array(count); let b4 = 0; for (let i = 0; i < count; i++) { if (!(i & 1)) b4 = R.u8(); out[i] = i & 1 ? b4 >> 4 : b4 & 15; } }
     else if (t >= 3 && t <= 6) { out = new Uint32Array(count); for (let i = 0; i < count; i++) out[i] = R.n(t - 2); }
     else if (t === 7) out = rh39(R, count, end);
@@ -154,6 +157,7 @@
     const flags = R.u8(); if (flags & 15) throw new Error('RHAdobe: chunk version ' + (flags & 15) + ' != 0');
     if (flags & 16) throw new Error('RHAdobe: subchunk extension data not supported');
     const mcEnc = flags >> 6; const nMat = mcEnc === 0 ? 1 : R.n([0, 1, 2, 4][mcEnc]);
+    if (nMat > size) throw new Error('RHAdobe: bad material count ' + nMat);
     const materials = [];
     for (let m = 0; m < nMat; m++) {
       const mf = R.u8(); const layers = R.n(((mf >> 4) & 3) + 1); const shadingId = R.n(((mf >> 2) & 3) + 1);
@@ -162,6 +166,8 @@
     }
     const vf = R.u8(), vs = (vf >> 6) + 1; const cnt = {};
     ['faces', 'positions', 'normals', 'diffuse', 'specular', 'texCoords'].forEach((k, b) => { cnt[k] = vf & (1 << b) ? R.n(vs) : 0; });
+    // counts come from the stream and size the typed arrays below; anything past MAX_COUNT is a damaged block
+    for (const k in cnt) if (cnt[k] > MAX_COUNT) throw new Error(`RHAdobe: implausible ${k} count ${cnt[k]}`);
     const F = cnt.faces;
     const P = floatArray(R, cnt.positions, 3, info);
     const N = cnt.normals ? floatArray(R, cnt.normals, 3, info) : null;
@@ -191,7 +197,7 @@
   function scan(u8) {
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); const td = new TextDecoder();
     const str = (o) => { const L = dv.getUint16(o, true); return [td.decode(u8.subarray(o + 2, o + 2 + L)), o + 2 + L]; };
-    const decls = new Map(), meshes = [], nodes = [], warnings = [];
+    const decls = new Map(), meshes = [], nodes = [], warnings = [], meshErrors = [];
     function block(o, lim) {
       const type = dv.getUint32(o, true), ds = dv.getUint32(o + 4, true), ms = dv.getUint32(o + 8, true); const d0 = o + 12;
       if (d0 + ds > lim) throw new Error('U3D block overruns stream at ' + o);
@@ -207,7 +213,7 @@
       } else if (type >= 0x100 && type <= 0xFFFFFF && type !== 0x00443355) {
         const dcl = decls.get(type);
         if (dcl && dcl.name === 'RHAdobeMeshResource') {
-          try { meshes.push(decodeBlock(u8, d0, ds)); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); }
+          try { meshes.push(decodeBlock(u8, d0, ds)); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); meshErrors.push({ offset: o, message: e.message }); }
         } else warnings.push(`New Object Block type 0x${type.toString(16)} at ${o} has no RHAdobeMeshResource declaration`);
       } else if (type === 0xFFFFFF21 || type === 0xFFFFFF22) { // group/model node: name, parents{name, 4x4 col-major}, [resource]
         let [name, q] = str(d0); const np = dv.getUint32(q, true); q += 4; const parents = [];
@@ -218,7 +224,7 @@
       return d0 + p4(ds) + p4(ms);
     }
     let o = 0; while (o + 12 <= u8.length) o = block(o, u8.length);
-    return { decls, meshes, nodes, warnings };
+    return { decls, meshes, nodes, warnings, meshErrors };
   }
   const mul = (a, b) => { const r = new Float64Array(16); for (let c = 0; c < 4; c++) for (let rr = 0; rr < 4; rr++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + rr] * b[c * 4 + k]; r[c * 4 + rr] = s; } return r; };
   const I = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
@@ -242,7 +248,7 @@
           get faces() { return m.facesAoA(); }, analyticFeatures: [] });
       }
     }
-    return { format: 'U3D (ECMA-363) + RHAdobeMeshResource', parts, meshes: sc.meshes, nodes: sc.nodes, warnings: sc.warnings, decodePath: 'U3D/RHAdobeMeshResource' };
+    return { format: 'U3D (ECMA-363) + RHAdobeMeshResource', parts, meshes: sc.meshes, nodes: sc.nodes, warnings: sc.warnings, meshErrors: sc.meshErrors, decodePath: 'U3D/RHAdobeMeshResource' };
   }
   return { GUID, decodeBlock, scan, parseU3D, _rh39: rh39, _uic1: uic1, _uintBlock: uintBlock, Reader };
 });
