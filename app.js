@@ -2787,7 +2787,9 @@
     const out = new TextSink(options.stream ? 'stream' : options.blob);
     out.push('ISO-10303-21;');
     out.push('HEADER;');
-    out.push("FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');");
+    const partial = partialNote();   // 1.6.2: damaged load -> second FILE_DESCRIPTION string (ASCII, no quotes); else byte-identical
+    out.push(partial ? `FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214','${partial.replace(/'/g, "''")}'),'2;1');`
+      : "FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214'),'2;1');");
     out.push(`FILE_NAME('${(state.fileName || 'assembly').replace(/\.pdf$/i, '')}.stp','2026-10-23T12:00:00',('Steven Moran'),('CAD Engineering Workbench'),'3D PDF Geometry Extractor','1.0','');`);
     out.push("FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));");
     out.push('ENDSEC;');
@@ -3100,6 +3102,11 @@
     const sLines = [
       line80('3D PDF Geometry Extractor IGES 5.3 Feature Edge Wireframe', 'S', 1)
     ];
+    // 1.6.2: damaged load -> the PARTIAL note as extra Start-section lines (72 columns each, split at spaces); T line counts them
+    const partial = partialNote();
+    if (partial) { let rest = partial;
+      while (rest) { let cut = rest.length <= 72 ? rest.length : rest.lastIndexOf(' ', 72); if (cut <= 0) cut = 72;
+        sLines.push(line80(rest.slice(0, cut), 'S', sLines.length + 1)); rest = rest.slice(cut).replace(/^ +/, ''); } }
     const gLines = [
       line80('1H,,1H;,14H3D_PDF_CAD_ASM,14H3D_PDF_CAD.igs,10H3D_PDF_EXT,5H1.0.0,32,38,', 'G', 1),
       line80('6,308,15,14H3D_PDF_CAD_ASM,1.0,2,2HMM,1,0.01,13H261023.120000;', 'G', 2)
@@ -4062,6 +4069,22 @@
     }, 250);
   }
 
+  // 1.6.2: the note written into STEP FILE_DESCRIPTION / IGES Start section while lastLoad.damaged is set (null otherwise).
+  // Printable ASCII with no apostrophe, so it is a valid ISO 10303-21 string and fits the IGES character set as is.
+  const PARTIAL_NOTE = 'PARTIAL: some 3D data in the source PDF could not be read; check against the drawing';
+  function partialNote() { return ((window.PDF3D && window.PDF3D.lastLoad) || {}).damaged ? PARTIAL_NOTE : null; }
+  // 'part.x_t' -> 'part_partial.x_t' (suffix before the last extension; no extension -> appended)
+  function partialName(name) { const m = /^(.*?)(\.[A-Za-z0-9_]+)$/.exec(name); return m && m[1] ? m[1] + '_partial' + m[2] : name + '_partial'; }
+  // 1.6.2: the default file name PDF3D.exportFormat(format, opts) will use (step mesh/stl/obj/iges/xt/raw), with _partial
+  // while lastLoad.damaged is set. Fitted/Both STEP results may come back as <stem>-surfaces[-only].stp; read result.filename.
+  function suggestedFileName(format, opts) {
+    const fmt = String(format || '').toLowerCase(), o = opts || {}, stem = stemName();
+    const st = state.streams && state.streams[state.activeStreamIdx];
+    const ext = { step: '.stp', stl: '.stl', obj: '.obj', iges: '.igs', xt: '.x_t', raw: st && st.subtype === 'PRC' ? '.prc' : '.u3d' }[fmt];
+    if (!ext) return null;
+    const name = stem + (fmt === 'stl' && o.encoding === 'ascii' ? '-ascii' : '') + ext;
+    return partialNote() ? partialName(name) : name;
+  }
   function stemName() {
     return (state.fileName || 'cad-3d-pdf-assembly').replace(/\.(pdf|u3d|prc)$/i, '');
   }
@@ -4650,7 +4673,8 @@
       const meshText = buildSTEPAP214(meshParts, { units: 'mm', brepMode: 'merged', detail: 1 });   // same mesh body as the 'both' file
       const fittedText = !blob ? null : blob._parts ? blob._parts : await blob.text(); // chunk array: mergeSTEPChunks streams it (no join)
       if (signal && signal.aborted) return exportCancelled();
-      const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
+      const desc = partialNote() ? ['3D PDF CAD surfaces - STEP AP214', partialNote()] : '3D PDF CAD surfaces - STEP AP214';   // 1.6.2 PARTIAL note
+      const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: desc });
       blob = { _parts: chunks, _type: 'application/step' };   // exportFormat makes the Blob or writes the chunks
     }
     const bsize = blob._parts ? null : blob.size;
@@ -4729,7 +4753,22 @@
   //     or read back -> { blob: null, delivery: 'picker', size }. A failed write -> status 'error', reasonCode 'WRITE_FAILED'
   //     (the file is partly written; errorName = the thrown error's name, quota = errorName === 'QuotaExceededError'). exportFormat never calls close() or abort(): the caller does
   //     (close on a result with delivery 'picker', abort + remove the file otherwise).
+  //   damaged (1.6.2): while lastLoad.damaged is set (the stream loaded partially, damaged data skipped), every result
+  //     that made a file (status 'ok' or 'mesh_only', delivery 'picker' or 'download', every format; also a WRITE_FAILED
+  //     one) carries damaged: <that same warning string> at the top level and as summary.damaged, and its filename gets
+  //     _partial before the extension (part.x_t -> part_partial.x_t). Absent / unchanged otherwise.
+  //   suggestedName (1.6.2): = filename on every result that has one (the name to offer in a save dialog / download).
   async function exportFormat(format, opts) {
+    const r = await exportFormatDeliver(format, opts);
+    const damaged = ((window.PDF3D && window.PDF3D.lastLoad) || {}).damaged;
+    if (r && damaged && (r.status === 'ok' || r.status === 'mesh_only' || r.delivery)) {
+      r.damaged = damaged; r.summary = { ...(r.summary || {}), damaged };   // copy: summary objects can be shared
+      if (r.filename) r.filename = partialName(r.filename);                  // part.x_t -> part_partial.x_t
+    }
+    if (r && r.filename) r.suggestedName = r.filename;
+    return r;
+  }
+  async function exportFormatDeliver(format, opts) {
     const o = opts || {}; const w = o.writable || null;
     const res = await exportFormatCore(format, o);
     if (!res) return res;
@@ -4757,6 +4796,8 @@
     }
   }
   PDF3D_NS.exportFormat = exportFormat;
+  PDF3D_NS.suggestedFileName = suggestedFileName;   // (format, opts) -> default name, _partial while lastLoad.damaged (1.6.2)
+  PDF3D_NS.partialNote = partialNote;               // () -> the STEP/IGES PARTIAL note while lastLoad.damaged, else null (1.6.2)
 
   // PDF3D.estimateBytes(format, opts) -> Promise<number | null> (estimated file size in bytes)
   // Pre-export size estimate for the save dialog / big-file warning. xt: the writer's counting pre-pass

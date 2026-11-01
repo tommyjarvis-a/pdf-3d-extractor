@@ -21,7 +21,11 @@
  * caller); an entry with an error must give ATTACHMENT_UNREADABLE both ways. An expect.json entry may pin
  * "attachmentSha256": [sha256 | null per attachment] (from tools/make-damaged-fixtures.js; null = unreadable on purpose).
  * Every corpus file (1.6.2): no raw JavaScript error text (DataView, Cannot read properties...) in lastLoad detail / message /
- * damaged, and lastLoad.trisParsed >= tris on 'ok' loads.
+ * damaged, and lastLoad.trisParsed >= tris on 'ok' loads. Every corpus file that loads 'ok' with lastLoad.damaged set (x05, x10):
+ * every PDF3D.exportFormat format (xt, step mesh/fitted/both, stl binary/ascii, obj, iges, raw), download and writable, must
+ * carry damaged / summary.damaged = lastLoad.damaged, a <stem>_partial.<ext> filename = suggestedName, the PARTIAL note in
+ * STEP FILE_DESCRIPTION and the IGES Start section; with damaged cleared the file is the same minus the note.
+ * Sample (always): exportFormat step / iges / raw results have no damaged key, no _partial name, no PARTIAL note.
  * $NX_PDF (or <corpus>/../nx2512-input.pdf) must give 37,196 triangles.
  */
 const fs = require('fs'); const path = require('path'); const vm = require('vm');
@@ -77,6 +81,57 @@ async function exportIdentity(window, ctx, label) {
     check(blobs === 0, `${label} ${name}: ${blobs} Blob(s) created on the writable path`);
     check(maxWrite <= (1 << 22), `${label} ${name}: a single write of ${maxWrite} B`);
     console.log(`  ${label} ${name}: ${want.length} B ${same ? 'identical' : 'DIFFERENT'}, ${writes} writes (max ${maxWrite} B), Blobs on writable path: ${blobs}`);
+  }
+}
+
+// 1.6.2 damaged loads (lastLoad.damaged set, e.g. x05 / x10): every PDF3D.exportFormat result, download and writable, for
+// every format must carry damaged === lastLoad.damaged and summary.damaged === lastLoad.damaged, a <stem>_partial.<ext>
+// filename (= suggestedName; = PDF3D.suggestedFileName(fmt, opts) for the mesh formats), and STEP / IGES must hold the
+// PDF3D.partialNote() text (FILE_DESCRIPTION second string / extra Start-section lines). Then the same export with
+// lastLoad.damaged cleared must have no damaged key, the plain name, and bytes = the damaged file minus the note
+// (STEP, IGES) or identical bytes (XT, STL, OBJ, raw): the note is the only difference.
+const DMG_FORMATS = [['xt'], ['step'], ['step', { body: 'fitted' }], ['step', { body: 'both' }], ['stl'], ['stl', { encoding: 'ascii' }], ['obj'], ['iges'], ['raw']];
+async function exportText(window, fmt, extra, writableToo) {
+  const d = await window.PDF3D.exportFormat(fmt, { ...extra });
+  const dl = d && d.blob ? Buffer.from(await d.blob.arrayBuffer()) : null; if (d) d.blob = null;
+  if (!writableToo) return { d, dl };
+  const bufs = []; const writable = { write: async (u8) => { bufs.push(Buffer.from(u8)); }, close: async () => {}, abort: async () => {} };
+  const w = await window.PDF3D.exportFormat(fmt, { ...extra, writable });
+  return { d, dl, w, wb: Buffer.concat(bufs) };
+}
+const stripNote = (fmt, buf, note) => {
+  let t = buf.toString('latin1');
+  if (fmt === 'step') return t.replace(`,'${note}'),'2;1');`, "),'2;1');");
+  const lines = t.split('\n'); const sl = lines.filter((l) => l[72] === 'S'); const keep = lines.filter((l) => !(l[72] === 'S' && l !== sl[0]));
+  return keep.join('\n').replace(/^S\s*\d+(G)/m, (m, g) => 'S' + '1'.padStart(7, ' ') + g);
+};
+async function damagedExports(window, label) {
+  const P = window.PDF3D; const ll = P.lastLoad; const dmg = ll.damaged; const note = P.partialNote && P.partialNote();
+  check(typeof note === 'string' && /^[\x20-\x26\x28-\x7e]+$/.test(note), `${label}: PDF3D.partialNote() ${JSON.stringify(note)} (want printable ASCII, no apostrophe)`);
+  for (const [fmt, extra] of DMG_FORMATS) {
+    const name = fmt + (extra ? '-' + (extra.encoding || extra.body) : ''); const tag = `${label} ${name}`;
+    const { d, dl, w, wb } = await exportText(window, fmt, extra, true);
+    if (!d || !dl) { check(d && d.status === 'skipped' && d.damaged === undefined, `${tag}: no file (${d && d.status} ${d && d.reasonCode}) but damaged=${d && d.damaged}`);
+      console.log(`  ${tag}: ${d && d.status} ${d && d.reasonCode} (no file)`); continue; }
+    for (const [r, how] of [[d, 'download'], [w, 'picker']]) {
+      check(r && r.delivery === how && r.damaged === dmg && r.summary && r.summary.damaged === dmg, `${tag} (${how}): damaged ${JSON.stringify(r && r.damaged)} summary.damaged ${JSON.stringify(r && r.summary && r.summary.damaged)}`);
+      check(r && /_partial\.[A-Za-z0-9_]+$/.test(r.filename || '') && r.suggestedName === r.filename, `${tag} (${how}): filename ${r && r.filename} suggestedName ${r && r.suggestedName}`);
+    }
+    if (!(fmt === 'step' && extra)) check(P.suggestedFileName(fmt, extra) === d.filename, `${tag}: suggestedFileName ${P.suggestedFileName(fmt, extra)} vs filename ${d.filename}`);
+    check(dl.equals(wb), `${tag}: download and writable bytes differ (${dl.length} vs ${wb.length} B)`);
+    const txt = dl.toString('latin1');
+    if (fmt === 'step') check(txt.includes(`FILE_DESCRIPTION(('`) && txt.includes(`,'${note}'),'2;1');`) && /^[\x20-\x7e\n\r]*$/.test(txt.slice(0, txt.indexOf('DATA;'))), `${tag}: STEP header has no PARTIAL FILE_DESCRIPTION (or non-ASCII header)`);
+    else if (fmt === 'iges') { const sl = txt.split('\n').filter((l) => l[72] === 'S');
+      check(sl.length >= 2 && sl.every((l) => l.length === 80) && sl.slice(1).map((l) => l.slice(0, 72).trim()).join(' ') === note && new RegExp(`^S${String(sl.length).padStart(7, ' ')}G`, 'm').test(txt), `${tag}: IGES Start section has no PARTIAL note (${sl.length} S lines)`); }
+    else check(!txt.includes('PARTIAL:'), `${tag}: ${fmt} contains the PARTIAL note (only STEP / IGES carry it)`);
+    // same export, lastLoad.damaged cleared
+    const { damaged: _, ...clean } = ll; P.lastLoad = clean; let u;
+    try { u = await exportText(window, fmt, extra, false); } finally { P.lastLoad = ll; }
+    check(u.d && !('damaged' in u.d) && !(u.d.summary && 'damaged' in u.d.summary) && u.d.filename === d.filename.replace(/_partial(\.[A-Za-z0-9_]+)$/, '$1') && u.d.suggestedName === u.d.filename,
+      `${tag} undamaged: damaged ${u.d && u.d.damaged} filename ${u.d && u.d.filename}`);
+    const same = fmt === 'step' || fmt === 'iges' ? stripNote(fmt, dl, note) === u.dl.toString('latin1') && !u.dl.toString('latin1').includes('PARTIAL:') : u.dl.equals(dl);
+    check(same, `${tag}: damaged file minus the note differs from the undamaged file`);
+    console.log(`  ${tag}: ${d.status} ${d.filename} ${dl.length} B, both ways same, damaged/summary.damaged ok, undamaged = minus note ${same ? 'yes' : 'NO'}`);
   }
 }
 
@@ -169,6 +224,12 @@ function syntheticAttachmentPDF(names) {
       for (const k of ['buildParasolidXT', 'buildSTEPAP214', 'buildASCIISTL', 'buildWavefrontOBJ', 'buildBinarySTL']) { const o = api[k](); const len = Array.isArray(o) ? o.reduce((n, c) => n + c.length, 0) : (o.length || o.byteLength || 0); check(len > 100, k + ' empty'); console.log(`  ${k}: ${len}`); }
       await exportIdentity(window, ctx, 'sample'); } }
 
+  // 1b. 1.6.2: an undamaged load exports with no damaged key, no _partial name and no PARTIAL note
+  { await api.activateStream(0); check(!window.PDF3D.lastLoad.damaged && window.PDF3D.partialNote() === null, 'sample: lastLoad.damaged / partialNote set');
+    for (const fmt of ['step', 'iges', 'raw']) { const { d, dl } = await exportText(window, fmt, undefined, false);
+      check(d && dl && !('damaged' in d) && !(d.summary && 'damaged' in d.summary) && !/_partial/.test(d.filename) && d.suggestedName === d.filename && d.filename === window.PDF3D.suggestedFileName(fmt) && !dl.toString('latin1').includes('PARTIAL:'),
+        `sample ${fmt}: undamaged export has damaged ${d && d.damaged} / name ${d && d.filename} / suggested ${window.PDF3D.suggestedFileName(fmt)}`); } }
+
   // 2. embedded CAD attachment, no 3D annotation
   { const tmp = path.join(require('os').tmpdir(), 'pdf3d-attach-test.pdf'); fs.writeFileSync(tmp, syntheticAttachmentPDF());
     const r = await decodeFile(api, tmp); console.log(`attachment pdf: streams ${r.streams.length}, attachments ${r.attachments.join(', ')}`);
@@ -203,6 +264,11 @@ function syntheticAttachmentPDF(names) {
       { const shown = [ll.detail, ll.message, ll.damaged].filter(Boolean).join(' | ');
         ok = check(!/DataView|typed array|out of bounds|Cannot read propert|is not a function|is not iterable|Invalid array length/i.test(shown), `${f}: raw runtime error text in lastLoad: ${shown.slice(0, 200)}`) && ok;
         if (ll.status === 'ok') ok = check(ll.trisParsed >= ll.tris, `${f}: lastLoad.trisParsed ${ll.trisParsed} < tris ${ll.tris}`) && ok; }
+      if (!r.error && ll.status === 'ok' && ll.damaged) {   // 1.6.2: export results of a partial load (always on)
+        const si = r.streams.findIndex((s) => s.tris > 0); const f0 = failures;
+        if (si >= 0) { await api.activateStream(si); await damagedExports(window, f); const s = api.getState(); if (s.streams[si]) s.streams[si].parsed = null; }
+        else check(false, `${f}: damaged load with no geometry to export`);
+        if (failures > f0) ok = false; }
       if (!r.error && (ll.attachmentDetails || []).length) { const f0 = failures; await attachmentRoundTrip(window, ctx, f, exp && !update ? exp.attachmentSha256 : undefined); if (failures > f0) ok = false; }
       if (exp && exp.lastLoad && !update) for (const k of Object.keys(exp.lastLoad))
         ok = check(JSON.stringify(ll[k]) === JSON.stringify(exp.lastLoad[k]), `${f}: lastLoad.${k} ${JSON.stringify(ll[k])} expected ${JSON.stringify(exp.lastLoad[k])}`) && ok;

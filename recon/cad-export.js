@@ -198,7 +198,9 @@
       const t = performance.now();
       // fitted STEP bytes -> 4 MiB string chunks (streamed decode; mergeSTEPChunks carries partial lines), never one big string
       const fittedText = wres && wres.fittedStep ? decodeChunks(wres.fittedStep) : null;
-      const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
+      // 1.6.2: damaged load -> PARTIAL note as a second FILE_DESCRIPTION string (window.PDF3D.partialNote() is null otherwise)
+      const note = window.PDF3D && typeof window.PDF3D.partialNote === 'function' ? window.PDF3D.partialNote() : null;
+      const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: note ? ['3D PDF CAD surfaces - STEP AP214', note] : '3D PDF CAD surfaces - STEP AP214' });
       let size = 0;
       if (o.noBlob) for (const c of chunks) size += utf8Length(c);
       const blob = o.noBlob ? null : new Blob(chunks, { type: 'application/step' });

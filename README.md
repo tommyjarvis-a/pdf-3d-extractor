@@ -149,6 +149,31 @@ const bytes = await PDF3D.estimateBytes('xt', { partIds: null, detail });   // s
 // whole model (seconds on large ones), so open the save dialog first or estimate ahead of the click.
 ```
 
+#### Partial loads at export time (1.6.2)
+
+While `PDF3D.lastLoad.damaged` is set (an `'ok'` load that skipped damaged data), exports say so:
+
+```js
+const r = await PDF3D.exportFormat('xt', { writable: w });
+// r.damaged          = PDF3D.lastLoad.damaged (the same warning string), on every result that made a file
+//                      (status 'ok' / 'solid' / 'partial' / 'mesh_only', delivery 'picker' or 'download', every format;
+//                      also a WRITE_FAILED one). Skipped / cancelled results and undamaged loads have no damaged key.
+// r.summary.damaged  = the same string
+// r.filename         = '<stem>_partial.<ext>' (part.x_t -> part_partial.x_t, part-ascii.stl -> part-ascii_partial.stl)
+// r.suggestedName    = r.filename (on every result with a filename, damaged or not)
+PDF3D.suggestedFileName('xt')                        // -> 'part_partial.x_t' while damaged, else 'part.x_t' (before exporting,
+PDF3D.suggestedFileName('stl', { encoding: 'ascii' }) //    e.g. for showSaveFilePicker's suggestedName); step = mesh name '<stem>.stp'
+                                                     //    (fitted / both results may be named <stem>-surfaces[-only].stp)
+PDF3D.partialNote()  // -> 'PARTIAL: some 3D data in the source PDF could not be read; check against the drawing' while damaged, else null
+```
+
+The file itself carries that note in STEP (mesh, fitted and both) as a second `FILE_DESCRIPTION` string,
+`FILE_DESCRIPTION(('3D PDF Extracted B-Rep Assembly - STEP AP214','PARTIAL: some 3D data in the source PDF could not be read; check against the drawing'),'2;1');`
+(printable ASCII, no apostrophe), and in IGES as extra Start-section lines (72 columns each; the Terminate line counts
+them). Parasolid `.x_t`, STL, OBJ and the raw stream are unchanged. Undamaged loads export byte-identical files, names and
+result fields (apart from the new `suggestedName`). `saveAttachment` results are not affected: embedded files are saved
+exactly as embedded and do not depend on whether the 3D stream decoded.
+
 ### Saving an embedded file (1.6.2)
 
 `PDF3D.saveAttachment(index, opts)` saves `lastLoad.attachmentDetails[index]` exactly as embedded (decoded and decrypted
@@ -170,7 +195,8 @@ const r = await PDF3D.saveAttachment(i, { writable: w, signal, onProgress });
 //                          the file is partly written
 // opts.signal aborted -> the exportFormat cancelled shape { status: 'cancelled', reasonCode: 'cancelled', blob: null, ... }
 // opts.onProgress({ stage: 'write', pct, label, bytes, totalBytes }) after each piece.
-// name = filename = attachmentDetails[i].fileName. saveAttachment never calls close() or abort(): close() on status 'ok',
+// name = filename = attachmentDetails[i].fileName (no damaged key or _partial suffix: a damaged 3D stream does not affect
+// embedded files). saveAttachment never calls close() or abort(): close() on status 'ok',
 // abort() otherwise (as with exportFormat).
 ```
 

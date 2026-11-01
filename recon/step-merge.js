@@ -33,13 +33,13 @@
     out.push(text.slice(seg, dataEnd));
     return { header, data: out.join(''), maxId };
   }
-  // texts: array of STEP strings. opts.fileName / opts.description replace FILE_NAME / FILE_DESCRIPTION in the first header.
+  // texts: array of STEP strings. opts.fileName / opts.description (string or array of strings) replace FILE_NAME / FILE_DESCRIPTION in the first header.
   function mergeSTEP(texts, opts) {
     opts = opts || {}; let offset = 0, header = null; const parts = [];
     for (const t of texts) { if (!t) continue; const s = scan(t, offset); if (header === null) header = s.header; parts.push(s.data.replace(/^\s*\n?/, '').replace(/\s*$/, '\n')); offset = Math.max(offset, s.maxId); }
     if (header === null) throw new Error('STEP merge: no input');
     const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${q(opts.description)}),'2;1');`);
+    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${[].concat(opts.description).map(q).join(',')}),'2;1');`);
     if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
     return header.replace(/\s*$/, '\n') + 'DATA;\n' + parts.join('') + 'ENDSEC;\nEND-ISO-10303-21;\n';
   }
@@ -88,7 +88,7 @@
   }
   function fixHeader(header, opts) {
     const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
-    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${q(opts.description)}),'2;1');`);
+    if (opts.description) header = header.replace(/FILE_DESCRIPTION\s*\([\s\S]*?\);/, `FILE_DESCRIPTION((${[].concat(opts.description).map(q).join(',')}),'2;1');`);
     if (opts.fileName) header = header.replace(/FILE_NAME\s*\([\s\S]*?\);\s*(?=FILE_SCHEMA)/, `FILE_NAME(${q(opts.fileName)},${q(opts.timeStamp || new Date().toISOString().slice(0, 19))},(${q(opts.author || '')}),(''),${q(opts.preprocessor || '3D PDF Geometry Extractor')},'Open CASCADE 7.6','');\n`);
     return header;
   }

@@ -16,6 +16,16 @@
   B-Rep weld drops degenerate triangles), `trisParsed` is as decoded (what the CAD fit limit `fitSkippedTris` and the
   large-model banner count). r08 showed 429,271 in the fit line and 427,503 in `lastLoad.tris`; both are now exposed and labelled.
 - **`lastLoad.damaged`** on `'ok'` loads that skipped damaged data (the warning text).
+- **Partial loads are visible at export time.** While `lastLoad.damaged` is set, every `PDF3D.exportFormat` result that
+  made a file (every format, `'picker'` and `'download'`, also `WRITE_FAILED`) carries **`damaged`** and
+  **`summary.damaged`** (= `lastLoad.damaged`), and its **`filename`** gets `_partial` before the extension
+  (`part_partial.x_t`). New **`result.suggestedName`** (= `filename`), **`PDF3D.suggestedFileName(format, opts)`** (the
+  default name before exporting, `_partial` while damaged) and **`PDF3D.partialNote()`**. STEP (mesh, fitted, both) gets
+  the second `FILE_DESCRIPTION` string `'PARTIAL: some 3D data in the source PDF could not be read; check against the
+  drawing'`, IGES the same note as extra Start-section lines; XT, STL, OBJ and raw are unchanged. Undamaged exports are
+  byte-identical to before. `saveAttachment` is unaffected (embedded files do not depend on the 3D decode).
+  `test/run.js` checks every format both ways on x05 and x10, and that the same export with `damaged` cleared differs
+  only by the note.
 - **Attachment fixtures** `x06_attachments_mixed.pdf`, `x07_attachments_aesv2.pdf`, `x08_attachments_rc4.pdf`,
   `x09_attachments_eff_aesv2.pdf` (tools/make-damaged-fixtures.js). Their expect.json entries pin `attachmentDetails`
   and the source sha256 of every attachment. `test/run.js` saves every attachment of every corpus file both ways and
