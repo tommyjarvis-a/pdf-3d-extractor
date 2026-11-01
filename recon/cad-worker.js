@@ -55,7 +55,14 @@ async function loadKernel(post, cacheName) {
 }
 
 self.onmessage = async (ev) => {
-  const m = ev.data; if (!m || m.cmd !== 'run') return;
+  const m = ev.data;
+  // probe (PDF3D.retryCadKernel): a fresh kernel download / Cache Storage read + init in this new worker, nothing else
+  if (m && m.cmd === 'probe') {
+    try { await loadKernel(() => {}, m.cacheName); self.postMessage({ type: 'kernel', ok: true }); self.postMessage({ type: 'probe', ok: true }); }
+    catch (e) { self.postMessage({ type: 'error', message: String((e && e.message) || e), stage: 'kernel', oom: /memory|Aborted\(OOM|allocation/i.test(String(e && e.message || e)) }); }
+    return;
+  }
+  if (!m || m.cmd !== 'run') return;
   const T0 = now(); const timings = {}; let heapPeak = 0; let oc = null;
   const heap = () => { if (oc && oc.HEAP8 && oc.HEAP8.length > heapPeak) heapPeak = oc.HEAP8.length; };
   // overall worker share: kernel 0-0.12, parts 0.12-0.97 (weighted by triangles), write 0.97-1

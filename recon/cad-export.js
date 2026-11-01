@@ -229,12 +229,44 @@
     });
   }
 
+  // PDF3D.retryCadKernel() -> Promise<boolean> (1.6.0, the export flow's 'Try again' for cadSurfacesReason 'kernel_download'):
+  // clears the failed state and makes a real, fresh attempt: a new worker downloads (or reads from Cache Storage) and starts
+  // the kernel. Nothing is memoised between attempts (every worker is new; a failed fetch / import is not cached). Updates
+  // capabilities.cadSurfaces / cadSurfacesReason and resolves true when fitting is usable, false otherwise (reason stays
+  // 'kernel_download'). single_file / file_url / browser_unsupported resolve false without trying. Concurrent calls share
+  // one attempt. Never rejects.
+  let retrying = null;
+  function probeWorker() {
+    return new Promise((resolve) => {
+      let w; try { w = new Worker(WORKER_URL); } catch (e) { resolve({ error: true, worker: true, message: String(e && e.message || e) }); return; }
+      let done = false; let kernelLoaded = false;
+      const finish = (v) => { if (done) return; done = true; clearTimeout(timer); try { w.terminate(); } catch (e) { /* gone */ } setTimeout(probeKernelCache, 0); resolve(v); };
+      const timer = setTimeout(() => finish({ error: true, message: 'CAD kernel download timed out (network error)' }), 180000);
+      w.onmessage = (ev) => { const m = ev.data || {};
+        if (m.type === 'kernel') kernelLoaded = true;
+        else if (m.type === 'probe') { if (kernelLoaded) { try { localStorage.setItem(LS_KEY, KERNEL_TAG); } catch (e) { /* private mode */ } } finish({ ok: true }); }
+        else if (m.type === 'error') finish({ error: true, message: m.message, oom: !!m.oom }); };
+      w.onerror = (e) => { e.preventDefault && e.preventDefault(); finish({ error: true, worker: true, message: (e && e.message) || 'worker error' }); };
+      w.postMessage({ cmd: 'probe', cacheName: CACHE_NAME });
+    });
+  }
+  function retryCadKernel() {
+    kernelFailed = false;
+    if (capReason()) { updateCaps(); return Promise.resolve(false); }   // single_file / file_url / browser_unsupported
+    if (retrying) return retrying;
+    retrying = probeWorker().then((r) => !!(r && r.ok), () => false).then((ok) => {
+      kernelFailed = !ok; updateCaps(); retrying = null; return ok;
+    });
+    return retrying;
+  }
+
   // UI: Designer's cad-export-ui.js (Simple menu item + Advanced button, progress/cancel toast) drives this API.
 
   if (!NS.exportCadSurfaces || NS.exportCadSurfaces.__cadStub) {
     NS.canExportCadSurfaces = canExportCadSurfaces;
     NS.exportCadSurfaces = exportCadSurfaces;
     NS.cadSurfaceLimits = LIMITS;
+    NS.retryCadKernel = retryCadKernel;
     updateCaps();
     window.addEventListener('online', () => { if (kernelFailed) { kernelFailed = false; updateCaps(); } });
   }

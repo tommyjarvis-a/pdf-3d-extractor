@@ -31,6 +31,12 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   (true again after the next successful run or when the browser comes back online). True otherwise (reason `null`). The Export menu dims
   *Fitted solid* and *Both* and shows the reason when it is false (for `browser_unsupported`: "This browser can’t run
   surface fitting. Try a recent version of Chrome, Edge, Safari or Firefox.").
+- **`PDF3D.retryCadKernel()`** (`recon/cad-export.js`): clears a `kernel_download` failure and makes a real, fresh
+  attempt to download (or read from the cache) and start the CAD kernel in a new worker, then updates
+  `capabilities.cadSurfaces` / `cadSurfacesReason`. Resolves `true` when fitting works again, `false` otherwise (the
+  reason stays `kernel_download`); it never rejects. `single_file`, `file_url` and `browser_unsupported` resolve `false`
+  without trying. The Export menu shows **Try again** next to the kernel-download reason (Designer's `export-flow.js`,
+  db3c08c); *Fitted solid* and *Both* come back without a reload.
 - **`PDF3D.estimateBytes(format, opts)`** (`app.js`): a size estimate before exporting, for the save dialog and
   big-file warnings. For Parasolid it runs the writer's counting pre-pass only (XT nodes × 92 bytes, the figure behind
   `XT_TOO_LARGE`) and returns the estimated size in bytes as a number; other formats, or nothing to export, return `null`.

@@ -321,7 +321,7 @@
             radio('xfBody', 'mesh', 'Mesh', null, body === 'mesh', off ? () => {} : pick),
             radio('xfBody', 'both', 'Both', null, body === 'both', pick, dis)),
           h('small', { class: 'xf-hint', 'data-xf': 'body-hint', text: BODY_HINT[body] }),
-          off ? h('small', { class: 'xf-hint xf-hint--off', id: 'xfCadReason', 'data-xf': 'cad-reason', text: cadReason() }) : null));
+          off ? reasonRow() : null));
         if (body === 'fitted') {
           add(h('div', { class: 'xf-field xf-seg xf-seg--wrap', role: 'radiogroup', 'aria-label': 'If a face can\u2019t be fitted', 'data-xf': 'on-no-fit' },
             h('span', { text: 'If a face can\u2019t be fitted' }),
@@ -363,6 +363,34 @@
     if (open) position();
     const el = had && ui.opts.querySelector(focusSel);
     if (el) el.focus({ preventScroll: true });
+  }
+  // unavailable reason line; for kernel_download a quiet "Try again" text button sits next to it. It calls Dev's
+  // PDF3D.retryCadKernel() when present (should clear the failed state and re-probe), then re-reads capabilities and
+  // re-renders: Fitted / Both come back without a reload once cadSurfaces is no longer false.
+  let retrying = false;
+  function reasonRow() {
+    const line = h('small', { class: 'xf-hint xf-hint--off', id: 'xfCadReason', 'data-xf': 'cad-reason', text: cadReason() });
+    if (caps().cadSurfacesReason !== 'kernel_download') return line;
+    const btn = h('button', { type: 'button', class: 'xf-retry', 'data-xf': 'cad-retry', text: retrying ? 'Trying again\u2026' : 'Try again',
+      'aria-describedby': 'xfCadReason', onclick: () => retryKernel() });
+    if (retrying) btn.setAttribute('aria-disabled', 'true');
+    return h('div', { class: 'xf-reason-row' }, line, btn);
+  }
+  async function retryKernel() {
+    if (retrying) return;
+    retrying = true;
+    const b = ui.opts.querySelector('[data-xf="cad-retry"]');
+    if (b) { b.textContent = 'Trying again\u2026'; b.setAttribute('aria-disabled', 'true'); }
+    const t0 = Date.now();
+    const fn = NS().retryCadKernel;
+    try { if (typeof fn === 'function') await fn.call(NS()); } catch (e) { /* engine text never shown; caps decide */ }
+    const wait = 400 - (Date.now() - t0);                              // let "Trying again…" be seen
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    retrying = false;
+    if (!open || prefs.format !== 'step') return;
+    const back = !cadOff();
+    rerender(back ? 'input[name="xfBody"]:checked' : '[data-xf="cad-retry"]');
+    say(back ? 'Fitting is available again.' : 'The CAD kernel still couldn\u2019t download.');
   }
   const BODY_HINT = {
     fitted: 'Real CAD surfaces (planes, cylinders, B-splines).',
@@ -615,9 +643,9 @@
     for (const l of lines || []) if (l) ui.rBody.append(h('p', { text: l }));
     if (parts && parts.length) {
       const ul = h('ul', { class: 'xf-parts', 'data-xf': 'parts', id: 'xfParts', 'aria-label': 'Parts' });
-      parts.forEach((p, i) => ul.append(h('li', { class: 'xf-part', 'data-written': p.kind, hidden: i >= PARTS_SHOWN },
+      parts.forEach((p, i) => ul.append(h('li', { class: 'xf-part', 'data-written': p.kind, 'data-open': p.open ? '1' : null, hidden: i >= PARTS_SHOWN },
         h('span', { class: 'xf-part-n', text: p.name }), h('span', { class: 'xf-part-w', text: p.what }),
-        p.why || p.body ? h('span', { class: 'xf-part-r', text: [p.body ? 'Body ' + p.body : '', cap(p.why)].filter(Boolean).join(' \u00b7 ') }) : null)));
+        p.why || p.body ? h('span', { class: 'xf-part-r', text: [bodyLabel(p), cap(p.why)].filter(Boolean).join(' \u00b7 ') }) : null)));
       ui.rBody.append(ul);
       if (parts.length > PARTS_SHOWN) {
         const more = h('button', { type: 'button', class: 'xf-more', 'data-xf': 'show-all', 'aria-expanded': 'false', 'aria-controls': 'xfParts', text: 'Show all ' + parts.length + ' parts' });
@@ -655,7 +683,7 @@
     const file = out.saved ? (out.fileVerb || 'Saved as') + ' ' + out.saved : '';
     const lines = (out.lines || []).filter(Boolean).map(sentence);
     setCard(out.tone, out.title, lines, file, out.parts);
-    const pl = (out.parts || []).map((p) => p.name + ': ' + p.what + (p.body ? ' as ' + p.body : '') + (p.why ? ', ' + p.why : '')).join('. ');
+    const pl = (out.parts || []).map((p) => p.name + ': ' + p.what + (p.body ? (Array.isArray(p.body) ? ', bodies ' + p.body.join(' and ') : ' as ' + p.body) : '') + (p.why ? ', ' + p.why : '')).join('. ');
     say([sentence(out.title)].concat(lines, pl ? [sentence(pl)] : [], file ? [sentence(file)] : []).join(' ').replace(/\s{2,}/g, ' '));
     if (!document.activeElement || document.activeElement === document.body) (t || ui.result).focus({ preventScroll: true });
     document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'done', format: out.format, status: out.status } }));
@@ -704,6 +732,47 @@
     return p.written === 'mesh' ? { kind: 'mesh', name: p.name, what: 'Mesh', body: p.name + '_mesh', why } : { kind: 'omitted', name: p.name, what: 'Left out', why };
   }
 
+  // body names on a part row: one name, or [fitted, mesh] for a Both part that has both bodies in the file
+  const bodyLabel = (p) => (!p.body ? '' : Array.isArray(p.body) ? 'Bodies ' + p.body.join(' and ') : 'Body ' + p.body);
+  // STEP "Both": the file holds a fitted body (<name>_fitted) for every part that could be fitted, plus a mesh body
+  // (<name>_mesh) for every part. 78ee997+ reports this as fittedBody / meshBody on each part (`written` stays 'mesh' for
+  // an open shell even though its fitted body is in the file). Older builds: fitted = written 'solid', mesh = not omitted.
+  const bothFitted = (p) => ('fittedBody' in p ? !!p.fittedBody : p.written === 'solid');
+  const bothMesh = (p) => ('meshBody' in p ? !!p.meshBody : p.written !== 'omitted');
+  function bothLine(p) {
+    const fitted = bothFitted(p), mesh = bothMesh(p), solid = fitted && p.status !== 'shell' && (p.status === 'solid' || p.written === 'solid');
+    const why = solid ? '' : reasonText(p.reasonCode, p.reason, p.status);
+    const fb = fitted ? (p.fittedBody || null) : null, mb = mesh ? (p.meshBody || p.name + '_mesh') : null;
+    const faces = p.faces != null && fitted ? ', ' + plural(+p.faces, 'face') : '';
+    if (fitted) return { kind: 'both', open: !solid, name: p.name, what: (solid ? 'Solid' : 'Open surfaces') + faces + (mesh ? ', plus mesh' : ''), body: fb && mb ? [fb, mb] : (fb || mb), why };
+    if (mesh) return { kind: 'mesh', name: p.name, what: 'Mesh only', body: mb, why };
+    return { kind: 'omitted', name: p.name, what: 'Left out', why };
+  }
+  function describeBoth(res, parts, blob, why) {
+    const list = parts.map(bothLine);
+    const n = parts.length, fit = list.filter((l) => l.kind === 'both').length, open = list.filter((l) => l.kind === 'both' && l.open).length;
+    const meshOnly = list.filter((l) => l.kind === 'mesh').length, out = list.filter((l) => l.kind === 'omitted').length, solids = fit - open;
+    const faces = parts.reduce((a, p) => a + (bothFitted(p) ? (+p.faces || 0) : 0), 0) || (res.summary && res.summary.faces);
+    const allMesh = list.every((l) => l.kind !== 'omitted');
+    const meshLine = allMesh ? (n > 1 ? 'Every part\u2019s mesh body is in the file too.' : 'The mesh body is included too.') : null;
+    if (fit === 0) {
+      return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
+        lines: ['No part could be fitted' + (why ? ' (' + why + ')' : '') + ', so the file has only mesh bodies.'] };
+    }
+    if (solids === n) {
+      return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
+        title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
+        lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.', meshLine] };
+    }
+    const openLine = open ? (open === 1 ? (n === 1 ? 'The fitted surfaces don\u2019t close into a solid.' : '1 fitted part has open surfaces, not a closed solid.') : open + ' fitted parts have open surfaces, not closed solids.') : null;
+    const meshOnlyLine = meshOnly ? (meshOnly === 1 ? '1 part couldn\u2019t be fitted, so it has only its mesh body.' : meshOnly + ' parts couldn\u2019t be fitted, so they have only their mesh body.') : null;
+    const outLine = out ? (out === 1 ? '1 part was left out of the file.' : out + ' parts were left out of the file.') : null;
+    const title = fit === n
+      ? (n === 1 ? 'Fitted surfaces exported (open, not a solid)' : 'Fitted: ' + solids + ' of ' + n + ' parts are closed solids')
+      : 'Partly fitted: ' + fit + ' of ' + n + ' parts fitted' + [meshOnly ? meshOnly + ' mesh only' : null, out ? out + ' left out' : null].filter(Boolean).map((t) => ', ' + t).join('');
+    return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
+  }
+
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
   const XT_UNITS = 'Stored in meters, opens at true size in NX.';
   const XT_NOTE = 'All parts merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
@@ -747,6 +816,7 @@
       const n = parts.length, fit = parts.filter((p) => p.written === 'solid').length;
       const mesh = parts.filter((p) => p.written === 'mesh').length, out = parts.filter((p) => p.written === 'omitted').length;
       const faces = parts.reduce((a, p) => a + (p.written === 'solid' ? (+p.faces || 0) : 0), 0) || (res.summary && res.summary.faces);
+      if (blob && o.body === 'both') return describeBoth(res, parts, blob, why);
       const list = parts.map(partLine);
       if (!blob) {
         return { tone: 'warn', status: res.status || 'skipped', title: 'Nothing saved: no part could be fitted', parts: list,
@@ -756,7 +826,7 @@
       if (fit === n) {
         return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
           title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
-          lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.', o.body === 'both' ? 'The mesh body is included too.' : null] };
+          lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.'] };
       }
       if (fit === 0) {
         return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',

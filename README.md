@@ -91,6 +91,10 @@ const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', pa
 // exportFormat('xt') summary adds: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, estimatedBytes }
 // too large for the Parasolid writer: { blob: null, status: 'error', reasonCode: 'XT_TOO_LARGE', summary: { estimatedBytes } }
 // PDF3D.capabilities.cadSurfaces: false with cadSurfacesReason 'single_file' | 'file_url' | 'browser_unsupported' | 'kernel_download'
+// PDF3D.retryCadKernel() -> Promise<boolean>: after 'kernel_download', clears the failed state and makes a real, fresh attempt
+//   (a new worker downloads or reads the cached kernel and starts it), then updates capabilities. true = fitting usable again
+//   (cadSurfaces true, reason null); false = still failing (reason stays 'kernel_download'). Never rejects. For 'single_file',
+//   'file_url' and 'browser_unsupported' it resolves false without trying. The Export menu's "Try again" calls it.
 
 // Delivery. exportFormat never downloads or opens a dialog itself:
 //   no opts.writable -> r.blob, r.delivery = 'download', r.size (the caller saves the Blob)
