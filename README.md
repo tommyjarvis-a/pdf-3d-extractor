@@ -86,9 +86,26 @@ buttons; STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical t
 ```js
 const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', partIds: null, signal, onProgress });
 // r = { blob, filename, status, reasonCode, reason, summary: { parts: [{ index, name, status, faces, reasonCode, written: 'solid'|'mesh'|'omitted' }] } }
+// body: 'both' also gives each part fittedBody ('<name>_fitted' for a solid or open shell, else null) and meshBody ('<name>_mesh'),
+// the bodies actually in the file (`written` keeps the Fitted-mode meaning: 'solid' only for closed solids)
 // exportFormat('xt') summary adds: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, estimatedBytes }
 // too large for the Parasolid writer: { blob: null, status: 'error', reasonCode: 'XT_TOO_LARGE', summary: { estimatedBytes } }
 // PDF3D.capabilities.cadSurfaces: false with cadSurfacesReason 'single_file' | 'file_url' | 'browser_unsupported' | 'kernel_download'
+
+// Delivery. exportFormat never downloads or opens a dialog itself:
+//   no opts.writable -> r.blob, r.delivery = 'download', r.size (the caller saves the Blob)
+//   opts.writable    -> a FileSystemWritableFileStream (showSaveFilePicker() then handle.createWritable()): the file is written
+//                       into it part by part (~8 MB writes, never one large Blob) -> r.blob = null, r.delivery = 'picker', r.size.
+//                       A failed write -> r.status = 'error', r.reasonCode = 'WRITE_FAILED'. exportFormat never calls close()
+//                       or abort(): call close() when r.delivery === 'picker' && r.status is not 'error'/'skipped'/'cancelled',
+//                       otherwise abort() (and remove the empty file if you can).
+const h = await showSaveFilePicker({ suggestedName: 'model.x_t' }); const w = await h.createWritable();
+const x = await PDF3D.exportFormat('xt', { writable: w });
+
+const bytes = await PDF3D.estimateBytes('xt', { partIds: null, detail });   // same opts as exportFormat
+// bytes = estimated file size (number), or null (no estimate for this format / nothing to export)
+// xt: the writer's counting pre-pass (XT nodes x 92 bytes, 1.0-1.2x the real size); nothing is written, but it walks the
+// whole model (seconds on large ones), so open the save dialog first or estimate ahead of the click.
 ```
 
 ## Known limitations

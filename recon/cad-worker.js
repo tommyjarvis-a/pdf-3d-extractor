@@ -95,7 +95,8 @@ self.onmessage = async (ev) => {
       heap();
       if (res.cancelled) { self.postMessage({ type: 'cancelled' }); return; }
       parts.push({ idx: i, status: res.status, reason: res.reason, summary: { ...res.summary, check: res.check || null, tris: tris[s] } });
-      if (res.shape && (!m.solidsOnly || res.status === 'solid')) bodies.push([res.shape, res.summary.name + '_fitted']);
+      // only parts the summary reports as fitted (solid, or shell unless solids-only) get a _fitted body; a mesh_only part's partial shape is not written
+      if (res.shape && (res.status === 'solid' || (!m.solidsOnly && res.status === 'shell'))) bodies.push([res.shape, res.summary.name + '_fitted']);
       base += span;
     }
     post({ stage: 'write', pct: 0.97, label: 'Writing fitted surfaces…' }, true);

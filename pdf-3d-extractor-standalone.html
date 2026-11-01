@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230ea5e9'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='bold' font-size='13' fill='%2304101d'%3E3D%3C/text%3E%3C/svg%3E" />
-<title>3D PDF → CAD Geometry Extractor (STEP .stp • STL • OBJ • IGES)</title>
+<title>3D PDF → CAD Geometry Extractor (STEP .stp • STL • OBJ • IGES • Parasolid .x_t)</title>
 <style>
   :root {
     --bg-0: #090d14;
@@ -1532,6 +1532,9 @@ body:not(.sm-simple) .xf-btn, body:not(.sm-simple) .xf-pop { display: none !impo
 .xf-name-ext { padding: 6px 8px 6px 0; color: var(--text-2); font: 500 12px var(--mono); }
 .xf-name .xf-note { margin-top: 0; }
 .xf-foot { display: flex; justify-content: flex-end; padding: 4px 4px 2px; }
+/* big-download warning (no save picker, estimate > 300 MB), just above Save */
+.xf-big { margin: 6px 8px 2px; padding: 6px 8px; border: 1px solid var(--amber); border-left-width: 3px; border-radius: 6px; overflow-wrap: anywhere; }
+.xf-big[hidden] { display: none; }
 .xf-go { min-width: 110px; justify-content: center; }
 .xf-go:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
@@ -7032,6 +7035,10 @@ void main() { gl_FragColor = uRGBA; }`;
   // JS heap, disk-backed in Chromium), so the limit is set by the Blob store, not by the heap; the largest
   // corpus file (r13, ~4 GB) stays below it.
   const XT_MAX_EST_BYTES = 8e9;
+  // Byte count for messages: "41 MB" below 1 GB (at least 1 MB), "2.2 GB" from 1 GB.
+  const fmtBytes = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1e6)) + ' MB');
+  // Anchor (blob URL) downloads above about this size can be cancelled by Chrome at 0 bytes without telling the page.
+  const BIG_DOWNLOAD_BYTES = 300e6;
 
   // Header KEY: the part name (file name without extension), restricted to safe characters.
   function xtKeyName(fileName) {
@@ -7130,6 +7137,43 @@ void main() { gl_FragColor = uRGBA; }`;
       }
     }
     const resSize = Math.max(1000, Math.ceil((maxCoordAbsM * 2.5) / 1000) * 1000);
+
+    // Sheet faces: loop vertices are projected onto the face plane; a vertex that lands exactly on the previous kept one
+    // would give a zero-length edge with a (0,0,0) LINE tangent (r07), so it is dropped (the first vertex is always kept;
+    // a loop left with < 3 vertices is dropped). Same arithmetic as the write pass, so plan and output agree. Returns the
+    // input array itself when nothing is dropped.
+    function sheetLoops(sf, verts) {
+      const loops = sf.loops.filter((lp) => lp && lp.length >= 3);
+      if (!loops.length) return loops;
+      const normal = normalizeVec3(sf.normal);
+      const rawOrig = verts[loops[0][0]];
+      const pOrig = [rawOrig[0] * scaleM, rawOrig[1] * scaleM, rawOrig[2] * scaleM];
+      const proj = (vRawIdx) => {
+        const raw = verts[vRawIdx];
+        const px = raw[0] * scaleM, py = raw[1] * scaleM, pz = raw[2] * scaleM;
+        const dist = (px - pOrig[0]) * normal[0] + (py - pOrig[1]) * normal[1] + (pz - pOrig[2]) * normal[2];
+        return [px - dist * normal[0], py - dist * normal[1], pz - dist * normal[2]];
+      };
+      const zeroEdge = (p0, p1) => {
+        const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+        const nDot = dx * normal[0] + dy * normal[1] + dz * normal[2];
+        return Math.hypot(dx - nDot * normal[0], dy - nDot * normal[1], dz - nDot * normal[2]) === 0;
+      };
+      let out = null;
+      for (let li = 0; li < loops.length; li++) {
+        const lp = loops[li];
+        const keep = [lp[0]], kp = [proj(lp[0])];
+        for (let k = 1; k < lp.length; k++) {
+          const q = proj(lp[k]);
+          if (!zeroEdge(kp[kp.length - 1], q)) { keep.push(lp[k]); kp.push(q); }
+        }
+        while (keep.length > 1 && zeroEdge(kp[kp.length - 1], kp[0])) { keep.pop(); kp.pop(); }
+        if (keep.length === lp.length) { if (out) out.push(lp); continue; }
+        if (!out) out = loops.slice(0, li);
+        if (keep.length >= 3) out.push(keep);
+      }
+      return out || loops;
+    }
 
     // Helper: check if a part's sourceFaces form a strict 2-manifold closed solid within Parasolid 1e-8 m plane tolerance
     let lastSplit = { faces: 0, tris: 0 };   // merged faces getValidSolidFaces had to write as triangles
@@ -7230,10 +7274,10 @@ void main() { gl_FragColor = uRGBA; }`;
           if (!(planCache && planCache.part === part)) { plan.splitFaces += lastSplit.faces; plan.splitInto += lastSplit.tris; }
         } else {
           let firstLoopLen = 0, F = 0, nIdx = 0, nNode = 0, E = 0;
+          const verts = B.weldedVerts;
           for (const sf of faces) {
             let nl = 0;
-            for (const lp of sf.loops) {
-              if (!lp || lp.length < 3) continue;
+            for (const lp of sheetLoops(sf, verts)) {
               if (!F && !nl) firstLoopLen = lp.length;
               nl++; nIdx += 1 + 6 * lp.length; nNode += 1 + 4 * lp.length; E += lp.length;
             }
@@ -7269,9 +7313,14 @@ void main() { gl_FragColor = uRGBA; }`;
     // Guard: refuse up front (nothing written) when the file would be too large to save.
     const estBytes = plan.nIdx * XT_EST_BYTES_PER_NODE;
     const maxBytes = options.maxBytes != null ? options.maxBytes : XT_MAX_EST_BYTES;
+    // estimateOnly: stop after the counting pre-pass (nothing is written past the header); PDF3D.estimateBytes uses it.
+    if (options.estimateOnly) {
+      planCache = null;
+      return { estimatedBytes: estBytes, faces: plan.faces, bodyType: isSolidBody ? 'solid' : 'sheet', tooLarge: estBytes > maxBytes };
+    }
     if (estBytes > maxBytes) {
       planCache = null;
-      const err = new RangeError(`Parasolid file would be about ${(estBytes / 1e9).toFixed(1)} GB (limit ${(maxBytes / 1e9).toFixed(1)} GB)`);
+      const err = new RangeError(`Parasolid file would be about ${fmtBytes(estBytes)} (limit ${fmtBytes(maxBytes)})`);
       err.code = 'XT_TOO_LARGE'; err.estimatedBytes = estBytes;
       throw err;
     }
@@ -7450,7 +7499,7 @@ void main() { gl_FragColor = uRGBA; }`;
         // Each merged planar B-Rep face (with outer + hole loops) is emitted as a connected 13 SHELL
         // in regVoidIdx with exact plane-projected loop vertices and a [posFin (+), dummy negFin (-)] pair per edge.
         for (const sf of sourceFaces) {
-          const validLoops = sf.loops.filter((lp) => lp && lp.length >= 3);
+          const validLoops = sheetLoops(sf, verts);   // loops >= 3 vertices, zero-length edges dropped
           if (validLoops.length === 0) continue;
           const shIdx = allocIdx(), shNodeId = allocNodeId();
           const fIdx = allocIdx(), surfIdx = allocIdx();
@@ -8827,14 +8876,16 @@ void main() { gl_FragColor = uRGBA; }`;
         showExportResult('warn', 'Parasolid export: nothing to save', ['No visible part has B-Rep faces. Show a part with geometry and try again.']);
         return false;
       }
-      triggerDownload(xt, filename, 'text/plain');
+      triggerDownload(xt, filename, 'text/plain');   // anchor download: the page cannot confirm the file was saved
       const n = (v) => v.toLocaleString('en-US');
+      const big = (st.estimatedBytes || 0) > BIG_DOWNLOAD_BYTES;
+      const bigLine = `This file is about ${fmtBytes(st.estimatedBytes || 0)}. Chrome can cancel downloads this large without a message; if it isn't in your Downloads, hide some parts or use Reduce detail and export again.`;
       const faceLine = `${n(faces)} flat face${faces === 1 ? '' : 's'}`;
       if (st.bodyType === 'sheet') {
         showExportResult('warn', 'Parasolid sheet body exported (open model)', [
           'This part isn\'t closed, so it was saved as surfaces, not a solid. This form hasn\'t been tested in NX.',
-          `Saved ${filename}: 1 sheet body, ${faceLine}, ${n(st.openEdges || 0)} open edges.`
-        ]);
+          `Download started: ${filename}, 1 sheet body, ${faceLine}, ${n(st.openEdges || 0)} open edges.`
+        ].concat(big ? [bigLine] : []));
         return true;
       }
       const lines = [`1 solid body, ${faceLine}.`];
@@ -8843,14 +8894,15 @@ void main() { gl_FragColor = uRGBA; }`;
         lines.push(`The viewer shows ${n(st.viewerFaces)} faces: ${n(st.splitFaces)} of them ${st.splitFaces === 1 ? 'is' : 'are'} not exactly flat, so ${st.splitFaces === 1 ? 'it was' : 'they were'} saved as ${n(st.splitTris)} flat triangles.`);
       }
       lines.push(`Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep. Stored in meters (Parasolid standard), opens at true size in NX.`);
-      showExportResult('ok', `Parasolid file saved: ${filename}`, lines);
+      if (big) lines.push(bigLine);
+      showExportResult(big ? 'warn' : 'ok', `Parasolid download started: ${filename}`, lines);
       return true;
     } catch (e) {
       console.error('Parasolid export failed', e);
       const tooLarge = e && e.code === 'XT_TOO_LARGE';
       const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
       showExportResult('err', tooLarge ? 'Parasolid export: model too large' : 'Parasolid export failed', [
-        tooLarge ? `The file would be about ${(e.estimatedBytes / 1e9).toFixed(1)} GB, more than the browser can save. Hide some parts or use Reduce detail, then try again.`
+        tooLarge ? `The file would be about ${fmtBytes(e.estimatedBytes)}, more than the browser can save. Hide some parts or use Reduce detail, then try again.`
           : oom ? 'The browser ran out of memory while writing the file. Hide some parts or use Reduce detail, then try again.'
           : `Error: ${(e && e.message) || e}`,
         'Nothing was saved.'
@@ -9208,6 +9260,8 @@ void main() { gl_FragColor = uRGBA; }`;
   // STEP 'fitted': a part is written as a fitted solid only when it closes into a solid; open shells, unfitted and
   // skipped parts get their mesh body (<name>_mesh, same file) with onNoFit 'mesh' (default) or are left out with
   // 'omit'. No part written -> blob null. xt is offered only while capabilities.parasolid and is always merged.
+  // exportFormat never downloads or saves anything itself: the caller writes `blob` (the Simple flow writes it into the
+  // showSaveFilePicker file, or falls back to a download) and sets the result's `delivery` ('picker' | 'download').
   const EXPORT_FORMATS = ['step', 'stl', 'obj', 'iges', 'raw', 'xt'];
   const exportBlob = (content, mimeType) => (content instanceof Uint8Array
     ? new Blob([content], { type: mimeType })
@@ -9225,7 +9279,7 @@ void main() { gl_FragColor = uRGBA; }`;
   const exportSkipped = (reasonCode, reason) => ({ blob: null, filename: null, status: 'skipped', reasonCode, reason, summary: { parts: [] } });
   const meshPartsSummary = (sel) => sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: null, reasonCode: null, reason: null, written: 'mesh' }));
 
-  async function exportFormat(format, opts) {
+  async function exportFormatCore(format, opts) {
     const o = opts || {}; const fmt = String(format || '').toLowerCase(); const signal = o.signal;
     if (!EXPORT_FORMATS.includes(fmt)) throw new Error(`Unknown export format: ${format}`);
     if (signal && signal.aborted) return exportCancelled();
@@ -9238,7 +9292,7 @@ void main() { gl_FragColor = uRGBA; }`;
       const st = state.streams[state.activeStreamIdx];
       if (!st || !st.rawBytes) return exportSkipped('no_parts', 'Open a 3D PDF first');
       const ext = st.subtype === 'PRC' ? 'prc' : 'u3d';
-      return { blob: exportBlob(st.rawBytes, 'application/octet-stream'), filename: `${stem}.${ext}`, status: 'ok', reasonCode: null, reason: null, summary: { parts: [] } };
+      return { ...fileParts(st.rawBytes, 'application/octet-stream'), filename: `${stem}.${ext}`, status: 'ok', reasonCode: null, reason: null, summary: { parts: [] } };
     }
     if (fmt === 'step' && (o.body === 'fitted' || o.body === 'both')) return exportStepFitted(o, stem, progress);
 
@@ -9258,7 +9312,7 @@ void main() { gl_FragColor = uRGBA; }`;
         const tooLarge = e && e.code === 'XT_TOO_LARGE';
         const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
         if (!tooLarge && !oom) throw e;   // the flow shows "Parasolid export failed" with the message
-        const eb = tooLarge && e.estimatedBytes; const gb = eb ? (eb >= 1e9 ? (eb / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(eb / 1e6)) + ' MB') : null;
+        const eb = tooLarge && e.estimatedBytes; const gb = eb ? fmtBytes(eb) : null;
         return { blob: null, filename: null, status: 'error', reasonCode: tooLarge ? 'XT_TOO_LARGE' : 'out_of_memory',   // Designer's card keys on 'XT_TOO_LARGE'
           reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some parts or use Reduce detail, then try again`
             : 'The browser ran out of memory while writing the Parasolid file. Hide some parts or use Reduce detail, then try again',
@@ -9271,7 +9325,7 @@ void main() { gl_FragColor = uRGBA; }`;
         schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
       if (!xs.faces) return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } };
       progress({ stage: 'write', pct: 100, label: 'Done' });
-      return { blob: exportBlob(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
+      return { ...fileParts(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
     }
     if (fmt === 'step') { content = buildSTEPAP214(sel.parts, { brepMode: o.brepMode || state.brepMode, units, blob: true, ...wo }); filename = `${stem}.stp`; mime = 'application/step'; }
     else if (fmt === 'stl' && o.encoding === 'ascii') { content = buildASCIISTL(sel.parts, units, { blob: true, ...wo }); filename = `${stem}-ascii.stl`; mime = 'text/plain'; }
@@ -9280,7 +9334,7 @@ void main() { gl_FragColor = uRGBA; }`;
     else { content = buildIGESWireframe(sel.parts, units, { blob: true, ...wo }); filename = `${stem}.igs`; mime = 'text/plain'; }
     if (signal && signal.aborted) return exportCancelled();
     progress({ stage: 'write', pct: 100, label: 'Done' });
-    return { blob: exportBlob(content, mime), filename, status: 'ok', reasonCode: null, reason: null, summary: { parts: meshPartsSummary(sel) } };
+    return { ...fileParts(content, mime), filename, status: 'ok', reasonCode: null, reason: null, summary: { parts: meshPartsSummary(sel) } };
   }
 
   // STEP with fitted surfaces (recon/cad-export.js) + per-part bookkeeping
@@ -9288,6 +9342,17 @@ void main() { gl_FragColor = uRGBA; }`;
     const cad = PDF3D_NS.exportCadSurfaces;
     if (typeof cad !== 'function') return { ...exportSkipped('unavailable', 'Fitted CAD surfaces are not available in this build'), summary: null };
     const fittedOnly = o.body === 'fitted'; const omit = fittedOnly && o.onNoFit === 'omit'; const signal = o.signal;
+    // no Worker / WebAssembly: no fitting at all; every part gets its mesh body (the Mesh STEP file), or nothing with 'omit'
+    if ((PDF3D_NS.capabilities || {}).cadSurfacesReason === 'browser_unsupported') {
+      const sel = exportSelection(o.partIds);
+      if (!sel.ids.length) return exportSkipped('no_parts', 'No visible part to export');
+      const why = 'This browser can\u2019t run surface fitting (no Web Workers or WebAssembly)';
+      const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: 0, reasonCode: 'browser_unsupported', reason: why, written: omit ? 'omitted' : 'mesh' }));
+      if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0 } };
+      const m = await exportFormatCore('step', { ...o, body: 'mesh', fittedOnly: false });
+      if (m.status !== 'ok') return m;
+      return { ...m, status: 'mesh_only', reasonCode: 'browser_unsupported', reason: why + ', so the mesh STEP was saved instead', meshStep: true, summary: { parts, faces: 0 } };
+    }
     const r = await cad(o.partIds == null ? null : o.partIds, { fittedOnly, solidsOnly: fittedOnly, onProgress: progress, signal });
     if (!r || r.status === 'cancelled') return r || exportCancelled();
     // preflight refusals (unavailable here, nothing to export, model too large): whole-file result, no per-part list
@@ -9298,6 +9363,7 @@ void main() { gl_FragColor = uRGBA; }`;
       const one = sel.ids.length === 1;
       const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: r.status, faces: one ? (+s.faces || 0) : undefined,
         reasonCode: r.status === 'solid' ? null : (r.reasonCode || null), written: r.status === 'solid' ? 'solid' : 'mesh' }));
+      if (!fittedOnly && r.status === 'mesh_only') for (const q of parts) { q.fittedBody = null; q.meshBody = q.name + '_mesh'; }
       return { ...r, summary: { ...s, parts } };
     }
     const byIdx = new Map((s.parts || []).map((p) => [p.index, p]));
@@ -9308,8 +9374,12 @@ void main() { gl_FragColor = uRGBA; }`;
       // fitted: only closed solids are fitted output. both: solids and open shells are fitted, every part also has a mesh body
       const fitted = status === 'solid';
       const written = fitted ? 'solid' : (omit ? 'omitted' : 'mesh');
-      return { index: i, name: wp ? wp.name : sel.chosen[k].name, status, faces: wp ? wp.faces : 0, reasonCode,
+      const q = { index: i, name: wp ? wp.name : sel.chosen[k].name, status, faces: wp ? wp.faces : 0, reasonCode,
         reason: wp ? (wp.reason || null) : null, tris: wp ? wp.tris : undefined, check: wp ? wp.check : undefined, written };
+      // both: the bodies actually in the file - '<name>_fitted' for a solid or open shell (the worker writes no other), and
+      // '<name>_mesh' for every part
+      if (!fittedOnly && r.blob) { const nm = wp ? wp.name : sel.chosen[k].name; q.fittedBody = status === 'solid' || status === 'shell' ? nm + '_fitted' : null; q.meshBody = nm + '_mesh'; }
+      return q;
     });
     const solids = parts.filter((p) => p.written === 'solid');
     const summary = { ...s, parts, faces: fittedOnly ? solids.reduce((a, p) => a + (+p.faces || 0), 0) : s.faces };
@@ -9331,15 +9401,97 @@ void main() { gl_FragColor = uRGBA; }`;
       const fittedText = blob ? await blob.text() : null;
       if (signal && signal.aborted) return exportCancelled();
       const chunks = window.PDF3DStepMerge.mergeSTEPChunks([fittedText, meshText], { fileName: filename, description: '3D PDF CAD surfaces - STEP AP214' });
-      blob = new Blob(chunks, { type: 'application/step' });
+      blob = { _parts: chunks, _type: 'application/step' };   // exportFormat makes the Blob or writes the chunks
     }
-    progress({ stage: 'write', pct: 100, label: 'Done', bytes: blob.size, totalBytes: blob.size });
+    const bsize = blob._parts ? null : blob.size;
+    progress({ stage: 'write', pct: 100, label: 'Done', bytes: bsize, totalBytes: bsize });
     const status = solids.length === parts.length ? 'solid' : solids.length ? 'partial' : 'mesh_only';
-    return { blob, filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
+    return { ...(blob._parts ? { blob: null, ...blob } : { blob }), filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
       reasonCode: status === 'solid' ? null : (engineCode || (parts.some((p) => p.status === 'shell') ? 'open_shell' : 'no_fit')),
       reason: status === 'solid' ? null : cleanReason, summary };
   }
+  // File content -> result fields: _parts (Blob parts) + _type; exportFormat turns them into a Blob or writes them to opts.writable.
+  const fileParts = (content, mimeType) => (content instanceof Uint8Array
+    ? { blob: null, _parts: [content], _type: mimeType }
+    : { blob: null, _parts: textChunks(content), _type: `${mimeType};charset=utf-8` });   // same Blob as exportBlob / triggerDownload
+  // Writes Blob parts to a FileSystemWritableFileStream in ~8 MB writes (strings UTF-8 encoded one by one, as a Blob does), so no
+  // single large Blob is built. Returns bytes written. Does not close or abort the stream (the caller owns it).
+  const WRITE_BATCH = 8 << 20;
+  async function writeParts(w, parts, signal, progress) {
+    const enc = new TextEncoder(); let buf = [], bufLen = 0, size = 0; let total = 0;
+    for (const p of parts) total += typeof p === 'string' ? p.length : (p.byteLength != null ? p.byteLength : p.size || 0);
+    const flush = async () => {
+      if (!bufLen) return;
+      let u8;
+      if (buf.length === 1) u8 = buf[0];
+      else { u8 = new Uint8Array(bufLen); let off = 0; for (const b of buf) { u8.set(b, off); off += b.length; } }
+      buf = []; bufLen = 0;
+      await w.write(u8); size += u8.length;
+      progress({ stage: 'write', pct: 100, label: 'Saving…', bytes: size, totalBytes: total });
+      if (signal && signal.aborted) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' });
+    };
+    const push = async (u8) => { buf.push(u8); bufLen += u8.length; if (bufLen >= WRITE_BATCH) await flush(); };
+    for (const p of parts) {
+      if (typeof p === 'string') {
+        for (let i = 0; i < p.length;) {   // slice on UTF-16 code units, keeping a surrogate pair together
+          let j = Math.min(p.length, i + WRITE_BATCH);
+          if (j < p.length) { const c = p.charCodeAt(j - 1); if (c >= 0xd800 && c <= 0xdbff) j++; }
+          await push(enc.encode(i === 0 && j === p.length ? p : p.slice(i, j))); i = j;
+        }
+      } else if (p instanceof Uint8Array) {
+        for (let i = 0; i < p.length; i += WRITE_BATCH) { await flush(); await w.write(p.subarray(i, i + WRITE_BATCH)); size += Math.min(WRITE_BATCH, p.length - i); }
+      } else if (p && typeof p.stream === 'function') {   // a Blob (fitted STEP from the CAD worker): read it in pieces
+        const rd = p.stream().getReader();
+        for (;;) { const { done, value } = await rd.read(); if (done) break; await push(value); }
+      }
+    }
+    await flush();
+    return size;
+  }
+
+  // PDF3D.exportFormat(format, opts): see exportFormatCore. Delivery:
+  //   no opts.writable -> { blob, delivery: 'download', size } (the caller saves the Blob)
+  //   opts.writable (FileSystemWritableFileStream from showSaveFilePicker().createWritable()) -> the file is written part by
+  //     part into it (no single large Blob) -> { blob: null, delivery: 'picker', size }. A failed write -> status 'error',
+  //     reasonCode 'WRITE_FAILED' (nothing else changed). exportFormat never calls close() or abort(): the caller does
+  //     (close on a result with delivery 'picker', abort + remove the file otherwise).
+  async function exportFormat(format, opts) {
+    const o = opts || {}; const w = o.writable || null;
+    const res = await exportFormatCore(format, o);
+    if (!res) return res;
+    const parts = res._parts || (res.blob ? [res.blob] : null); const type = res._type;
+    delete res._parts; delete res._type;
+    if (!parts) return res;
+    if (!w) {
+      if (!res.blob) res.blob = new Blob(parts, { type });
+      return Object.assign(res, { delivery: 'download', size: res.blob.size });
+    }
+    const progress = (p) => { if (typeof o.onProgress === 'function') { try { o.onProgress(p); } catch (e) { /* UI callback */ } } };
+    try {
+      const size = await writeParts(w, parts, o.signal, progress);
+      return Object.assign(res, { blob: null, delivery: 'picker', size });
+    } catch (e) {
+      if (e && e.name === 'AbortError' && o.signal && o.signal.aborted) return exportCancelled();
+      return Object.assign(res, { blob: null, delivery: 'picker', size: null, status: 'error', reasonCode: 'WRITE_FAILED',
+        reason: 'Couldn\u2019t write the file: ' + String((e && e.message) || e).replace(/[.\s]+$/, '') });
+    }
+  }
   PDF3D_NS.exportFormat = exportFormat;
+
+  // PDF3D.estimateBytes(format, opts) -> Promise<number | null> (estimated file size in bytes)
+  // Pre-export size estimate for the save dialog / big-file warning. xt: the writer's counting pre-pass
+  // (XT nodes x 92 bytes, the same figure as the XT_TOO_LARGE guard; 1.0-1.2x the real size), nothing written.
+  // Same opts as exportFormat (partIds, detail). null = no estimate for this format or nothing to export.
+  async function estimateBytes(format, opts) {
+    const o = opts || {}; const fmt = String(format || '').toLowerCase();
+    if (fmt !== 'xt' || !(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return null;
+    const sel = exportSelection(o.partIds);
+    if (!sel.ids.length) return null;
+    const detail = o.detail != null && o.detail !== '' ? (Number(o.detail) || 1) : (state.exportDetail || 1);
+    const e = buildParasolidXT(sel.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, detail, estimateOnly: true });
+    return e && e.faces ? e.estimatedBytes : null;
+  }
+  PDF3D_NS.estimateBytes = estimateBytes;
 
   window.addEventListener('DOMContentLoaded', () => {
     initEvents();
@@ -9592,9 +9744,10 @@ void main() { gl_FragColor = uRGBA; }`;
       const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || (!solidsOnly && p.status === 'shell'));
       let status, reason = null, reasonCode = null;
       let cause = null;
+      // a worker run that got past the kernel clears an earlier kernel failure (Fitted / Both come back without a reload)
+      if (!workerErr && wres && kernelFailed) { kernelFailed = false; updateCaps(); }
       if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only';
         if (fe.code === 'kernel_download' || fe.code === 'worker_failed') { kernelFailed = true; updateCaps(); } }
-      else if (sel.mode === 'fit' && kernelFailed) { kernelFailed = false; updateCaps(); }
       else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
       else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
@@ -9612,8 +9765,9 @@ void main() { gl_FragColor = uRGBA; }`;
         if (signal && signal.aborted) return cancelled();
         const t = performance.now();
         const byIdx = new Map(parts.map((p) => [p.idx, p]));
+        // every mesh body in a Both file is <name>_mesh (fitted bodies are <name>_fitted), fitted or not
         const meshParts = sel.ids.map((i, k) => { const ap = sel.parts[k]; const wp = byIdx.get(i);
-          return wp && (wp.status === 'solid' || wp.status === 'shell') ? { ...ap, name: wp.summary.name + '_mesh', visible: true } : { ...ap, visible: true }; });
+          return { ...ap, name: ((wp && wp.summary && wp.summary.name) || ap.name) + '_mesh', visible: true }; });
         meshText = window.CAD3DExtractor.buildSTEPAP214({ parts: meshParts, units: 'mm', brepMode: 'merged', detail: 1 });
         timings.meshWrite = Math.round(performance.now() - t);
       }
@@ -11103,7 +11257,7 @@ void main() { gl_FragColor = uRGBA; }`;
  *
  * Engine hooks (all optional, feature-detected, never faked):
  *   PDF3D.capabilities.parasolid === true   → show "Parasolid (.x_t)" (needs PDF3D.exportFormat or #btnExportXT).
- *       1.5.2 writer is merged-only: one faceted body (list line "Faceted solid, flat faces"), note "Faceted solid, merged into one body (no B-spline surfaces yet)",
+ *       1.5.2 writer is merged-only: one faceted body (list line "Faceted body, flat faces"), note "Faceted solid, merged into one body (no B-spline surfaces yet)",
  *       no body/mode choice; exportFormat('xt', opts) always gets brepMode: 'merged'.
  *       Result keys (summary.<k>, else top-level <k>): faces === 0 → amber "Nothing to export", no file;
  *       bodyType === 'sheet' || openEdges > 0 || sewn === false → amber "Parasolid sheet body exported (open model)".
@@ -11119,9 +11273,21 @@ void main() { gl_FragColor = uRGBA; }`;
  *       the whole mesh STEP is saved instead.
  * Without exportFormat, mesh formats are written by clicking the original button and capturing the blob it downloads.
  *
- * Saving: showSaveFilePicker (Chrome/Edge) is called FIRST, inside the click gesture, then the export runs, then we write.
- * Elsewhere: an inline file-name field + <a download> ("Saves to your Downloads folder"). Picker cancel = quiet no-op.
- * Every export ends in a visible result card that stays until dismissed or the next export starts.
+ *   PDF3D.estimateBytes(format, opts)      → number | {estimatedBytes} | Promise of either (optional): estimated output size, asked (debounced) when
+ *       STEP / STL / OBJ / Parasolid options are shown or change. Download path only (no save picker): > 300 MB → amber note
+ *       above Save. Errors / non-numbers / absent hook = no note.
+ *   Result extras (optional): delivery: 'picker'|'download', size (bytes; overrides blob.size), summary.estimatedBytes
+ *       (fallback when there is no blob size). Downloaded (no picker, or delivery === 'download') and > 300 MB → the green
+ *       card becomes amber "Check that the download finished" (Chrome can cancel huge blob downloads silently, 0-byte file).
+ * Saving: showSaveFilePicker (Chrome/Edge) is called FIRST, inside the click gesture. With the hook, handle.createWritable() is
+ *   passed as opts.writable: the writer streams parts into it and returns { blob: null, delivery: 'picker', size } without
+ *   closing; we close() and only then show the green card. A returned blob (old writer / no hook) is written by us.
+ *   WRITE_FAILED, a browser error while writing, or write()/close() rejecting → abort(), remove the file (handle.remove(),
+ *   else truncate to 0 bytes) and an amber "Couldn’t finish saving {name}" card; raw browser text is never shown.
+ * Elsewhere: an inline file-name field + <a download> ("Saves to your Downloads folder"; card says "Sent to Downloads as").
+ * Picker cancel = quiet no-op.
+ * Every export ends in a visible result card that stays until dismissed or the next export starts; it is hidden while the
+ * Export popover is open (it would cover Save) and comes back if the popover closes without a new export.
  *
  * API: window.PDF3DExportFlow = { open(), close(), select(fmt), save(), dismiss(), state, formats(), storageKey }
  * Event: 'pdf3d:export' on document, detail { phase: 'start'|'done', format, status }.
@@ -11155,7 +11321,7 @@ void main() { gl_FragColor = uRGBA; }`;
     { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with part groups', mime: 'model/obj', btn: 'btnExportOBJ' },
     { id: 'iges', label: 'IGES', ext: '.igs', sub: 'Wireframe edges only', mime: 'model/iges', btn: 'btnExportIGES' },
     { id: 'raw', label: 'Raw stream', ext: '.u3d', sub: 'The embedded U3D / PRC bytes', mime: 'application/octet-stream', btn: 'btnExportRaw' },
-    { id: 'xt', label: 'Parasolid', ext: '.x_t', sub: 'Faceted solid, flat faces', mime: 'text/plain', btn: 'btnExportXT', cap: 'parasolid' }
+    { id: 'xt', label: 'Parasolid', ext: '.x_t', sub: 'Faceted body, flat faces', mime: 'text/plain', btn: 'btnExportXT', cap: 'parasolid' }
   ];
   const FMT = Object.fromEntries(FORMATS.map((f) => [f.id, f]));
   const caps = () => (NS().capabilities || {});
@@ -11209,6 +11375,7 @@ void main() { gl_FragColor = uRGBA; }`;
   // ------------------------------------------------------------------ UI
   const ui = {};
   let open = false, running = null, lastTrigger = null, ptrInside = false;
+  let stashed = false;   // result card hidden while the Export popover is open (it would cover Save / the options)
 
   function radio(name, value, label, hint, checked, onchange, off) {
     const inp = h('input', { type: 'radio', name, value, checked: !!checked });
@@ -11255,7 +11422,9 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.pop = h('div', { id: 'xfPop', class: 'sm-pop xf-pop', role: 'dialog', 'aria-label': 'Export', hidden: true },
       h('div', { class: 'sm-pop-h', id: 'xfFmtH', text: 'Format' }), ui.list,
       ui.optsWrap = h('div', { class: 'xf-opts-wrap' }, h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', id: 'xfOptH', text: 'Options' }), ui.opts),
-      h('hr', { class: 'sm-sep' }), ui.nameRow, h('div', { class: 'xf-foot' }, ui.go));
+      h('hr', { class: 'sm-sep' }), ui.nameRow,
+      ui.big = h('p', { class: 'xf-note xf-note--warn xf-big', 'data-xf': 'big-note', role: 'note', hidden: true }),
+      h('div', { class: 'xf-foot' }, ui.go));
 
     // Safari never focuses a pressed button: ignore focus loss while a pointer is down in the popover
     ui.pop.addEventListener('pointerdown', () => { ptrInside = true; }, true);
@@ -11267,6 +11436,7 @@ void main() { gl_FragColor = uRGBA; }`;
       if (!ui.pop.contains(a) && a !== lastTrigger && document.hasFocus()) close(false);
     }, 0));
     ui.pop.addEventListener('keydown', popKeys);
+    ui.opts.addEventListener('change', () => estimateSoon());    // units / detail / B-Rep proxies, radios
     document.addEventListener('pointerdown', (ev) => {
       if (open && !ui.pop.contains(ev.target) && !(lastTrigger && lastTrigger.contains(ev.target))) close(false);
     }, true);
@@ -11305,6 +11475,7 @@ void main() { gl_FragColor = uRGBA; }`;
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
     renderList(); renderOpts();
+    if (!ui.result.hidden) { ui.result.hidden = true; stashed = true; }
     ui.pop.hidden = false;
     open = true;
     ui.btnSimple.setAttribute('aria-expanded', 'true');
@@ -11317,6 +11488,7 @@ void main() { gl_FragColor = uRGBA; }`;
     open = false;
     ui.pop.hidden = true;
     ui.btnSimple.setAttribute('aria-expanded', 'false');
+    if (stashed) { stashed = false; ui.result.hidden = false; }   // closed without a new export: the last card comes back
     if (returnFocus && lastTrigger && simpleMode()) lastTrigger.focus({ preventScroll: true });
   }
   function position() {
@@ -11410,7 +11582,9 @@ void main() { gl_FragColor = uRGBA; }`;
         }
       }
       if (body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
-      add(proxySelect('unitSelect', 'Units'));
+      // Fitted / Both STEP is always written in mm (STEP records its unit, NX imports at true size): no Units choice,
+      // the saved #unitSelect value is left alone. capabilities.fittedUnits === true (writer honours units) shows it again.
+      if (body === 'mesh' || caps().fittedUnits === true) add(proxySelect('unitSelect', 'Units'));
       if (body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
       const pre = cad && body !== 'mesh' ? preflight() : null;
       if (pre && pre.estimate && pre.estimate.kernelCached === false) add(h('p', { class: 'xf-note', text: 'First fitted export downloads the CAD kernel (' + mb(pre.estimate.kernelBytes || 13719175) + ' MB).' }));
@@ -11426,7 +11600,7 @@ void main() { gl_FragColor = uRGBA; }`;
     } else if (f.id === 'iges') {
       add(proxySelect('unitSelect', 'Units'));
     } else if (f.id === 'xt') {
-      add(h('p', { class: 'xf-note', 'data-xf': 'xt-note', text: 'Faceted solid, merged into one body (no B-spline surfaces yet)' }));   // 1.5.2: merged mode only, no body/mode choice
+      add(h('p', { class: 'xf-note', 'data-xf': 'xt-note', text: XT_NOTE }));   // 1.5.2: merged mode only, no body/mode choice
     } else if (f.id === 'raw') {
       add(h('p', { class: 'xf-note', text: 'The stream exactly as embedded in the PDF. No options.' }));
     }
@@ -11463,11 +11637,42 @@ void main() { gl_FragColor = uRGBA; }`;
     const full = fileName(), ext = extOf(f);
     if (!ui.name.dataset.touched || ui.name.dataset.fmt !== f.id) { ui.name.value = full.slice(0, -ext.length); ui.name.dataset.fmt = f.id; delete ui.name.dataset.touched; }
     ui.nameExt.textContent = ext;
+    estimateSoon();
+  }
+
+  // ------------------------------------------------------------------ big-download warning (download path only)
+  const BIG = 300e6;
+  const EST_FMTS = /^(step|stl|obj|xt)$/;
+  let estTimer = 0, estSeq = 0;
+  function estimateSoon() {
+    clearTimeout(estTimer);
+    const seq = ++estSeq;
+    const f = FMT[prefs.format];
+    if (!f || pickerOK() || !EST_FMTS.test(f.id) || typeof NS().estimateBytes !== 'function') { setBig(0); return; }
+    estTimer = setTimeout(async () => {
+      let n = 0;
+      try { const v = await NS().estimateBytes(f.id, optsFor(f)); n = +(v && typeof v === 'object' ? v.estimatedBytes : v); } catch (e) { n = 0; }
+      if (seq !== estSeq) return;                                           // options changed meanwhile
+      setBig(open && FMT[prefs.format] === f && !pickerOK() && isFinite(n) && n > BIG ? n : 0);
+    }, 250);
+  }
+  function setBig(n) {
+    const show = n > 0;
+    if (show) ui.big.textContent = 'This file will be about ' + fmtGB(n) + '. Your browser may not save downloads this large. Chrome or Edge can save it straight to a folder.';
+    if (ui.big.hidden === !show && (!show || ui.big.dataset.bytes === String(n))) return;
+    ui.big.hidden = !show; ui.big.dataset.bytes = show ? String(n) : '';
+    if (open) position();
+  }
+  // bytes handed to the browser: result.size (hook override), else blob.size, else summary.estimatedBytes
+  function bytesOf(res, blob) {
+    const s = (res && res.summary) || {};
+    for (const v of [res && res.size, blob && blob.size, s.estimatedBytes, res && res.estimatedBytes]) if (isFinite(+v) && +v > 0) return +v;
+    return 0;
   }
 
   // ------------------------------------------------------------------ save
   async function doSave() {
-    if (running) { showCard(); return; }
+    if (running) { close(true); showCard(); return; }
     const f = FMT[prefs.format];
     if (!f || !available(f)) return;
     const opts = optsFor(f);
@@ -11485,33 +11690,71 @@ void main() { gl_FragColor = uRGBA; }`;
       const base = (ui.name.value || '').trim().replace(/[\\/:*?"<>|]+/g, '-') || stem();
       name = base.toLowerCase().endsWith(extOf(f).toLowerCase()) ? base : base + extOf(f);
     }
+    stashed = false;                                             // a new export replaces the hidden card
     close(true);
     const t = lastTrigger || trigger();
-    const run = running = { ctrl: new AbortController(), format: f.id, t0: performance.now() };
+    const run = running = { ctrl: new AbortController(), format: f.id, t0: performance.now(), writable: null };
     progress(f, opts);
     document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'start', format: f.id } }));
-    let res, err = null;
+    // Save-as + Dev's hook: open the writable now and let the writer stream parts into it (one huge Blob can't be read
+    // in Chrome). The writer never closes it; this flow owns close() / abort().
+    if (handle && hasHook() && typeof handle.createWritable === 'function') {
+      try { run.writable = await handle.createWritable(); } catch (e) { run.writable = null; }
+    }
+    let res, err = null, cleanup = '';
     try { res = await runExport(f, opts, run); } catch (e) { err = e; }
     let out;
     try {
+      if (handle && (err || writeFailed(res))) throw new SaveError(err);
       out = describe(f, opts, res, err);
       if (out.blob) {
-        if (handle) await writeHandle(handle, out.blob);
-        else download(out.blob, name);
+        if (handle) {
+          const w = run.writable || await handle.createWritable();
+          run.writable = w;
+          if (out.blob !== STREAMED) await w.write(out.blob);    // writer returned a blob (old hook / fallback): we write it
+          await w.close();                                       // green only once close() has resolved
+          run.writable = null;
+        } else download(out.blob, name);
         out.saved = name;
-      } else if (handle && typeof handle.remove === 'function') {
-        try { await handle.remove(); } catch (e) { /* Chrome may have created an empty file; best effort */ }
+        // downloads can't be confirmed; Chrome silently cancels very large blob downloads (0-byte file)
+        const dl = !handle || (res && res.delivery === 'download');
+        if (dl) out.fileVerb = 'Sent to Downloads as';
+        const bytes = dl && out.tone === 'ok' ? bytesOf(res, out.blob) : 0;
+        if (bytes > BIG) {
+          out = Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished',
+            lines: ['Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If it\u2019s missing or 0 bytes in Downloads, try Chrome or Edge, or hide some parts.', f.id === 'xt' ? XT_UNITS : null] });
+        }
+      } else if (handle) {
+        cleanup = await discard(handle, run);                    // no file (0 faces, too large, cancelled, engine error)
       }
     } catch (e) {
-      out = { tone: 'err', status: 'error', title: 'Couldn\u2019t save the file', lines: [String((e && e.message) || e)] };
+      if (handle) cleanup = await discard(handle, run);
+      out = writeFailedCard(name, f, opts, res, e);
     }
     running = null;
     out.format = f.id;
     finish(out, t);
+    ui.result.dataset.cleanup = cleanup;                         // 'removed' | 'truncated' | 'failed' | '' (nothing to clean)
   }
-  async function writeHandle(handle, blob) {
-    const w = await handle.createWritable();
-    try { await w.write(blob); await w.close(); } catch (e) { try { await w.abort(); } catch (e2) { /* ignore */ } throw e; }
+  // marker blob: the writer streamed the file into opts.writable itself (result { blob: null, delivery: 'picker' })
+  const STREAMED = { streamed: true, size: 0 };
+  function SaveError(cause) { this.name = 'SaveError'; this.cause = cause; }
+  const writeFailed = (r) => !!r && (normCode(r.reasonCode) === 'write_failed' || (r.status === 'error' && r.delivery === 'picker'));
+  // Save-as failure (writer WRITE_FAILED / throw while streaming, write() or close() rejected): amber, own words only
+  // (no DOMException text). Engine errors that aren't about writing keep their own cards.
+  function writeFailedCard(name, f, o, res, e) {
+    const cause = e instanceof SaveError ? e.cause : e;
+    if (e instanceof SaveError && cause && !isBrowserErr(cause) && !writeFailed(res)) return Object.assign(describe(f, o, res, cause), { blob: null });
+    return { tone: 'warn', status: 'write_failed', title: 'Couldn\u2019t finish saving ' + name, lines: ['Nothing was kept. Check there\u2019s enough free space, then try again.'] };
+  }
+  const isBrowserErr = (e) => !!e && ((typeof DOMException !== 'undefined' && e instanceof DOMException) || /^(NotReadableError|QuotaExceededError|InvalidStateError|NotAllowedError|NoModificationAllowedError|NotFoundError|TypeMismatchError|SecurityError|AbortError)$/.test(e.name || ''));
+  // drop whatever the Save-as picker left behind: abort the open writable (errors ignored), then delete the file with
+  // handle.remove() (Chrome 110+); where remove() is missing, truncate it to 0 bytes (fresh createWritable() + close()).
+  async function discard(handle, run) {
+    const w = run.writable; run.writable = null;
+    if (w) { try { await w.abort(); } catch (e) { /* ignore */ } }
+    if (typeof handle.remove === 'function') { try { await handle.remove(); return 'removed'; } catch (e) { /* fall through */ } }
+    try { const t = await handle.createWritable({ keepExistingData: false }); await t.close(); return 'truncated'; } catch (e) { return 'failed'; }
   }
   function download(blob, name) {
     const url = URL.createObjectURL(blob);
@@ -11536,7 +11779,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const cadStep = f.id === 'step' && o.body !== 'mesh';
     let r;
     try {
-      if (hasHook()) r = await NS().exportFormat(f.id, Object.assign({}, o, { signal: run.ctrl.signal, onProgress }));
+      if (hasHook()) r = streamed(await NS().exportFormat(f.id, Object.assign({}, o, { signal: run.ctrl.signal, onProgress }, run.writable ? { writable: run.writable } : {})), run);
       else if (cadStep) r = await NS().exportCadSurfaces(o.partIds, { fittedOnly: o.body === 'fitted', onProgress, signal: run.ctrl.signal });
     } catch (e) { if (e && e.name === 'AbortError') return { status: 'cancelled' }; throw e; }
     if (hasHook() && !cadStep) return r || {};
@@ -11547,7 +11790,7 @@ void main() { gl_FragColor = uRGBA; }`;
       const noFile = !r.blob;
       // nothing fitted (or the engine could not run) → the whole mesh STEP, so the user always gets a file
       if (noFile && !/^(too_large|no_parts|unavailable)$/.test(normCode(r.reasonCode) || '')) {
-        const m = hasHook() ? await NS().exportFormat('step', Object.assign({}, o, { body: 'mesh', fittedOnly: false, signal: run.ctrl.signal })) : await capture('btnExportSTEP');
+        const m = hasHook() ? streamed(await NS().exportFormat('step', Object.assign({}, o, { body: 'mesh', fittedOnly: false, signal: run.ctrl.signal }, run.writable ? { writable: run.writable } : {})), run) : await capture('btnExportSTEP');
         if (!m || !m.blob) return r;
         if (parts) for (const p of parts) if (p.written !== 'solid') p.written = 'mesh';
         return Object.assign(r, { status: 'mesh_only', blob: m.blob, meshStep: true, summary: Object.assign({}, r.summary, parts ? { parts } : {}) });
@@ -11563,6 +11806,11 @@ void main() { gl_FragColor = uRGBA; }`;
     const id = f.id === 'stl' && o.encoding === 'ascii' ? 'btnExportSTLText' : f.btn;
     const c = await capture(id);
     return { status: 'ok', blob: c.blob, filename: c.filename };
+  }
+  // { blob: null, delivery: 'picker' } from a writer that got opts.writable = the file was streamed into it
+  function streamed(r, run) {
+    if (!r || r.blob || !run.writable || r.delivery !== 'picker' || r.status === 'error' || r.status === 'cancelled' || writeFailed(r)) return r;
+    return Object.assign({}, r, { blob: STREAMED });
   }
   // summary.parts, normalised (copies). shell / mesh_only count as not fitted.
   function partsOf(r) {
@@ -11609,7 +11857,7 @@ void main() { gl_FragColor = uRGBA; }`;
   }
 
   // ------------------------------------------------------------------ result card
-  function showCard() { ui.result.hidden = false; }
+  function showCard() { if (open) stashed = true; else ui.result.hidden = false; }
   const PARTS_SHOWN = 5;
   function setCard(tone, title, lines, file, parts) {
     ui.result.dataset.tone = tone;
@@ -11655,19 +11903,22 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.result.dataset.state = 'done';
     ui.result.dataset.status = out.status;
     ui.rBar.hidden = true; ui.rCancel.hidden = true; ui.rClose.hidden = false;
-    const file = out.saved ? 'Saved as ' + out.saved : '';
-    setCard(out.tone, out.title, out.lines, file, out.parts);
+    const file = out.saved ? (out.fileVerb || 'Saved as') + ' ' + out.saved : '';
+    const lines = (out.lines || []).filter(Boolean).map(sentence);
+    setCard(out.tone, out.title, lines, file, out.parts);
     const pl = (out.parts || []).map((p) => p.name + ': ' + p.what + (p.body ? ' as ' + p.body : '') + (p.why ? ', ' + p.why : '')).join('. ');
-    say(out.title + '. ' + (out.lines || []).filter(Boolean).join(' ') + (pl ? ' ' + pl + '.' : '') + (file ? ' ' + file + '.' : ''));
+    say([sentence(out.title)].concat(lines, pl ? [sentence(pl)] : [], file ? [sentence(file)] : []).join(' ').replace(/\s{2,}/g, ' '));
     if (!document.activeElement || document.activeElement === document.body) (t || ui.result).focus({ preventScroll: true });
     document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'done', format: out.format, status: out.status } }));
   }
   function dismiss(giveFocus) {
-    if (running || ui.result.hidden) return;
+    if (running || ui.result.hidden) { if (!running) stashed = false; return; }
     const had = ui.result.contains(document.activeElement);
     ui.result.hidden = true;
     if ((giveFocus || had) && trigger()) trigger().focus({ preventScroll: true });
   }
+  // every card line / announced piece ends in a full stop (engine reasons like "No visible part to export" don't)
+  const sentence = (t) => { t = String(t).trim(); return /[.!?\u2026:]$/.test(t) ? t : t + '.'; };
   function say(t) { ui.live.textContent = ''; setTimeout(() => { ui.live.textContent = t; }, 40); }
 
   // plain-language outcome. Whole-file CAD wording comes from cad-export-ui.js when it is loaded.
@@ -11706,10 +11957,11 @@ void main() { gl_FragColor = uRGBA; }`;
 
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
   const XT_UNITS = 'Stored in meters, opens at true size in NX.';
+  const XT_NOTE = 'All parts merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
 
   function describe(f, o, res, err) {
     const label = f.id === 'stl' ? 'STL (' + (o.encoding === 'ascii' ? 'ASCII' : 'binary') + ')' : f.label;
-    if (err) return { tone: 'err', status: 'error', title: label + ' export failed', lines: [String((err && err.message) || err), 'Nothing was saved.'] };
+    if (err) return { tone: 'err', status: 'error', title: label + ' export failed', lines: [isBrowserErr(err) ? 'The browser stopped the export.' : String((err && err.message) || err), 'Nothing was saved.'] };
     res = res || {};
     const isCad = f.id === 'step' && o.body !== 'mesh' && res.status !== 'ok';
     if (!isCad) {
@@ -11719,15 +11971,16 @@ void main() { gl_FragColor = uRGBA; }`;
         const s = res.summary || {}, g = (k) => (s[k] != null ? s[k] : res[k]);
         // XT_TOO_LARGE (estimated output > 8 GB): own wording only; the engine's reason text also says "Nothing was saved"
         if (!blob && normCode(res.reasonCode) === 'too_large') {
-          return { tone: 'warn', status: 'too_large', title: 'Model too large to export',
-            lines: ['This model is too large for the browser to write as Parasolid' + (+g('estimatedBytes') > 0 ? ' (about ' + fmtGB(+g('estimatedBytes')) + ').' : '.'), 'Nothing was saved. Try hiding some parts, or export STEP or STL instead.'] };
+          return { tone: 'warn', status: 'too_large', title: 'Model too large to export' + (+g('estimatedBytes') > 0 ? ' (about ' + fmtGB(+g('estimatedBytes')) + ')' : ''),
+            lines: ['This model is too large for the browser to write as Parasolid.', 'Nothing was saved. Try hiding some parts, or export STEP or STL instead.'] };
         }
         if (g('faces') != null && +g('faces') === 0) {
           return { tone: 'warn', status: 'empty', title: 'Nothing to export', lines: ['The model has no faces to write.', 'No file was saved.'] };
         }
         if (blob && (g('bodyType') === 'sheet' || +g('openEdges') > 0 || g('sewn') === false)) {
           return { tone: 'warn', status: 'sheet', blob, title: 'Parasolid sheet body exported (open model)',
-            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.', XT_UNITS] };
+            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.',
+              +g('openEdges') > 0 ? (+g('openEdges') === 1 ? '1 open edge.' : Math.round(+g('openEdges')).toLocaleString('en-US') + ' open edges.') : null, XT_UNITS] };
         }
       }
       if (!blob) return { tone: 'err', status: res.status || 'error', title: 'Nothing exported', lines: [cap(reasonText(res.reasonCode, res.reason)) || 'The exporter returned no file.', 'Nothing was saved.'] };

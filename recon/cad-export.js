@@ -139,9 +139,10 @@
       const parts = wres ? wres.parts : []; const bodiesOk = parts.filter((p) => p.status === 'solid' || (!solidsOnly && p.status === 'shell'));
       let status, reason = null, reasonCode = null;
       let cause = null;
+      // a worker run that got past the kernel clears an earlier kernel failure (Fitted / Both come back without a reload)
+      if (!workerErr && wres && kernelFailed) { kernelFailed = false; updateCaps(); }
       if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only';
         if (fe.code === 'kernel_download' || fe.code === 'worker_failed') { kernelFailed = true; updateCaps(); } }
-      else if (sel.mode === 'fit' && kernelFailed) { kernelFailed = false; updateCaps(); }
       else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
       else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
@@ -159,8 +160,9 @@
         if (signal && signal.aborted) return cancelled();
         const t = performance.now();
         const byIdx = new Map(parts.map((p) => [p.idx, p]));
+        // every mesh body in a Both file is <name>_mesh (fitted bodies are <name>_fitted), fitted or not
         const meshParts = sel.ids.map((i, k) => { const ap = sel.parts[k]; const wp = byIdx.get(i);
-          return wp && (wp.status === 'solid' || wp.status === 'shell') ? { ...ap, name: wp.summary.name + '_mesh', visible: true } : { ...ap, visible: true }; });
+          return { ...ap, name: ((wp && wp.summary && wp.summary.name) || ap.name) + '_mesh', visible: true }; });
         meshText = window.CAD3DExtractor.buildSTEPAP214({ parts: meshParts, units: 'mm', brepMode: 'merged', detail: 1 });
         timings.meshWrite = Math.round(performance.now() - t);
       }

@@ -56,6 +56,9 @@ body:not(.sm-simple) .xf-btn, body:not(.sm-simple) .xf-pop { display: none !impo
 .xf-name-ext { padding: 6px 8px 6px 0; color: var(--text-2); font: 500 12px var(--mono); }
 .xf-name .xf-note { margin-top: 0; }
 .xf-foot { display: flex; justify-content: flex-end; padding: 4px 4px 2px; }
+/* big-download warning (no save picker, estimate > 300 MB), just above Save */
+.xf-big { margin: 6px 8px 2px; padding: 6px 8px; border: 1px solid var(--amber); border-left-width: 3px; border-radius: 6px; overflow-wrap: anywhere; }
+.xf-big[hidden] { display: none; }
 .xf-go { min-width: 110px; justify-content: center; }
 .xf-go:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 

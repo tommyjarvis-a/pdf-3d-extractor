@@ -31,6 +31,20 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
   (true again after the next successful run or when the browser comes back online). True otherwise (reason `null`). The Export menu dims
   *Fitted solid* and *Both* and shows the reason when it is false (for `browser_unsupported`: "This browser can’t run
   surface fitting. Try a recent version of Chrome, Edge, Safari or Firefox.").
+- **`PDF3D.estimateBytes(format, opts)`** (`app.js`): a size estimate before exporting, for the save dialog and
+  big-file warnings. For Parasolid it runs the writer's counting pre-pass only (XT nodes × 92 bytes, the figure behind
+  `XT_TOO_LARGE`) and returns the estimated size in bytes as a number; other formats, or nothing to export, return `null`.
+- **`exportFormat(format, {writable})`**: given a `FileSystemWritableFileStream` (from the save dialog), the file is
+  written into it part by part (about 8 MB per write) and no single large Blob is built, so very large Parasolid files
+  (r08, 554 MB) save through the dialog. The result is `{blob: null, delivery: 'picker', size}`. A failed write returns
+  `status: 'error'`, `reasonCode: 'WRITE_FAILED'`. `exportFormat` never calls `close()` or `abort()`; the caller does.
+  Without `writable` the result is the Blob as before, now with `delivery: 'download'` and `size`. This applies to every
+  format, including fitted STEP.
+- `exportFormat('step', {body: 'fitted' | 'both'})` in a browser without Web Workers or WebAssembly
+  (`cadSurfacesReason: 'browser_unsupported'`) returns the mesh STEP with `status: 'mesh_only'`,
+  `reasonCode: 'browser_unsupported'` (per part too); with `onNoFit: 'omit'` it is skipped with that code.
+- Fitted STEP length units: not added. A STEP file records its own unit, so the mm output is correct;
+  `capabilities.fittedUnits` is not set, and the Units setting is hidden for Fitted and Both.
 - **Fitted-only CAD export can leave open shells out** (`exportCadSurfaces(..., {fittedOnly: true, solidsOnly: true})`,
   `recon/cad-worker.js`): only closed solids are written as fitted bodies. The default is unchanged.
 
@@ -38,9 +52,24 @@ Alpha: the new Simple-mode Export menu is ready for testing, and its wording and
 - `cad-export-ui.js` from Designer: when the browser is offline, a failed kernel download or worker now reads
   "You’re offline" with a reconnect hint, and a late progress update can no longer replace the screen-reader
   announcement of the result. Its result wording is shared with the Export card (`PDF3DCadExportUI.describe`).
+- Advanced **Export Parasolid (.x_t)** no longer says the file was saved, because the browser download can still fail.
+  It says "Parasolid download started: screw.x_t". Above about 300 MB it adds: "This file is about 1.1 GB. Chrome can
+  cancel downloads this large without a message; if it isn't in your Downloads, hide some parts or use Reduce detail
+  and export again."
+- Sizes under 1 GB in Parasolid messages are shown in MB (was "0.0 GB").
+- The page title lists Parasolid .x_t.
 
 ### Fixed
 - Advanced mode on phones (390 px): the longer B-Rep Mode option text from 1.5.2 no longer makes the page scroll sideways.
+- After a CAD kernel download failure, the next export that gets the kernel running reports its real status (it was
+  "unknown", with no reasonCode) and turns Fitted and Both back on without a reload.
+- Both (fitted + mesh): a part whose fit stopped short (status `mesh_only`) is no longer written as a partial
+  `<name>_fitted` body, so the file matches the summary (r03: "No clean surface fit", mesh bodies only). Every mesh body
+  in a Both file is now named `<name>_mesh`, including parts that could not be fitted and models with no face data.
+  Each part in a Both result also lists `fittedBody` and `meshBody`, the body names actually in the file.
+- Parasolid open models (sheet bodies): a loop vertex that lands exactly on the previous one when flattened onto its
+  face plane is dropped, so no zero-length line with a (0,0,0) direction is written (one line in r07). Other files are
+  byte-identical to 1.5.2.
 - `test/run.js` loads the app again (its fake window now has `matchMedia`, which `simple-mode.js` reads at load).
 
 ### Known issues
