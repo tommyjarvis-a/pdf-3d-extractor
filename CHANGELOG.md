@@ -15,6 +15,10 @@
 ### Added
 - `window.PDF3D.lastLoad` / `CAD3DExtractor.getLastLoad()`: `ok` / `unsupported` (`UNSUPPORTED_MESH`) / `error`
   (`DECODE_ERROR`) / `no3d` (`NO_3D`) with `format`, `detail` and a display `message` (see README "Load result").
+- Simple mode: load-result cards in the empty viewport (Designer wording). `UNSUPPORTED_MESH` and `DECODE_ERROR` are amber, `NO_3D`
+  is neutral. The raw decode error is never shown on the card; it is logged once with `console.warn('[PDF3D] 3D decode error: …')`.
+  A PDF with no 3D content and no attachments now clears the viewport and shows the `NO_3D` card in Simple mode instead of an
+  `alert()` over the previous model. Advanced is unchanged.
   Simple's empty state shows the `message` for unsupported or failed 3D streams.
 
 ## 1.5.2 — 2026-10-25

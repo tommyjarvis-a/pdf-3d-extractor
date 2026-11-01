@@ -3796,7 +3796,9 @@
     if (streams.length === 0) {
       setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0, attachments: state.attachments.map((a) => a.name),
         message: state.attachments.length ? 'No 3D model in this PDF; it has embedded file attachments.' : 'No 3D model (U3D / PRC) in this PDF.' });
-      if (state.attachments.length) {
+      // Simple mode shows the NO_3D load card in the empty viewport instead of an alert (Advanced keeps the alert)
+      const simpleUI = typeof document !== 'undefined' && document.body && document.body.classList.contains('sm-simple');
+      if (state.attachments.length || simpleUI) {
         // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
         state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
         state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;

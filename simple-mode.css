@@ -340,6 +340,14 @@ body.sm-simple .sm-empty {
   font-size: 13px;
   text-align: center;
 }
+/* load-result cards: same box, tone on the left border (as .cad-toast) */
+.sm-empty > div[data-tone="warn"], .sm-empty > div[data-tone="muted"] { max-width: 440px; border-style: solid; border-left-width: 3px; text-align: left; }
+.sm-empty > div[data-tone="warn"] { border-left-color: var(--amber); }
+.sm-empty > div[data-tone="muted"] { border-left-color: var(--text-2); }
+.sm-empty-title { display: block; font: 700 13px var(--sans); color: var(--text-0); margin-bottom: 4px; }
+.sm-empty > div[data-tone="warn"] .sm-empty-title { color: #fbbf24; }
+.sm-empty-line { display: block; line-height: 1.45; }
+.sm-empty-hint { display: block; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
 
 /* ---------------------------------------------------------------- About dialog */
 .sm-dialog {

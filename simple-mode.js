@@ -430,8 +430,11 @@
     // drop veil + empty hint
     ui.dropVeil = h('div', { class: 'sm-dropveil', hidden: true, 'aria-hidden': 'true' },
       h('div', null, 'Drop to open', h('small', { text: '3D PDF (.pdf), .u3d or .prc' })));
+    ui.emptyTitle = h('strong', { class: 'sm-empty-title', hidden: true });
+    ui.emptyLine = h('span', { class: 'sm-empty-line', hidden: true });
     ui.emptyText = h('span', { text: 'Drop a 3D PDF here or click Open' });
-    ui.empty = h('div', { class: 'sm-empty', hidden: true }, h('div', null, ui.emptyText));
+    ui.emptyCard = h('div', null, ui.emptyTitle, ui.emptyLine, ui.emptyText);
+    ui.empty = h('div', { class: 'sm-empty', hidden: true }, ui.emptyCard);
     if (wrap) wrap.append(ui.pill, ui.empty, ui.dropVeil);
 
     // ---------- sheets
@@ -706,11 +709,32 @@
     const loaded = /NO MESH|NO 3D STREAM/.test(t);
     ui.empty.hidden = nParts > 0;
     const ll = (window.PDF3D || {}).lastLoad;
-    ui.emptyText.textContent = loaded && ll && (ll.status === 'unsupported' || ll.status === 'error') && ll.message
-      ? `${ll.message} Drop another 3D PDF here or click Open.`
+    const card = loaded && ll ? loadCard(ll) : null;
+    if (card && ll.reasonCode === 'DECODE_ERROR' && warnedLoad !== ll) { warnedLoad = ll; console.warn('[PDF3D] 3D decode error:', ll.detail); }
+    ui.emptyCard.dataset.tone = card ? card.tone : '';
+    ui.emptyTitle.hidden = ui.emptyLine.hidden = !card;
+    ui.emptyTitle.textContent = card ? card.title : '';
+    ui.emptyLine.textContent = card ? card.line : '';
+    ui.emptyText.className = card ? 'sm-empty-hint' : '';
+    ui.emptyText.textContent = card
+      ? 'Drop another 3D PDF here or click Open.'
       : loaded
       ? `No 3D geometry found in ${(($('docFileName') || {}).textContent || 'this file').trim()}. Drop another 3D PDF here or click Open.`
       : 'Drop a 3D PDF here or click Open';
+  }
+
+  // Load-result cards (Designer wording). The raw decode error never goes on the card; it is console.warn'ed once.
+  var warnedLoad = null;
+  function loadCard(ll) {
+    switch (ll.reasonCode) {
+      case 'UNSUPPORTED_MESH': return { tone: 'warn', title: "This 3D model can't be read yet",
+        line: `The PDF has a 3D model, but it's saved in a format the app doesn't support yet (${ll.format}, ${ll.detail}).` };
+      case 'NO_3D': return { tone: 'muted', title: 'No 3D model in this PDF',
+        line: 'This PDF has no 3D content. A 3D PDF shows a model you can rotate in Acrobat.' };
+      case 'DECODE_ERROR': return { tone: 'warn', title: "Couldn't read this 3D model",
+        line: 'The PDF has a 3D model, but part of it is damaged or saved in an unexpected way.' };
+      default: return null;
+    }
   }
 
   // ------------------------------------------------------------------ About dialog

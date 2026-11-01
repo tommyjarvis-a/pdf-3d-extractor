@@ -37,7 +37,7 @@ Large models: parts are stored as typed arrays with one compact welded B-Rep eac
 ## Load result (API)
 
 After every load (`CAD3DExtractor.loadPDFBuffer`) and stream switch (`activateStream`), the app sets
-`window.PDF3D.lastLoad` (also returned by `CAD3DExtractor.getLastLoad()`). Use `reasonCode` for logic and `message` for display.
+`window.PDF3D.lastLoad` (also returned by `CAD3DExtractor.getLastLoad()`). Use `reasonCode` for logic. `message` is a developer/log string (for `error` it includes the raw decoder error).
 
 | `status` | `reasonCode` | When | Fields |
 |---|---|---|---|
@@ -56,6 +56,10 @@ Example (VEA file with the RHAdobe decoder unavailable):
  "detail":"RHAdobeMeshResource","wires":0,
  "message":"This PDF has a 3D model, but it's stored in a format the app can't read yet (U3D, RHAdobeMeshResource)."}
 ```
+
+Simple mode does not show `message`. It renders its own load card from `reasonCode` (plus `format`/`detail` for
+`UNSUPPORTED_MESH`): amber "This 3D model can't be read yet", neutral "No 3D model in this PDF", or amber
+"Couldn't read this 3D model". For `DECODE_ERROR` the error text goes only to `console.warn`.
 
 ## Known limitations
 
