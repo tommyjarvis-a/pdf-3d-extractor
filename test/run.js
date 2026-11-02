@@ -90,7 +90,7 @@ async function exportIdentity(window, ctx, label) {
 
 // 1.6.2 damaged loads (lastLoad.damaged set, e.g. x05 / x10): every PDF3D.exportFormat result, download and writable, for
 // every format must carry damaged === lastLoad.damaged and summary.damaged === lastLoad.damaged, a <stem>_partial.<ext>
-// filename (= suggestedName; = PDF3D.suggestedFileName(fmt, opts) for the mesh formats), and STEP / IGES must hold the
+// filename (= suggestedName = PDF3D.suggestedFileName(fmt, opts), every format and mode), and STEP / IGES must hold the
 // PDF3D.partialNote() text (FILE_DESCRIPTION second string / extra Start-section lines). Then the same export with
 // lastLoad.damaged cleared must have no damaged key, the plain name, and bytes = the damaged file minus the note
 // (STEP, IGES) or identical bytes (XT, STL, OBJ, raw): the note is the only difference.
@@ -123,7 +123,7 @@ async function damagedExports(window, label) {
       check(r && r.delivery === how && r.damaged === dmg && r.summary && r.summary.damaged === dmg, `${tag} (${how}): damaged ${JSON.stringify(r && r.damaged)} summary.damaged ${JSON.stringify(r && r.summary && r.summary.damaged)}`);
       check(r && /_partial\.[A-Za-z0-9_]+$/.test(r.filename || '') && r.suggestedName === r.filename, `${tag} (${how}): filename ${r && r.filename} suggestedName ${r && r.suggestedName}`);
     }
-    if (!(fmt === 'step' && extra)) check(P.suggestedFileName(fmt, extra) === d.filename, `${tag}: suggestedFileName ${P.suggestedFileName(fmt, extra)} vs filename ${d.filename}`);
+    check(P.suggestedFileName(fmt, extra) === d.filename && w.filename === d.filename, `${tag}: suggestedFileName ${P.suggestedFileName(fmt, extra)} vs filename ${d.filename}`);
     check(dl.equals(wb), `${tag}: download and writable bytes differ (${dl.length} vs ${wb.length} B)`);
     const txt = dl.toString('latin1');
     if (fmt === 'step') check(txt.includes(`FILE_DESCRIPTION(('`) && txt.includes(`,'${note}'),'2;1');`) && /^[\x20-\x7e\n\r]*$/.test(txt.slice(0, txt.indexOf('DATA;'))), `${tag}: STEP header has no PARTIAL FILE_DESCRIPTION (or non-ASCII header)`);
@@ -273,6 +273,19 @@ function syntheticAttachmentPDF(names) {
     for (const fmt of ['step', 'iges', 'raw']) { const { d, dl } = await exportText(window, fmt, undefined, false);
       check(d && dl && !('damaged' in d) && !(d.summary && 'damaged' in d.summary) && !/_partial/.test(d.filename) && d.suggestedName === d.filename && d.filename === window.PDF3D.suggestedFileName(fmt) && !dl.toString('latin1').includes('PARTIAL:'),
         `sample ${fmt}: undamaged export has damaged ${d && d.damaged} / name ${d && d.filename} / suggested ${window.PDF3D.suggestedFileName(fmt)}`); } }
+
+  // 1d. 1.6.2: one name rule: result.filename (download and writable) === PDF3D.suggestedFileName(format, opts) for every
+  // format and mode that writes a file (STEP fitted / both too, whatever the fit outcome); x05 / x10 repeat it with _partial
+  { await api.activateStream(0); const P = window.PDF3D; const got = [];
+    for (const [fmt, extra] of DMG_FORMATS) { const tag = fmt + (extra ? '-' + (extra.encoding || extra.body) : '');
+      const { d, dl, w } = await exportText(window, fmt, extra, true); const want = P.suggestedFileName(fmt, extra);
+      if (!d || !dl) { console.log(`  name rule sample ${tag}: ${d && d.status} ${d && d.reasonCode} (no file)`); continue; }
+      got.push(`${tag}=${d.filename}`);
+      check(d.filename === want && d.suggestedName === want && w && w.filename === want && w.suggestedName === want, `name rule sample ${tag}: filename ${d.filename} / writable ${w && w.filename} vs suggestedFileName ${want}`); }
+    const stem = P.suggestedFileName('step').replace(/\.stp$/, '');
+    check(P.suggestedFileName('step', { body: 'fitted' }) === stem + '-surfaces-only.stp' && P.suggestedFileName('step', { body: 'both' }) === stem + '-surfaces.stp'
+      && P.suggestedFileName('step', { body: 'mesh' }) === stem + '.stp' && P.suggestedFileName('nope') === null, 'name rule: STEP body names / unknown format');
+    console.log(`name rule: filename === suggestedFileName for ${got.length} sample exports: ${got.join(', ')}`); }
 
   // 1c. 1.6.2: STEP header strings use ISO 10303-21 encoding ('' \\ \X2\ \X4\); plain ASCII names are unchanged
   { const tmpdir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pdf3d-stepname-'));

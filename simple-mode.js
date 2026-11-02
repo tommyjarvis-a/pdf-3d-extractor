@@ -337,11 +337,16 @@
     ui.menuExport.append(h('div', { class: 'sm-pop-h', text: 'Export as' }), ui.exportItems, h('hr', { class: 'sm-sep' }),
       h('div', { class: 'sm-pop-h', text: 'Export settings' }), ui.settingsBox);
 
+    // partial load (lastLoad.damaged): quiet amber note beside the status chip, tied to the current lastLoad
+    ui.dmgText = h('span', { class: 'sm-damaged-t' });
+    ui.dmgX = h('button', { type: 'button', class: 'sm-damaged-x', 'aria-label': 'Dismiss note', title: 'Dismiss', text: '\u00d7',
+      onclick: () => { ui.dmgDismissed = (window.PDF3D || {}).lastLoad; syncDamaged(); if (ui.btnOpen) ui.btnOpen.focus({ preventScroll: true }); } });
+    ui.dmg = h('span', { class: 'sm-damaged', role: 'note', 'data-sm': 'damaged-note', hidden: true }, h('span', { class: 'sm-damaged-ico', 'aria-hidden': 'true', text: '!' }), ui.dmgText, ui.dmgX);
     ui.topbar = h('header', { class: 'sm-topbar', 'aria-label': 'Simple mode toolbar' },
       h('div', { class: 'sm-brand' },
         h('div', { class: 'brand-badge', 'aria-hidden': 'true', text: '3D' }),
         h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
-      h('div', { class: 'sm-doc' }, ui.docName, ui.status),
+      h('div', { class: 'sm-doc' }, ui.docName, ui.status, ui.dmg),
       h('div', { class: 'sm-actions' },
         ui.btnOpen, ui.btnMore,
         h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret),
@@ -433,7 +438,8 @@
     ui.emptyTitle = h('strong', { class: 'sm-empty-title', hidden: true });
     ui.emptyLine = h('span', { class: 'sm-empty-line', hidden: true });
     ui.emptyText = h('span', { text: 'Drop a 3D PDF here or click Open' });
-    ui.emptyCard = h('div', null, ui.emptyTitle, ui.emptyLine, ui.emptyText);
+    ui.attBox = h('div', { class: 'sm-att', 'data-sm': 'attachments', hidden: true });
+    ui.emptyCard = h('div', null, ui.emptyTitle, ui.emptyLine, ui.attBox, ui.emptyText);
     ui.empty = h('div', { class: 'sm-empty', hidden: true }, ui.emptyCard);
     if (wrap) wrap.append(ui.pill, ui.empty, ui.dropVeil);
 
@@ -487,6 +493,8 @@
     // ---------- live mirrors of original state
     observe($('docFileName'), () => { ui.docName.textContent = $('docFileName').textContent; ui.docName.title = ui.docName.textContent; syncEmpty(); });
     observe($('statusBadge'), syncStatus);
+    // a new PDF3D.lastLoad without a badge change (stream switch, test stubs): re-read it
+    document.addEventListener('pdf3d:lastload', () => syncStatus());
     observe($('partList'), syncPartCount, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
     ($('partList') || document).addEventListener('change', () => setTimeout(syncPartCount, 0));
     observe($('btnExportSTEP'), () => { ui.btnExportMain.disabled = !!$('btnExportSTEP').disabled; }, { attributes: true, attributeFilter: ['disabled'] });
@@ -640,7 +648,14 @@
     // A decode error's raw text stays in the console (app.js console.error + syncEmpty's console.warn); the chip's
     // hover text uses the approved card line instead.
     const ll = (window.PDF3D || {}).lastLoad;
-    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : t + (b.title ? '\n' + b.title : '');
+    let tip = t + (b.title ? '\n' + b.title : '');
+    // the damaged-load warning text stays in the console (syncDamaged); the note beside the chip says it in plain words
+    const dmg = ll && typeof ll.damaged === 'string' ? ll.damaged.trim() : '';
+    if (dmg) tip = tip.split('\n').filter((l) => l.trim() !== dmg).join('\n');
+    // NO 3D STREAM: the badge carries the raw attachment name; Simple shows the sanitized fileName (attachment card line)
+    const ac = /NO 3D STREAM/.test(t) ? attCard(ll) : null;
+    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : ac ? ac.lines[0] : tip;
+    syncDamaged();
     syncEmpty();
   }
   function syncDisplay() {
@@ -716,8 +731,14 @@
     if (card && ll.reasonCode === 'DECODE_ERROR' && warnedLoad !== ll) { warnedLoad = ll; console.warn('[PDF3D] 3D decode error:', ll.detail); }
     ui.emptyCard.dataset.tone = card ? card.tone : '';
     ui.emptyTitle.hidden = ui.emptyLine.hidden = !card;
+    // embedded files (1.6.2 attachmentDetails): NO_3D becomes the attachment card; other load cards keep their own
+    // title and line and list the files under it
+    const att = card ? attCard(ll) : null;
+    if (att && ll.reasonCode === 'NO_3D') { card.tone = 'att'; card.title = att.title; card.line = att.lines[0]; }
+    if (att) ui.emptyCard.dataset.tone = card.tone;
     ui.emptyTitle.textContent = card ? card.title : '';
     ui.emptyLine.textContent = card ? card.line : '';
+    renderAtt(att, ll, att && ll.reasonCode === 'NO_3D');
     ui.emptyText.className = card ? 'sm-empty-hint' : '';
     ui.emptyText.textContent = card
       ? 'Drop another 3D PDF here or click Open.'
@@ -738,6 +759,117 @@
         line: 'The PDF has a 3D model, but part of it is damaged or saved in an unexpected way.' };
       default: return null;
     }
+  }
+
+  // ------------------------------------------------------------------ attachment card (lastLoad.attachmentDetails)
+  // Names shown are always attachmentDetails[i].fileName (Dev's sanitized save name), never the raw PDF name.
+  function attList(ll) { return ll && Array.isArray(ll.attachmentDetails) ? ll.attachmentDetails : []; }
+  const attName = (a, i) => String((a && typeof a.fileName === 'string' && a.fileName) || `attachment-${i + 1}.bin`);
+  function humanSize(n) {
+    n = Math.max(0, +n || 0);
+    if (n < 1024) return n + (n === 1 ? ' byte' : ' bytes');
+    const u = ['KB', 'MB', 'GB', 'TB']; let v = n / 1024, k = 0;
+    while (v >= 1024 && k < u.length - 1) { v /= 1024; k++; }
+    const r = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+    return (r >= 1024 && k < u.length - 1 ? (r / 1024).toFixed(1) + ' ' + u[k + 1] : r + ' ' + u[k]);
+  }
+  // up to 3 names, then "and {k} more": a / a and b / a, b and c / a, b, c and 5 more
+  function nameList(names) {
+    if (names.length <= 1) return names.join('');
+    if (names.length <= 3) return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    return names.slice(0, 3).join(', ') + ' and ' + (names.length - 3) + ' more';
+  }
+  function attCard(ll) {
+    const atts = attList(ll);
+    if (!atts.length) return null;
+    const all = atts.map((a, i) => ({ i, a: a || {}, name: attName(a, i), bad: !!(a && a.error) }));
+    const ordered = all.filter((x) => x.a.isCAD).concat(all.filter((x) => !x.a.isCAD));   // CAD first, PDF order within
+    const one = all.length === 1 && all[0].a.isCAD && !all[0].bad;
+    const lines = [one ? `This PDF has ${all[0].name} (${humanSize(all[0].a.size)}) attached.`
+      : `It has ${all.length} attached file${all.length === 1 ? '' : 's'}: ${nameList(ordered.map((x) => x.name))}.`];
+    for (const x of ordered) if (x.bad) lines.push(`${x.name} couldn\u2019t be read.`);
+    return { tone: 'att', title: one ? 'No 3D model, but a CAD file is attached' : 'No 3D model in this PDF', lines,
+      items: ordered.filter((x) => !x.bad), one };
+  }
+  function renderAtt(att, ll, titled) {
+    const box = ui.attBox;
+    if (!att) { box.hidden = true; box.textContent = ''; ui.attFor = null; return; }
+    box.hidden = false;
+    // rebuild only for a new load or new content (syncEmpty runs on every DOM change; a rebuild would drop focus and progress)
+    const sig = att.lines.join('\n') + '\n' + att.items.map((x) => x.i + ':' + x.name + ':' + x.a.size).join('|');
+    if (ui.attFor === ll && ui.attSig === sig && box.dataset.titled === String(!!titled)) return;
+    ui.attFor = ll; ui.attSig = sig; box.dataset.titled = String(!!titled); box.textContent = '';
+    // lines: under the attachment title the first line is already ui.emptyLine; under another load card all lines go here
+    for (const l of titled ? att.lines.slice(1) : att.lines) {
+      box.append(h('span', { class: 'sm-att-line' + (/couldn\u2019t be read\.$/.test(l) ? ' sm-att-line--warn' : ''), text: l }));
+    }
+    const items = att.items;
+    if (!items.length) return;
+    const list = h('div', { class: 'sm-att-list', id: 'smAttList', role: 'list', 'aria-label': 'Attached files' });
+    const rows = items.map((x, k) => {
+      const label = `Save ${x.name}`;
+      const sz = h('span', { class: 'sm-att-size', id: 'smAttSz' + x.i, text: humanSize(x.a.size) });
+      const btn = h('button', { type: 'button', class: 'btn ' + (k === 0 ? 'btn-primary ' : '') + 'sm-att-save', 'data-att': String(x.i),
+        'aria-describedby': 'smAttSz' + x.i, text: label });
+      btn.dataset.label = label;
+      btn.addEventListener('click', () => saveAtt(x, btn));
+      const row = h('div', { class: 'sm-att-row', role: 'listitem' }, btn, sz);
+      if (k >= 3) row.hidden = true;
+      list.append(row);
+      return row;
+    });
+    box.append(list);
+    if (items.length > 3) {
+      const more = h('button', { type: 'button', class: 'sm-att-more', 'aria-expanded': 'false', 'aria-controls': 'smAttList', 'data-sm': 'att-more',
+        text: `Show all ${items.length}` });
+      more.addEventListener('click', () => {
+        const open = more.getAttribute('aria-expanded') !== 'true';
+        more.setAttribute('aria-expanded', String(open));
+        more.textContent = open ? 'Show fewer' : `Show all ${items.length}`;
+        rows.forEach((r, k) => { if (k >= 3) r.hidden = !open; });
+        if (open && rows[3]) rows[3].querySelector('button').focus({ preventScroll: true });
+      });
+      box.append(more);
+    }
+  }
+  function saveAtt(x, btn) {
+    if (ui.attBusy || btn.getAttribute('aria-disabled') === 'true') return;
+    const XF = window.PDF3DExportFlow;
+    const btns = [...ui.attBox.querySelectorAll('.sm-att-save')];
+    const busy = (on) => { ui.attBusy = on; for (const b of btns) if (b !== btn) { if (on) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled'); } };
+    busy(true);
+    let p;
+    // the Save-as picker, streaming, close / abort and the result card live in export-flow.js (same machinery as exports)
+    if (XF && typeof XF.saveAttachment === 'function') p = XF.saveAttachment(x.i, { button: btn, label: btn.dataset.label });
+    else p = plainDownload(x);
+    Promise.resolve(p).catch(() => {}).then(() => busy(false));
+  }
+  // no export-flow.js: plain download of the engine's blob (no card; errors only go to the console)
+  async function plainDownload(x) {
+    const NS = window.PDF3D || {};
+    if (typeof NS.saveAttachment !== 'function') return;
+    const r = await NS.saveAttachment(x.i, {});
+    if (!r || r.status !== 'ok' || !r.blob) { console.warn('[PDF3D] attachment not saved:', r && r.reasonCode); return; }
+    const url = URL.createObjectURL(r.blob);
+    const a = h('a', { href: url, download: r.filename || x.name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+
+  // ------------------------------------------------------------------ partial (damaged) load note
+  var warnedDamaged = null;
+  function syncDamaged() {
+    if (!ui.dmg) return;
+    const ll = (window.PDF3D || {}).lastLoad;
+    const raw = ll && ll.status === 'ok' && typeof ll.damaged === 'string' ? ll.damaged.trim() : '';
+    if (raw && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
+    const on = !!raw && ui.dmgDismissed !== ll;
+    ui.dmg.hidden = !on;
+    if (!on) return;
+    const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
+    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} part${n === 1 ? '' : 's'} loaded.`
+      : 'Part of this model couldn\u2019t be read, so some parts may be missing.';
+    if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }
 
   // ------------------------------------------------------------------ About dialog

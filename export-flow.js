@@ -42,8 +42,17 @@
  * Every export ends in a visible result card that stays until dismissed or the next export starts; it is hidden while the
  * Export popover is open (it would cover Save) and comes back if the popover closes without a new export.
  *
- * API: window.PDF3DExportFlow = { open(), close(), select(fmt), save(), dismiss(), state, formats(), storageKey }
- * Event: 'pdf3d:export' on document, detail { phase: 'start'|'done', format, status }.
+ * Partial loads (PDF3D.partialNote() non-null, else lastLoad.damaged on an 'ok' load, or damaged / summary.damaged on the export result): the suggested name
+ * gets "_partial" before the extension (part_partial.x_t, part-ascii_partial.stl; PDF3D.suggestedFileName when the engine has it), the popover shows "Only part of this model
+ * loaded. The file may be missing parts." above Save, and a card for a saved file is amber (never green) with the first
+ * line "This model was only partly read. Check it against the drawing before using it." (other lines kept).
+ * Fitting-limit card: title "Exported as mesh STEP"; the triangle count is lastLoad.trisParsed, else summary.tris, else
+ * parsed from the reason.
+ * Embedded files: saveAttachment(index, { button, label }) — Simple's attachment card Save buttons (see the function).
+ *
+ * API: window.PDF3DExportFlow = { open(), close(), select(fmt), save(), dismiss(), saveAttachment(i, o), state, formats(), storageKey }
+ * Events: 'pdf3d:export' on document, detail { phase: 'start'|'done', format, status }; 'pdf3d:attachment' { phase: 'done',
+ *   format: 'attachment', status: 'attachment_saved'|'attachment_failed' }.
  */
 (function () {
   'use strict';
@@ -177,6 +186,7 @@
       ui.optsWrap = h('div', { class: 'xf-opts-wrap' }, h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', id: 'xfOptH', text: 'Options' }), ui.opts),
       h('hr', { class: 'sm-sep' }), ui.nameRow,
       ui.big = h('p', { class: 'xf-note xf-note--warn xf-big', 'data-xf': 'big-note', role: 'note', hidden: true }),
+      ui.dmgNote = h('p', { class: 'xf-note xf-note--warn xf-dmg', 'data-xf': 'damaged-note', role: 'note', hidden: true, text: DMG_NOTE }),
       h('div', { class: 'xf-foot' }, ui.go));
 
     // Safari never focuses a pressed button: ignore focus loss while a pointer is down in the popover
@@ -227,7 +237,7 @@
     if (!simpleMode()) return;
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
-    renderList(); renderOpts();
+    renderList(); renderOpts(); syncDamagedNote();
     if (!ui.result.hidden) { ui.result.hidden = true; stashed = true; }
     ui.pop.hidden = false;
     open = true;
@@ -405,10 +415,35 @@
   const mb = (b) => (b / 1e6).toFixed(1).replace(/\.0$/, '');
   function sel() { const s = appState(); const i = s && s.selectedPartIdx; return typeof i === 'number' && i >= 0 && s.parts && i < s.parts.length ? [i] : null; }
 
+  // 1.6.2 (9ba8d26): PDF3D.suggestedFileName(format, opts) is the engine's own default name (with _partial while the load is
+  // damaged), so the dialog offers what exportFormat will call the file. Older engines: the same rule locally.
   function fileName() {
     const f = FMT[prefs.format];
+    const dev = NS().suggestedFileName;
+    if (typeof dev === 'function') {
+      try { const n = dev.call(NS(), f.id, { encoding: prefs.stl.enc }); if (nonEmpty(n)) return n.trim(); } catch (e) { /* fall back */ }
+    }
     const suffix = f.id === 'stl' && prefs.stl.enc === 'ascii' ? '-ascii' : '';
-    return stem() + suffix + extOf(f);
+    return stem() + suffix + (loadDamaged() ? '_partial' : '') + extOf(f);   // part-ascii_partial.stl, like the engine
+  }
+  // ------------------------------------------------------------------ partial (damaged) loads
+  // lastLoad.damaged (1.6.2, 'ok' loads only) = some of the model couldn't be read. Exports from such a load get a _partial
+  // file name, a note in the popover and an amber card. Export results may carry it too (damaged / summary.damaged).
+  const DMG_NOTE = 'Only part of this model loaded. The file may be missing parts.';
+  const DMG_LINE = 'This model was only partly read. Check it against the drawing before using it.';
+  const nonEmpty = (v) => typeof v === 'string' && !!v.trim();
+  // 1.6.2 (9ba8d26): PDF3D.partialNote() (note text while damaged, else null) is the trigger; older engines: lastLoad.damaged
+  function loadDamaged() {
+    const pn = NS().partialNote;
+    if (typeof pn === 'function') { try { return nonEmpty(pn.call(NS())); } catch (e) { /* fall back */ } }
+    const ll = NS().lastLoad; return !!(ll && ll.status === 'ok' && nonEmpty(ll.damaged));
+  }
+  function resDamaged(res) { return !!(res && (nonEmpty(res.damaged) || (res.summary && nonEmpty(res.summary.damaged)))) || loadDamaged(); }
+  function syncDamagedNote() {
+    const on = loadDamaged();
+    if (ui.dmgNote.hidden === !on) return;
+    ui.dmgNote.hidden = !on;
+    if (open) position();
   }
   function syncName() {
     const f = FMT[prefs.format]; if (!f) return;
@@ -418,6 +453,7 @@
     const full = fileName(), ext = extOf(f);
     if (!ui.name.dataset.touched || ui.name.dataset.fmt !== f.id) { ui.name.value = full.slice(0, -ext.length); ui.name.dataset.fmt = f.id; delete ui.name.dataset.touched; }
     ui.nameExt.textContent = ext;
+    syncDamagedNote();
     estimateSoon();
   }
 
@@ -461,7 +497,11 @@
     if (pickerOK()) {
       // Must be the first await in the click gesture (Chrome throws SecurityError after long async work).
       try {
-        handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: f.label + ' file', accept: { [f.mime]: [extOf(f)] } }] });
+        // Chrome rejects accept extensions with characters other than letters / digits / + / . ('.x_t' → TypeError, which
+        // silently turned every Parasolid save into a download), so those go without a type filter
+        const po = { suggestedName: name };
+        if (/^\.[a-z0-9+.]{1,16}$/i.test(extOf(f))) po.types = [{ description: f.label + ' file', accept: { [f.mime]: [extOf(f)] } }];
+        handle = await window.showSaveFilePicker(po);
       } catch (e) {
         if (e && e.name === 'AbortError') return;                 // user cancelled: quiet no-op, popover stays open
         handle = null;                                           // SecurityError etc.: fall back to a download
@@ -524,8 +564,13 @@
       out = writeFailedCard(name, f, opts, res, e);
     }
     running = null;
+    // partial load: a saved file is never green; the first line says to check it (other lines kept)
+    if (out.saved && resDamaged(res)) out = Object.assign({}, out, { tone: out.tone === 'err' ? 'err' : 'warn', lines: [DMG_LINE].concat(out.lines || []), damaged: true });
     out.format = f.id;
     finish(out, t);
+    ui.result.dataset.kind = 'export';
+    ui.result.dataset.delivery = '';
+    ui.result.dataset.damaged = out.damaged ? '1' : '';
     ui.result.dataset.cleanup = cleanup;                         // 'removed' | 'truncated' | 'failed' | '' (nothing to clean)
     ui.result.dataset.check = out.check || '';                   // 'download': big download, check card or check line
     ui.result.dataset.limit = out.limit ? '1' : '';                  // whole-model fitting limit card (no part rows)
@@ -720,7 +765,7 @@
     if (pct != null && isFinite(pct)) { ui.rBar.setAttribute('aria-valuenow', String(Math.round(pct))); ui.rBar.firstChild.style.width = Math.max(2, Math.min(100, pct)) + '%'; }
     if (p && p.label) { const b = ui.rBody.querySelector('p') || ui.rBody.appendChild(h('p')); b.textContent = p.label; ui.rBody.hidden = false; }
   }
-  function finish(out, t) {
+  function finish(out, t, evt) {
     ui.result.dataset.state = 'done';
     ui.result.dataset.status = out.status;
     ui.rBar.hidden = true; ui.rCancel.hidden = true; ui.rClose.hidden = false;
@@ -730,7 +775,86 @@
     const pl = (out.parts || []).map((p) => p.name + ': ' + p.what + (p.body ? (Array.isArray(p.body) ? ', bodies ' + p.body.join(' and ') : ' as ' + p.body) : '') + (p.why ? ', ' + p.why : '')).join('. ');
     say([sentence(out.title)].concat(lines, pl ? [sentence(pl)] : [], file ? [sentence(file)] : []).join(' ').replace(/\s{2,}/g, ' '));
     if (!document.activeElement || document.activeElement === document.body) (t || ui.result).focus({ preventScroll: true });
-    document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'done', format: out.format, status: out.status } }));
+    document.dispatchEvent(new CustomEvent(evt || 'pdf3d:export', { detail: { phase: 'done', format: out.format, status: out.status } }));
+  }
+
+  // ------------------------------------------------------------------ embedded files (Simple's attachment card)
+  // PDF3DExportFlow.saveAttachment(index, { button, label }) saves lastLoad.attachmentDetails[index] with the export
+  // machinery: Save-as picker first (suggestedName = fileName), createWritable() with one retry BEFORE calling
+  // PDF3D.saveAttachment(index, { writable, signal, onProgress }) (Dev streams into it and never closes it; this flow closes,
+  // green only after close() resolves, or aborts + removes the file on error). No picker (or both createWritable() attempts
+  // failed): called without a writable, its blob is downloaded. Picker cancel = no-op. Progress goes on the button
+  // ("Saving… N%"); the result uses the export result card (announced). Raw error text is never shown.
+  const ATT_UNREADABLE = 'The attached file couldn\u2019t be read from the PDF.';
+  const ATT_OTHER = 'Nothing was kept. Try again.';
+  let attRun = null;
+  function attFailCard(name, res, e) {
+    const unreadable = !!res && normCode(res.reasonCode) === 'attachment_unreadable';
+    const quota = !unreadable && (isQuota(e) || (!!res && quotaResult(res)));
+    return { tone: 'warn', status: 'attachment_failed', title: 'Couldn\u2019t save ' + name, lines: [unreadable ? ATT_UNREADABLE : quota ? WF_QUOTA : ATT_OTHER], quota };
+  }
+  async function saveAttachment(index, opts) {
+    const o = opts || {};
+    if (attRun || running) return { status: 'busy' };
+    const ll = NS().lastLoad || {}, a = (Array.isArray(ll.attachmentDetails) ? ll.attachmentDetails : [])[index];
+    const fn = NS().saveAttachment;
+    if (!a || typeof fn !== 'function') return { status: 'unavailable' };
+    const name0 = String(a.fileName || 'attachment-' + (index + 1) + '.bin');
+    const btn = o.button || null, label = o.label || (btn ? btn.textContent : '');
+    let handle = null, name = name0;
+    if (pickerOK()) {
+      // first await in the click gesture. Chrome only accepts accept-extensions of letters / digits / + / . (".x_t" throws a
+      // TypeError), so such types are left out instead of losing the picker
+      const ext = String(a.ext || (name0.match(/\.([^.]+)$/) || [])[1] || '').toLowerCase();
+      const mime = typeof a.mime === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(a.mime) ? a.mime : 'application/octet-stream';
+      const po = { suggestedName: name0 };
+      if (/^[a-z0-9+]{1,16}$/.test(ext)) po.types = [{ description: ext.toUpperCase() + ' file', accept: { [mime]: ['.' + ext] } }];
+      try { handle = await window.showSaveFilePicker(po); } catch (e) {
+        if (e && e.name === 'AbortError') return { status: 'cancelled' };   // user cancelled: nothing happens
+        handle = null;                                                   // SecurityError etc.: download instead
+      }
+      if (handle && handle.name) name = handle.name;
+    }
+    const run = attRun = { ctrl: new AbortController(), writable: null, index };
+    const setBtn = (pct) => { if (btn) btn.textContent = pct == null ? label : 'Saving\u2026 ' + pct + '%'; };
+    if (btn) { btn.setAttribute('aria-disabled', 'true'); btn.dataset.saving = '1'; }
+    setBtn(0);
+    let cleanup = '', dl = !handle;
+    if (handle) {
+      run.writable = await openWritable(handle);
+      if (!run.writable) { cleanup = await discard(handle, run); handle = null; dl = true; }
+    }
+    const onProgress = (p) => { const v = p && typeof p === 'object' ? +p.pct : NaN; if (isFinite(v)) setBtn(Math.max(0, Math.min(100, Math.round(v)))); };
+    let res = null, out = null;
+    try {
+      res = await fn.call(NS(), index, Object.assign({ signal: run.ctrl.signal, onProgress }, handle ? { writable: run.writable } : {}));
+      if (!res || res.status === 'cancelled') { if (handle) cleanup = await discard(handle, run); }
+      else if (res.status !== 'ok') { if (handle) cleanup = await discard(handle, run); out = attFailCard(name0, res, null); }
+      else {
+        const w = handle ? run.writable : null;
+        let fileName;
+        if (w) {
+          if (res.blob) await w.write(res.blob);                         // engine handed back a blob anyway: we write it
+          else if (res.delivery !== 'picker') throw new SaveError(null);
+          await w.close(); run.writable = null;                          // green only once close() has resolved
+          fileName = name;
+        } else if (res.blob) { fileName = res.filename || name0; download(res.blob, fileName); }
+        else throw new SaveError(null);
+        out = { tone: 'ok', status: 'attachment_saved', title: (dl ? 'Downloaded as ' : 'Saved as ') + fileName, lines: [] };
+      }
+    } catch (e) {
+      if (handle) cleanup = await discard(handle, run);
+      out = attFailCard(name0, res, e instanceof SaveError ? e.cause : e);
+    }
+    attRun = null;
+    if (btn) { btn.removeAttribute('aria-disabled'); delete btn.dataset.saving; }
+    setBtn(null);
+    if (!out) return { status: 'cancelled' };
+    stashed = false; close(false);
+    out.format = 'attachment';
+    finish(out, btn && btn.isConnected ? btn : trigger(), 'pdf3d:attachment');
+    Object.assign(ui.result.dataset, { kind: 'attachment', cleanup, check: '', limit: '', damaged: '', delivery: dl ? 'download' : 'picker' });
+    return { status: out.status, quota: !!out.quota, cleanup, delivery: dl ? 'download' : 'picker' };
   }
   function dismiss(giveFocus) {
     if (running || ui.result.hidden) { if (!running) stashed = false; return; }
@@ -819,9 +943,9 @@
   }
 
   // Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
-  // card says so once ("Saved as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
+  // card says so once ("Exported as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
   // lists no part rows. Triggers: top-level reasonCode fit_limit, every part fit_limit, or the engine's too-many-triangles text.
-  // Counts: summary.tris (else the reason text); limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).
+  // Counts: PDF3D.lastLoad.trisParsed (1.6.2), else summary.tris, else the reason text; limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).
   const LIMIT_TEXT = /too many (triangles|faces) to fit/i;
   function limitHit(res, parts) {
     if (codeOf(res.reasonCode) === 'fit_limit' || LIMIT_TEXT.test(String(res.reason || ''))) return true;
@@ -831,13 +955,15 @@
   const fmtK = (n) => (n >= 1e6 ? (Math.round(n / 1e5) / 10).toString().replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)));
   function limitLine(res) {
     const s = res.summary || {}, r = String(res.reason || '');
-    let tris = +s.tris > 0 ? +s.tris : numK(r.match(/(\d[\d.,]*)\s*([kKmM])?\s*triangles/));
+    // the count the fitting limit was checked against: lastLoad.trisParsed (1.6.2, before welding), else summary.tris, else the reason text
+    const ll = NS().lastLoad || {};
+    let tris = +ll.trisParsed > 0 ? +ll.trisParsed : +s.tris > 0 ? +s.tris : numK(r.match(/(\d[\d.,]*)\s*([kKmM])?\s*triangles/));
     const lim0 = NS().cadSurfaceLimits && NS().cadSurfaceLimits.maxFitTris;
     let lim = +s.fitLimit > 0 ? +s.fitLimit : +lim0 > 0 ? +lim0 : numK(r.match(/limit\D{0,12}?(\d[\d.,]*)\s*([kKmM])?/i));
     const bits = [isFinite(tris) && tris > 0 ? fmtK(tris) + ' triangles' : null, isFinite(lim) && lim > 0 ? 'limit ' + fmtK(lim) : null].filter(Boolean);
     return 'Too large to fit surfaces in the browser' + (bits.length ? ' (' + bits.join(', ') + ')' : '') + '.';
   }
-  const LIMIT_TITLE = 'Saved as mesh STEP';
+  const LIMIT_TITLE = 'Exported as mesh STEP';   // not 'Saved as': the file line says Saved as / Downloaded as
   // part rows only when the parts don't all share the one limit reason (some part has its own outcome)
   const limitRows = (parts, list) => (parts.every((p) => normCode(p.reasonCode) === 'fit_limit' || p.reasonCode == null) ? undefined : list);
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
@@ -938,9 +1064,9 @@
     ui.name.addEventListener('input', () => { ui.name.dataset.touched = '1'; });
   }
   window.PDF3DExportFlow = {
-    open: (b) => openPop(b || trigger()), close: () => close(true), select, save: doSave, dismiss: () => dismiss(false),
+    open: (b) => openPop(b || trigger()), close: () => close(true), select, save: doSave, dismiss: () => dismiss(false), saveAttachment,
     formats: () => FORMATS.filter(available).map((f) => f.id),
-    get state() { return { open, running: !!running, prefs: JSON.parse(JSON.stringify(prefs)), picker: pickerOK() }; },
+    get state() { return { open, running: !!running, savingAttachment: attRun ? attRun.index : null, prefs: JSON.parse(JSON.stringify(prefs)), picker: pickerOK() }; },
     storageKey: LS
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

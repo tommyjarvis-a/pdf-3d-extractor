@@ -1239,6 +1239,28 @@ body.sm-simple .sm-empty {
 .sm-empty > div[data-tone="warn"] .sm-empty-title { color: #fbbf24; }
 .sm-empty-line { display: block; line-height: 1.45; }
 .sm-empty-hint { display: block; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
+/* attachment card (lastLoad.attachmentDetails): cyan left border, one Save button per readable file */
+.sm-empty > div[data-tone="att"] { max-width: 460px; border-style: solid; border-left-width: 3px; border-left-color: var(--cyan); text-align: left; }
+.sm-att { display: grid; gap: 6px; margin-top: 6px; }
+.sm-att[hidden], .sm-att [hidden] { display: none !important; }
+.sm-att-line { display: block; line-height: 1.45; }
+.sm-att-line--warn { color: #fbbf24; }
+.sm-att-list { display: grid; gap: 6px; margin-top: 4px; }
+.sm-att-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sm-att-save { max-width: 330px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; justify-content: flex-start; }
+.sm-att-save[aria-disabled="true"] { opacity: .55; cursor: default; }
+.sm-att-save:focus-visible, .sm-att-more:focus-visible, .sm-damaged-x:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.sm-att-size { font: 500 11px var(--mono); color: var(--text-2); white-space: nowrap; }
+.sm-att-more { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--cyan); font: 600 11.5px var(--sans); cursor: pointer; }
+.sm-att-more:hover { text-decoration: underline; }
+/* partial load note beside the status chip (lastLoad.damaged) */
+.sm-damaged { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px 2px 8px; border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 999px; background: rgba(245, 158, 11, 0.08); color: #fbbf24; font-size: 11.5px; }
+.sm-damaged[hidden] { display: none !important; }
+.sm-damaged-ico { width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; background: var(--amber); color: #03101d; font: 700 9.5px var(--sans); }
+.sm-damaged-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-damaged-x { flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: 600 14px/1 var(--sans); cursor: pointer; }
+.sm-damaged-x:hover { background: rgba(245, 158, 11, 0.18); }
 
 /* ---------------------------------------------------------------- About dialog */
 .sm-dialog {
@@ -1331,6 +1353,8 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
   body.sm-simple .sm-pill .btn { padding: 0 11px; }
   body.sm-simple .sm-pill .sm-pill-v { display: none; }   /* current display mode lives in the menu */
   .sm-mi { min-height: 40px; }
+  .sm-att-save, .sm-att-more { min-height: 40px; }
+  .sm-damaged-x { width: 32px; height: 32px; }
   .sm-field .select-ctrl { min-height: 40px; }
   .sm-range input { height: 40px; }
   .sm-sec > summary { min-height: 40px; }
@@ -1361,6 +1385,12 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
 }
 @keyframes sm-pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes sm-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* narrow screens: the partial-load note wraps instead of truncating */
+@media (max-width: 720px) {
+  body.sm-simple .sm-doc { flex-wrap: wrap; }
+  .sm-damaged { border-radius: 10px; }
+  .sm-damaged-t { white-space: normal; }
+}
 
 </style>
 <style data-href="cad-export-ui.css">
@@ -1542,6 +1572,9 @@ body.xf-on.sm-simple .xf-retry[aria-disabled="true"] { color: var(--text-2); cur
 /* big-download warning (no save picker, estimate > 300 MB), just above Save */
 .xf-big { margin: 6px 8px 2px; padding: 6px 8px; border: 1px solid var(--amber); border-left-width: 3px; border-radius: 6px; overflow-wrap: anywhere; }
 .xf-big[hidden] { display: none; }
+/* partial-load note above Save (lastLoad.damaged): quieter than the big-download box */
+.xf-dmg { margin: 6px 8px 2px; padding: 5px 8px; border-left: 3px solid var(--amber); border-radius: 4px; background: rgba(245, 158, 11, 0.08); }
+.xf-dmg[hidden] { display: none; }
 .xf-go { min-width: 110px; justify-content: center; }
 .xf-go:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
@@ -1622,7 +1655,7 @@ body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple s
     <div class="brand">
       <div class="brand-badge">3D</div>
       <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.6.1</span></div>
+        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.6.2</span></div>
         <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
       </div>
     </div>
@@ -5026,7 +5059,7 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.1
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.2
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -5043,7 +5076,7 @@ void main() { gl_FragColor = uRGBA; }`;
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.6.1';
+  const APP_VERSION = '1.6.2';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -8756,8 +8789,9 @@ void main() { gl_FragColor = uRGBA; }`;
       const path = ap.decodePath ? `${ap.decodePath.toUpperCase()} • ` : '';
       const warns = ap.warnings || [];
       const cadAtt = (state.attachments || []).filter((a) => a.isCAD);
-      statusBadge.textContent = !state.streams.length && (state.attachments || []).length
-        ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${(cadAtt[0] || state.attachments[0]).name}`
+      const att0 = cadAtt[0] || (state.attachments || [])[0];   // shown by its sanitized save name (attachmentDetails[i].fileName)
+      statusBadge.textContent = !state.streams.length && att0
+        ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${attachmentFileName(att0, state.attachments.indexOf(att0))}`
         : !state.parts.length
         ? `${path}NO MESH${warns.length ? ' • ' + warns[0].slice(0, 120) : ''}`
         : bounds.allWatertight
@@ -9124,15 +9158,23 @@ void main() { gl_FragColor = uRGBA; }`;
   function partialNote() { return ((window.PDF3D && window.PDF3D.lastLoad) || {}).damaged ? PARTIAL_NOTE : null; }
   // 'part.x_t' -> 'part_partial.x_t' (suffix before the last extension; no extension -> appended)
   function partialName(name) { const m = /^(.*?)(\.[A-Za-z0-9_]+)$/.exec(name); return m && m[1] ? m[1] + '_partial' + m[2] : name + '_partial'; }
-  // 1.6.2: the default file name PDF3D.exportFormat(format, opts) will use (step mesh/stl/obj/iges/xt/raw), with _partial
-  // while lastLoad.damaged is set. Fitted/Both STEP results may come back as <stem>-surfaces[-only].stp; read result.filename.
-  function suggestedFileName(format, opts) {
+  // 1.6.2: the one file-name rule for PDF3D.exportFormat(format, opts) results and PDF3D.suggestedFileName (before the
+  // _partial suffix): step mesh <stem>.stp, step { body: 'fitted' } <stem>-surfaces-only.stp, { body: 'both' }
+  // <stem>-surfaces.stp (whatever the fit outcome, also the mesh fallbacks), stl <stem>.stl / { encoding: 'ascii' }
+  // <stem>-ascii.stl, obj, iges .igs, xt .x_t, raw .prc / .u3d (active stream). null for an unknown format.
+  function exportBaseName(format, opts) {
     const fmt = String(format || '').toLowerCase(), o = opts || {}, stem = stemName();
     const st = state.streams && state.streams[state.activeStreamIdx];
-    const ext = { step: '.stp', stl: '.stl', obj: '.obj', iges: '.igs', xt: '.x_t', raw: st && st.subtype === 'PRC' ? '.prc' : '.u3d' }[fmt];
+    if (fmt === 'step') return stem + (o.body === 'fitted' ? '-surfaces-only' : o.body === 'both' ? '-surfaces' : '') + '.stp';
+    const ext = { stl: '.stl', obj: '.obj', iges: '.igs', xt: '.x_t', raw: st && st.subtype === 'PRC' ? '.prc' : '.u3d' }[fmt];
     if (!ext) return null;
-    const name = stem + (fmt === 'stl' && o.encoding === 'ascii' ? '-ascii' : '') + ext;
-    return partialNote() ? partialName(name) : name;
+    return stem + (fmt === 'stl' && o.encoding === 'ascii' ? '-ascii' : '') + ext;
+  }
+  // the name PDF3D.exportFormat(format, opts) will give its file (same opts: step body, stl encoding), with _partial while
+  // lastLoad.damaged is set; e.g. for showSaveFilePicker's suggestedName
+  function suggestedFileName(format, opts) {
+    const name = exportBaseName(format, opts);
+    return name && partialNote() ? partialName(name) : name;
   }
   function stemName() {
     return (state.fileName || 'cad-3d-pdf-assembly').replace(/\.(pdf|u3d|prc)$/i, '');
@@ -9708,7 +9750,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const cleanReason = r.reason ? String(r.reason).replace(/\. Fitted-only export:.*$/, '') : null;
     if (!fittedOnly) return { ...r, summary };   // 'both': the engine already wrote fitted bodies + every mesh body
 
-    const filename = `${stem}.stp`;
+    const filename = exportBaseName('step', { body: 'fitted' });   // the merged file's FILE_NAME = the result name (no _partial)
     const left = parts.filter((p) => p.written === 'mesh');
     if (!solids.length && !left.length) {
       return { blob: null, filename: null, status: 'skipped', reasonCode: engineCode || 'no_fit', reason: cleanReason, summary };
@@ -9729,7 +9771,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const bsize = blob._parts ? null : blob.size;
     progress({ stage: 'write', pct: 100, label: 'Done', bytes: bsize, totalBytes: bsize });
     const status = solids.length === parts.length ? 'solid' : solids.length ? 'partial' : 'mesh_only';
-    return { ...(blob._parts ? { ...blob, blob: null } : { blob }), filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
+    return { ...(blob._parts ? { ...blob, blob: null } : { blob }), filename, status,
       reasonCode: status === 'solid' ? null : (engineCode || (parts.some((p) => p.status === 'shell') ? 'open_shell' : 'no_fit')),
       reason: status === 'solid' ? null : cleanReason, summary };
   }
@@ -9809,6 +9851,7 @@ void main() { gl_FragColor = uRGBA; }`;
   //   suggestedName (1.6.2): = filename on every result that has one (the name to offer in a save dialog / download).
   async function exportFormat(format, opts) {
     const r = await exportFormatDeliver(format, opts);
+    if (r && r.filename) r.filename = exportBaseName(format, opts) || r.filename;   // one rule with suggestedFileName
     const damaged = ((window.PDF3D && window.PDF3D.lastLoad) || {}).damaged;
     if (r && damaged && (r.status === 'ok' || r.status === 'mesh_only' || r.delivery)) {
       r.damaged = damaged; r.summary = { ...(r.summary || {}), damaged };   // copy: summary objects can be shared
@@ -10678,11 +10721,16 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.menuExport.append(h('div', { class: 'sm-pop-h', text: 'Export as' }), ui.exportItems, h('hr', { class: 'sm-sep' }),
       h('div', { class: 'sm-pop-h', text: 'Export settings' }), ui.settingsBox);
 
+    // partial load (lastLoad.damaged): quiet amber note beside the status chip, tied to the current lastLoad
+    ui.dmgText = h('span', { class: 'sm-damaged-t' });
+    ui.dmgX = h('button', { type: 'button', class: 'sm-damaged-x', 'aria-label': 'Dismiss note', title: 'Dismiss', text: '\u00d7',
+      onclick: () => { ui.dmgDismissed = (window.PDF3D || {}).lastLoad; syncDamaged(); if (ui.btnOpen) ui.btnOpen.focus({ preventScroll: true }); } });
+    ui.dmg = h('span', { class: 'sm-damaged', role: 'note', 'data-sm': 'damaged-note', hidden: true }, h('span', { class: 'sm-damaged-ico', 'aria-hidden': 'true', text: '!' }), ui.dmgText, ui.dmgX);
     ui.topbar = h('header', { class: 'sm-topbar', 'aria-label': 'Simple mode toolbar' },
       h('div', { class: 'sm-brand' },
         h('div', { class: 'brand-badge', 'aria-hidden': 'true', text: '3D' }),
         h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
-      h('div', { class: 'sm-doc' }, ui.docName, ui.status),
+      h('div', { class: 'sm-doc' }, ui.docName, ui.status, ui.dmg),
       h('div', { class: 'sm-actions' },
         ui.btnOpen, ui.btnMore,
         h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret),
@@ -10774,7 +10822,8 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.emptyTitle = h('strong', { class: 'sm-empty-title', hidden: true });
     ui.emptyLine = h('span', { class: 'sm-empty-line', hidden: true });
     ui.emptyText = h('span', { text: 'Drop a 3D PDF here or click Open' });
-    ui.emptyCard = h('div', null, ui.emptyTitle, ui.emptyLine, ui.emptyText);
+    ui.attBox = h('div', { class: 'sm-att', 'data-sm': 'attachments', hidden: true });
+    ui.emptyCard = h('div', null, ui.emptyTitle, ui.emptyLine, ui.attBox, ui.emptyText);
     ui.empty = h('div', { class: 'sm-empty', hidden: true }, ui.emptyCard);
     if (wrap) wrap.append(ui.pill, ui.empty, ui.dropVeil);
 
@@ -10828,6 +10877,8 @@ void main() { gl_FragColor = uRGBA; }`;
     // ---------- live mirrors of original state
     observe($('docFileName'), () => { ui.docName.textContent = $('docFileName').textContent; ui.docName.title = ui.docName.textContent; syncEmpty(); });
     observe($('statusBadge'), syncStatus);
+    // a new PDF3D.lastLoad without a badge change (stream switch, test stubs): re-read it
+    document.addEventListener('pdf3d:lastload', () => syncStatus());
     observe($('partList'), syncPartCount, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
     ($('partList') || document).addEventListener('change', () => setTimeout(syncPartCount, 0));
     observe($('btnExportSTEP'), () => { ui.btnExportMain.disabled = !!$('btnExportSTEP').disabled; }, { attributes: true, attributeFilter: ['disabled'] });
@@ -10981,7 +11032,14 @@ void main() { gl_FragColor = uRGBA; }`;
     // A decode error's raw text stays in the console (app.js console.error + syncEmpty's console.warn); the chip's
     // hover text uses the approved card line instead.
     const ll = (window.PDF3D || {}).lastLoad;
-    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : t + (b.title ? '\n' + b.title : '');
+    let tip = t + (b.title ? '\n' + b.title : '');
+    // the damaged-load warning text stays in the console (syncDamaged); the note beside the chip says it in plain words
+    const dmg = ll && typeof ll.damaged === 'string' ? ll.damaged.trim() : '';
+    if (dmg) tip = tip.split('\n').filter((l) => l.trim() !== dmg).join('\n');
+    // NO 3D STREAM: the badge carries the raw attachment name; Simple shows the sanitized fileName (attachment card line)
+    const ac = /NO 3D STREAM/.test(t) ? attCard(ll) : null;
+    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : ac ? ac.lines[0] : tip;
+    syncDamaged();
     syncEmpty();
   }
   function syncDisplay() {
@@ -11057,8 +11115,14 @@ void main() { gl_FragColor = uRGBA; }`;
     if (card && ll.reasonCode === 'DECODE_ERROR' && warnedLoad !== ll) { warnedLoad = ll; console.warn('[PDF3D] 3D decode error:', ll.detail); }
     ui.emptyCard.dataset.tone = card ? card.tone : '';
     ui.emptyTitle.hidden = ui.emptyLine.hidden = !card;
+    // embedded files (1.6.2 attachmentDetails): NO_3D becomes the attachment card; other load cards keep their own
+    // title and line and list the files under it
+    const att = card ? attCard(ll) : null;
+    if (att && ll.reasonCode === 'NO_3D') { card.tone = 'att'; card.title = att.title; card.line = att.lines[0]; }
+    if (att) ui.emptyCard.dataset.tone = card.tone;
     ui.emptyTitle.textContent = card ? card.title : '';
     ui.emptyLine.textContent = card ? card.line : '';
+    renderAtt(att, ll, att && ll.reasonCode === 'NO_3D');
     ui.emptyText.className = card ? 'sm-empty-hint' : '';
     ui.emptyText.textContent = card
       ? 'Drop another 3D PDF here or click Open.'
@@ -11079,6 +11143,117 @@ void main() { gl_FragColor = uRGBA; }`;
         line: 'The PDF has a 3D model, but part of it is damaged or saved in an unexpected way.' };
       default: return null;
     }
+  }
+
+  // ------------------------------------------------------------------ attachment card (lastLoad.attachmentDetails)
+  // Names shown are always attachmentDetails[i].fileName (Dev's sanitized save name), never the raw PDF name.
+  function attList(ll) { return ll && Array.isArray(ll.attachmentDetails) ? ll.attachmentDetails : []; }
+  const attName = (a, i) => String((a && typeof a.fileName === 'string' && a.fileName) || `attachment-${i + 1}.bin`);
+  function humanSize(n) {
+    n = Math.max(0, +n || 0);
+    if (n < 1024) return n + (n === 1 ? ' byte' : ' bytes');
+    const u = ['KB', 'MB', 'GB', 'TB']; let v = n / 1024, k = 0;
+    while (v >= 1024 && k < u.length - 1) { v /= 1024; k++; }
+    const r = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+    return (r >= 1024 && k < u.length - 1 ? (r / 1024).toFixed(1) + ' ' + u[k + 1] : r + ' ' + u[k]);
+  }
+  // up to 3 names, then "and {k} more": a / a and b / a, b and c / a, b, c and 5 more
+  function nameList(names) {
+    if (names.length <= 1) return names.join('');
+    if (names.length <= 3) return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    return names.slice(0, 3).join(', ') + ' and ' + (names.length - 3) + ' more';
+  }
+  function attCard(ll) {
+    const atts = attList(ll);
+    if (!atts.length) return null;
+    const all = atts.map((a, i) => ({ i, a: a || {}, name: attName(a, i), bad: !!(a && a.error) }));
+    const ordered = all.filter((x) => x.a.isCAD).concat(all.filter((x) => !x.a.isCAD));   // CAD first, PDF order within
+    const one = all.length === 1 && all[0].a.isCAD && !all[0].bad;
+    const lines = [one ? `This PDF has ${all[0].name} (${humanSize(all[0].a.size)}) attached.`
+      : `It has ${all.length} attached file${all.length === 1 ? '' : 's'}: ${nameList(ordered.map((x) => x.name))}.`];
+    for (const x of ordered) if (x.bad) lines.push(`${x.name} couldn\u2019t be read.`);
+    return { tone: 'att', title: one ? 'No 3D model, but a CAD file is attached' : 'No 3D model in this PDF', lines,
+      items: ordered.filter((x) => !x.bad), one };
+  }
+  function renderAtt(att, ll, titled) {
+    const box = ui.attBox;
+    if (!att) { box.hidden = true; box.textContent = ''; ui.attFor = null; return; }
+    box.hidden = false;
+    // rebuild only for a new load or new content (syncEmpty runs on every DOM change; a rebuild would drop focus and progress)
+    const sig = att.lines.join('\n') + '\n' + att.items.map((x) => x.i + ':' + x.name + ':' + x.a.size).join('|');
+    if (ui.attFor === ll && ui.attSig === sig && box.dataset.titled === String(!!titled)) return;
+    ui.attFor = ll; ui.attSig = sig; box.dataset.titled = String(!!titled); box.textContent = '';
+    // lines: under the attachment title the first line is already ui.emptyLine; under another load card all lines go here
+    for (const l of titled ? att.lines.slice(1) : att.lines) {
+      box.append(h('span', { class: 'sm-att-line' + (/couldn\u2019t be read\.$/.test(l) ? ' sm-att-line--warn' : ''), text: l }));
+    }
+    const items = att.items;
+    if (!items.length) return;
+    const list = h('div', { class: 'sm-att-list', id: 'smAttList', role: 'list', 'aria-label': 'Attached files' });
+    const rows = items.map((x, k) => {
+      const label = `Save ${x.name}`;
+      const sz = h('span', { class: 'sm-att-size', id: 'smAttSz' + x.i, text: humanSize(x.a.size) });
+      const btn = h('button', { type: 'button', class: 'btn ' + (k === 0 ? 'btn-primary ' : '') + 'sm-att-save', 'data-att': String(x.i),
+        'aria-describedby': 'smAttSz' + x.i, text: label });
+      btn.dataset.label = label;
+      btn.addEventListener('click', () => saveAtt(x, btn));
+      const row = h('div', { class: 'sm-att-row', role: 'listitem' }, btn, sz);
+      if (k >= 3) row.hidden = true;
+      list.append(row);
+      return row;
+    });
+    box.append(list);
+    if (items.length > 3) {
+      const more = h('button', { type: 'button', class: 'sm-att-more', 'aria-expanded': 'false', 'aria-controls': 'smAttList', 'data-sm': 'att-more',
+        text: `Show all ${items.length}` });
+      more.addEventListener('click', () => {
+        const open = more.getAttribute('aria-expanded') !== 'true';
+        more.setAttribute('aria-expanded', String(open));
+        more.textContent = open ? 'Show fewer' : `Show all ${items.length}`;
+        rows.forEach((r, k) => { if (k >= 3) r.hidden = !open; });
+        if (open && rows[3]) rows[3].querySelector('button').focus({ preventScroll: true });
+      });
+      box.append(more);
+    }
+  }
+  function saveAtt(x, btn) {
+    if (ui.attBusy || btn.getAttribute('aria-disabled') === 'true') return;
+    const XF = window.PDF3DExportFlow;
+    const btns = [...ui.attBox.querySelectorAll('.sm-att-save')];
+    const busy = (on) => { ui.attBusy = on; for (const b of btns) if (b !== btn) { if (on) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled'); } };
+    busy(true);
+    let p;
+    // the Save-as picker, streaming, close / abort and the result card live in export-flow.js (same machinery as exports)
+    if (XF && typeof XF.saveAttachment === 'function') p = XF.saveAttachment(x.i, { button: btn, label: btn.dataset.label });
+    else p = plainDownload(x);
+    Promise.resolve(p).catch(() => {}).then(() => busy(false));
+  }
+  // no export-flow.js: plain download of the engine's blob (no card; errors only go to the console)
+  async function plainDownload(x) {
+    const NS = window.PDF3D || {};
+    if (typeof NS.saveAttachment !== 'function') return;
+    const r = await NS.saveAttachment(x.i, {});
+    if (!r || r.status !== 'ok' || !r.blob) { console.warn('[PDF3D] attachment not saved:', r && r.reasonCode); return; }
+    const url = URL.createObjectURL(r.blob);
+    const a = h('a', { href: url, download: r.filename || x.name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+
+  // ------------------------------------------------------------------ partial (damaged) load note
+  var warnedDamaged = null;
+  function syncDamaged() {
+    if (!ui.dmg) return;
+    const ll = (window.PDF3D || {}).lastLoad;
+    const raw = ll && ll.status === 'ok' && typeof ll.damaged === 'string' ? ll.damaged.trim() : '';
+    if (raw && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
+    const on = !!raw && ui.dmgDismissed !== ll;
+    ui.dmg.hidden = !on;
+    if (!on) return;
+    const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
+    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} part${n === 1 ? '' : 's'} loaded.`
+      : 'Part of this model couldn\u2019t be read, so some parts may be missing.';
+    if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }
 
   // ------------------------------------------------------------------ About dialog
@@ -11785,8 +11960,17 @@ void main() { gl_FragColor = uRGBA; }`;
  * Every export ends in a visible result card that stays until dismissed or the next export starts; it is hidden while the
  * Export popover is open (it would cover Save) and comes back if the popover closes without a new export.
  *
- * API: window.PDF3DExportFlow = { open(), close(), select(fmt), save(), dismiss(), state, formats(), storageKey }
- * Event: 'pdf3d:export' on document, detail { phase: 'start'|'done', format, status }.
+ * Partial loads (PDF3D.partialNote() non-null, else lastLoad.damaged on an 'ok' load, or damaged / summary.damaged on the export result): the suggested name
+ * gets "_partial" before the extension (part_partial.x_t, part-ascii_partial.stl; PDF3D.suggestedFileName when the engine has it), the popover shows "Only part of this model
+ * loaded. The file may be missing parts." above Save, and a card for a saved file is amber (never green) with the first
+ * line "This model was only partly read. Check it against the drawing before using it." (other lines kept).
+ * Fitting-limit card: title "Exported as mesh STEP"; the triangle count is lastLoad.trisParsed, else summary.tris, else
+ * parsed from the reason.
+ * Embedded files: saveAttachment(index, { button, label }) — Simple's attachment card Save buttons (see the function).
+ *
+ * API: window.PDF3DExportFlow = { open(), close(), select(fmt), save(), dismiss(), saveAttachment(i, o), state, formats(), storageKey }
+ * Events: 'pdf3d:export' on document, detail { phase: 'start'|'done', format, status }; 'pdf3d:attachment' { phase: 'done',
+ *   format: 'attachment', status: 'attachment_saved'|'attachment_failed' }.
  */
 (function () {
   'use strict';
@@ -11920,6 +12104,7 @@ void main() { gl_FragColor = uRGBA; }`;
       ui.optsWrap = h('div', { class: 'xf-opts-wrap' }, h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', id: 'xfOptH', text: 'Options' }), ui.opts),
       h('hr', { class: 'sm-sep' }), ui.nameRow,
       ui.big = h('p', { class: 'xf-note xf-note--warn xf-big', 'data-xf': 'big-note', role: 'note', hidden: true }),
+      ui.dmgNote = h('p', { class: 'xf-note xf-note--warn xf-dmg', 'data-xf': 'damaged-note', role: 'note', hidden: true, text: DMG_NOTE }),
       h('div', { class: 'xf-foot' }, ui.go));
 
     // Safari never focuses a pressed button: ignore focus loss while a pointer is down in the popover
@@ -11970,7 +12155,7 @@ void main() { gl_FragColor = uRGBA; }`;
     if (!simpleMode()) return;
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
-    renderList(); renderOpts();
+    renderList(); renderOpts(); syncDamagedNote();
     if (!ui.result.hidden) { ui.result.hidden = true; stashed = true; }
     ui.pop.hidden = false;
     open = true;
@@ -12148,10 +12333,35 @@ void main() { gl_FragColor = uRGBA; }`;
   const mb = (b) => (b / 1e6).toFixed(1).replace(/\.0$/, '');
   function sel() { const s = appState(); const i = s && s.selectedPartIdx; return typeof i === 'number' && i >= 0 && s.parts && i < s.parts.length ? [i] : null; }
 
+  // 1.6.2 (9ba8d26): PDF3D.suggestedFileName(format, opts) is the engine's own default name (with _partial while the load is
+  // damaged), so the dialog offers what exportFormat will call the file. Older engines: the same rule locally.
   function fileName() {
     const f = FMT[prefs.format];
+    const dev = NS().suggestedFileName;
+    if (typeof dev === 'function') {
+      try { const n = dev.call(NS(), f.id, { encoding: prefs.stl.enc }); if (nonEmpty(n)) return n.trim(); } catch (e) { /* fall back */ }
+    }
     const suffix = f.id === 'stl' && prefs.stl.enc === 'ascii' ? '-ascii' : '';
-    return stem() + suffix + extOf(f);
+    return stem() + suffix + (loadDamaged() ? '_partial' : '') + extOf(f);   // part-ascii_partial.stl, like the engine
+  }
+  // ------------------------------------------------------------------ partial (damaged) loads
+  // lastLoad.damaged (1.6.2, 'ok' loads only) = some of the model couldn't be read. Exports from such a load get a _partial
+  // file name, a note in the popover and an amber card. Export results may carry it too (damaged / summary.damaged).
+  const DMG_NOTE = 'Only part of this model loaded. The file may be missing parts.';
+  const DMG_LINE = 'This model was only partly read. Check it against the drawing before using it.';
+  const nonEmpty = (v) => typeof v === 'string' && !!v.trim();
+  // 1.6.2 (9ba8d26): PDF3D.partialNote() (note text while damaged, else null) is the trigger; older engines: lastLoad.damaged
+  function loadDamaged() {
+    const pn = NS().partialNote;
+    if (typeof pn === 'function') { try { return nonEmpty(pn.call(NS())); } catch (e) { /* fall back */ } }
+    const ll = NS().lastLoad; return !!(ll && ll.status === 'ok' && nonEmpty(ll.damaged));
+  }
+  function resDamaged(res) { return !!(res && (nonEmpty(res.damaged) || (res.summary && nonEmpty(res.summary.damaged)))) || loadDamaged(); }
+  function syncDamagedNote() {
+    const on = loadDamaged();
+    if (ui.dmgNote.hidden === !on) return;
+    ui.dmgNote.hidden = !on;
+    if (open) position();
   }
   function syncName() {
     const f = FMT[prefs.format]; if (!f) return;
@@ -12161,6 +12371,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const full = fileName(), ext = extOf(f);
     if (!ui.name.dataset.touched || ui.name.dataset.fmt !== f.id) { ui.name.value = full.slice(0, -ext.length); ui.name.dataset.fmt = f.id; delete ui.name.dataset.touched; }
     ui.nameExt.textContent = ext;
+    syncDamagedNote();
     estimateSoon();
   }
 
@@ -12204,7 +12415,11 @@ void main() { gl_FragColor = uRGBA; }`;
     if (pickerOK()) {
       // Must be the first await in the click gesture (Chrome throws SecurityError after long async work).
       try {
-        handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: f.label + ' file', accept: { [f.mime]: [extOf(f)] } }] });
+        // Chrome rejects accept extensions with characters other than letters / digits / + / . ('.x_t' → TypeError, which
+        // silently turned every Parasolid save into a download), so those go without a type filter
+        const po = { suggestedName: name };
+        if (/^\.[a-z0-9+.]{1,16}$/i.test(extOf(f))) po.types = [{ description: f.label + ' file', accept: { [f.mime]: [extOf(f)] } }];
+        handle = await window.showSaveFilePicker(po);
       } catch (e) {
         if (e && e.name === 'AbortError') return;                 // user cancelled: quiet no-op, popover stays open
         handle = null;                                           // SecurityError etc.: fall back to a download
@@ -12267,8 +12482,13 @@ void main() { gl_FragColor = uRGBA; }`;
       out = writeFailedCard(name, f, opts, res, e);
     }
     running = null;
+    // partial load: a saved file is never green; the first line says to check it (other lines kept)
+    if (out.saved && resDamaged(res)) out = Object.assign({}, out, { tone: out.tone === 'err' ? 'err' : 'warn', lines: [DMG_LINE].concat(out.lines || []), damaged: true });
     out.format = f.id;
     finish(out, t);
+    ui.result.dataset.kind = 'export';
+    ui.result.dataset.delivery = '';
+    ui.result.dataset.damaged = out.damaged ? '1' : '';
     ui.result.dataset.cleanup = cleanup;                         // 'removed' | 'truncated' | 'failed' | '' (nothing to clean)
     ui.result.dataset.check = out.check || '';                   // 'download': big download, check card or check line
     ui.result.dataset.limit = out.limit ? '1' : '';                  // whole-model fitting limit card (no part rows)
@@ -12463,7 +12683,7 @@ void main() { gl_FragColor = uRGBA; }`;
     if (pct != null && isFinite(pct)) { ui.rBar.setAttribute('aria-valuenow', String(Math.round(pct))); ui.rBar.firstChild.style.width = Math.max(2, Math.min(100, pct)) + '%'; }
     if (p && p.label) { const b = ui.rBody.querySelector('p') || ui.rBody.appendChild(h('p')); b.textContent = p.label; ui.rBody.hidden = false; }
   }
-  function finish(out, t) {
+  function finish(out, t, evt) {
     ui.result.dataset.state = 'done';
     ui.result.dataset.status = out.status;
     ui.rBar.hidden = true; ui.rCancel.hidden = true; ui.rClose.hidden = false;
@@ -12473,7 +12693,86 @@ void main() { gl_FragColor = uRGBA; }`;
     const pl = (out.parts || []).map((p) => p.name + ': ' + p.what + (p.body ? (Array.isArray(p.body) ? ', bodies ' + p.body.join(' and ') : ' as ' + p.body) : '') + (p.why ? ', ' + p.why : '')).join('. ');
     say([sentence(out.title)].concat(lines, pl ? [sentence(pl)] : [], file ? [sentence(file)] : []).join(' ').replace(/\s{2,}/g, ' '));
     if (!document.activeElement || document.activeElement === document.body) (t || ui.result).focus({ preventScroll: true });
-    document.dispatchEvent(new CustomEvent('pdf3d:export', { detail: { phase: 'done', format: out.format, status: out.status } }));
+    document.dispatchEvent(new CustomEvent(evt || 'pdf3d:export', { detail: { phase: 'done', format: out.format, status: out.status } }));
+  }
+
+  // ------------------------------------------------------------------ embedded files (Simple's attachment card)
+  // PDF3DExportFlow.saveAttachment(index, { button, label }) saves lastLoad.attachmentDetails[index] with the export
+  // machinery: Save-as picker first (suggestedName = fileName), createWritable() with one retry BEFORE calling
+  // PDF3D.saveAttachment(index, { writable, signal, onProgress }) (Dev streams into it and never closes it; this flow closes,
+  // green only after close() resolves, or aborts + removes the file on error). No picker (or both createWritable() attempts
+  // failed): called without a writable, its blob is downloaded. Picker cancel = no-op. Progress goes on the button
+  // ("Saving… N%"); the result uses the export result card (announced). Raw error text is never shown.
+  const ATT_UNREADABLE = 'The attached file couldn\u2019t be read from the PDF.';
+  const ATT_OTHER = 'Nothing was kept. Try again.';
+  let attRun = null;
+  function attFailCard(name, res, e) {
+    const unreadable = !!res && normCode(res.reasonCode) === 'attachment_unreadable';
+    const quota = !unreadable && (isQuota(e) || (!!res && quotaResult(res)));
+    return { tone: 'warn', status: 'attachment_failed', title: 'Couldn\u2019t save ' + name, lines: [unreadable ? ATT_UNREADABLE : quota ? WF_QUOTA : ATT_OTHER], quota };
+  }
+  async function saveAttachment(index, opts) {
+    const o = opts || {};
+    if (attRun || running) return { status: 'busy' };
+    const ll = NS().lastLoad || {}, a = (Array.isArray(ll.attachmentDetails) ? ll.attachmentDetails : [])[index];
+    const fn = NS().saveAttachment;
+    if (!a || typeof fn !== 'function') return { status: 'unavailable' };
+    const name0 = String(a.fileName || 'attachment-' + (index + 1) + '.bin');
+    const btn = o.button || null, label = o.label || (btn ? btn.textContent : '');
+    let handle = null, name = name0;
+    if (pickerOK()) {
+      // first await in the click gesture. Chrome only accepts accept-extensions of letters / digits / + / . (".x_t" throws a
+      // TypeError), so such types are left out instead of losing the picker
+      const ext = String(a.ext || (name0.match(/\.([^.]+)$/) || [])[1] || '').toLowerCase();
+      const mime = typeof a.mime === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(a.mime) ? a.mime : 'application/octet-stream';
+      const po = { suggestedName: name0 };
+      if (/^[a-z0-9+]{1,16}$/.test(ext)) po.types = [{ description: ext.toUpperCase() + ' file', accept: { [mime]: ['.' + ext] } }];
+      try { handle = await window.showSaveFilePicker(po); } catch (e) {
+        if (e && e.name === 'AbortError') return { status: 'cancelled' };   // user cancelled: nothing happens
+        handle = null;                                                   // SecurityError etc.: download instead
+      }
+      if (handle && handle.name) name = handle.name;
+    }
+    const run = attRun = { ctrl: new AbortController(), writable: null, index };
+    const setBtn = (pct) => { if (btn) btn.textContent = pct == null ? label : 'Saving\u2026 ' + pct + '%'; };
+    if (btn) { btn.setAttribute('aria-disabled', 'true'); btn.dataset.saving = '1'; }
+    setBtn(0);
+    let cleanup = '', dl = !handle;
+    if (handle) {
+      run.writable = await openWritable(handle);
+      if (!run.writable) { cleanup = await discard(handle, run); handle = null; dl = true; }
+    }
+    const onProgress = (p) => { const v = p && typeof p === 'object' ? +p.pct : NaN; if (isFinite(v)) setBtn(Math.max(0, Math.min(100, Math.round(v)))); };
+    let res = null, out = null;
+    try {
+      res = await fn.call(NS(), index, Object.assign({ signal: run.ctrl.signal, onProgress }, handle ? { writable: run.writable } : {}));
+      if (!res || res.status === 'cancelled') { if (handle) cleanup = await discard(handle, run); }
+      else if (res.status !== 'ok') { if (handle) cleanup = await discard(handle, run); out = attFailCard(name0, res, null); }
+      else {
+        const w = handle ? run.writable : null;
+        let fileName;
+        if (w) {
+          if (res.blob) await w.write(res.blob);                         // engine handed back a blob anyway: we write it
+          else if (res.delivery !== 'picker') throw new SaveError(null);
+          await w.close(); run.writable = null;                          // green only once close() has resolved
+          fileName = name;
+        } else if (res.blob) { fileName = res.filename || name0; download(res.blob, fileName); }
+        else throw new SaveError(null);
+        out = { tone: 'ok', status: 'attachment_saved', title: (dl ? 'Downloaded as ' : 'Saved as ') + fileName, lines: [] };
+      }
+    } catch (e) {
+      if (handle) cleanup = await discard(handle, run);
+      out = attFailCard(name0, res, e instanceof SaveError ? e.cause : e);
+    }
+    attRun = null;
+    if (btn) { btn.removeAttribute('aria-disabled'); delete btn.dataset.saving; }
+    setBtn(null);
+    if (!out) return { status: 'cancelled' };
+    stashed = false; close(false);
+    out.format = 'attachment';
+    finish(out, btn && btn.isConnected ? btn : trigger(), 'pdf3d:attachment');
+    Object.assign(ui.result.dataset, { kind: 'attachment', cleanup, check: '', limit: '', damaged: '', delivery: dl ? 'download' : 'picker' });
+    return { status: out.status, quota: !!out.quota, cleanup, delivery: dl ? 'download' : 'picker' };
   }
   function dismiss(giveFocus) {
     if (running || ui.result.hidden) { if (!running) stashed = false; return; }
@@ -12562,9 +12861,9 @@ void main() { gl_FragColor = uRGBA; }`;
   }
 
   // Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
-  // card says so once ("Saved as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
+  // card says so once ("Exported as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
   // lists no part rows. Triggers: top-level reasonCode fit_limit, every part fit_limit, or the engine's too-many-triangles text.
-  // Counts: summary.tris (else the reason text); limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).
+  // Counts: PDF3D.lastLoad.trisParsed (1.6.2), else summary.tris, else the reason text; limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).
   const LIMIT_TEXT = /too many (triangles|faces) to fit/i;
   function limitHit(res, parts) {
     if (codeOf(res.reasonCode) === 'fit_limit' || LIMIT_TEXT.test(String(res.reason || ''))) return true;
@@ -12574,13 +12873,15 @@ void main() { gl_FragColor = uRGBA; }`;
   const fmtK = (n) => (n >= 1e6 ? (Math.round(n / 1e5) / 10).toString().replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)));
   function limitLine(res) {
     const s = res.summary || {}, r = String(res.reason || '');
-    let tris = +s.tris > 0 ? +s.tris : numK(r.match(/(\d[\d.,]*)\s*([kKmM])?\s*triangles/));
+    // the count the fitting limit was checked against: lastLoad.trisParsed (1.6.2, before welding), else summary.tris, else the reason text
+    const ll = NS().lastLoad || {};
+    let tris = +ll.trisParsed > 0 ? +ll.trisParsed : +s.tris > 0 ? +s.tris : numK(r.match(/(\d[\d.,]*)\s*([kKmM])?\s*triangles/));
     const lim0 = NS().cadSurfaceLimits && NS().cadSurfaceLimits.maxFitTris;
     let lim = +s.fitLimit > 0 ? +s.fitLimit : +lim0 > 0 ? +lim0 : numK(r.match(/limit\D{0,12}?(\d[\d.,]*)\s*([kKmM])?/i));
     const bits = [isFinite(tris) && tris > 0 ? fmtK(tris) + ' triangles' : null, isFinite(lim) && lim > 0 ? 'limit ' + fmtK(lim) : null].filter(Boolean);
     return 'Too large to fit surfaces in the browser' + (bits.length ? ' (' + bits.join(', ') + ')' : '') + '.';
   }
-  const LIMIT_TITLE = 'Saved as mesh STEP';
+  const LIMIT_TITLE = 'Exported as mesh STEP';   // not 'Saved as': the file line says Saved as / Downloaded as
   // part rows only when the parts don't all share the one limit reason (some part has its own outcome)
   const limitRows = (parts, list) => (parts.every((p) => normCode(p.reasonCode) === 'fit_limit' || p.reasonCode == null) ? undefined : list);
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
@@ -12681,9 +12982,9 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.name.addEventListener('input', () => { ui.name.dataset.touched = '1'; });
   }
   window.PDF3DExportFlow = {
-    open: (b) => openPop(b || trigger()), close: () => close(true), select, save: doSave, dismiss: () => dismiss(false),
+    open: (b) => openPop(b || trigger()), close: () => close(true), select, save: doSave, dismiss: () => dismiss(false), saveAttachment,
     formats: () => FORMATS.filter(available).map((f) => f.id),
-    get state() { return { open, running: !!running, prefs: JSON.parse(JSON.stringify(prefs)), picker: pickerOK() }; },
+    get state() { return { open, running: !!running, savingAttachment: attRun ? attRun.index : null, prefs: JSON.parse(JSON.stringify(prefs)), picker: pickerOK() }; },
     storageKey: LS
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

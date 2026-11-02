@@ -1,6 +1,8 @@
 # Changelog
 
-## 1.6.2 (unreleased)
+## 1.6.2 (alpha) — 2026-11-01
+
+Alpha: Simple mode now handles PDFs without a 3D model but with embedded files, and partial (damaged) loads. Its wording may still change.
 
 ### Added
 - **`PDF3D.saveAttachment(index, opts)`** saves embedded file `lastLoad.attachmentDetails[index]` exactly as embedded
@@ -20,7 +22,7 @@
   made a file (every format, `'picker'` and `'download'`, also `WRITE_FAILED`) carries **`damaged`** and
   **`summary.damaged`** (= `lastLoad.damaged`), and its **`filename`** gets `_partial` before the extension
   (`part_partial.x_t`). New **`result.suggestedName`** (= `filename`), **`PDF3D.suggestedFileName(format, opts)`** (the
-  default name before exporting, `_partial` while damaged) and **`PDF3D.partialNote()`**. STEP (mesh, fitted, both) gets
+  name the export will use, `_partial` while damaged; see Changed) and **`PDF3D.partialNote()`**. STEP (mesh, fitted, both) gets
   the second `FILE_DESCRIPTION` string `'PARTIAL: some 3D data in the source PDF could not be read; check against the
   drawing'`, IGES the same note as extra Start-section lines, Parasolid `.x_t` two free-text header lines under
   `**PART3;` right above `**END_OF_HEADER` (split at the `;`, each ≤ 80 characters; the size estimate counts them); STL,
@@ -28,6 +30,14 @@
   byte-identical to before. `saveAttachment` is unaffected (embedded files do not depend on the 3D decode).
   `test/run.js` checks every format both ways on x05 and x10, and that the same export with `damaged` cleared differs
   only by the note.
+- **Attachment card on the Simple no-3D screen (simple-mode, Designer).** When a load has no 3D model but embedded files,
+  the empty screen lists them by `fileName` (never the raw name) and offers "Save {name}" through
+  `PDF3D.saveAttachment` (Save-as picker, `createWritable()` with one retry, else a download), with a green / amber
+  result card.
+- **Partial-load note in Simple mode (simple-mode / export-flow, Designer).** A damaged `'ok'` load shows a dismissable
+  amber note ("Part of this model couldn’t be read, so only N parts loaded."); the Export popover warns before Save, the
+  Save dialog uses `PDF3D.suggestedFileName` (`…_partial.…`), and the result card for a written file is amber with
+  "This model was only partly read. Check it against the drawing before using it."
 - **Attachment fixtures** `x06_attachments_mixed.pdf`, `x07_attachments_aesv2.pdf`, `x08_attachments_rc4.pdf`,
   `x09_attachments_eff_aesv2.pdf` (tools/make-damaged-fixtures.js). Their expect.json entries pin `attachmentDetails`
   and the source sha256 of every attachment. `test/run.js` saves every attachment of every corpus file both ways and
@@ -41,6 +51,16 @@
   obj, glb/gltf, dwg/dxf, 3dm, asm, par, ifc and the other mesh/drawing formats of 1.6.1's list no longer count).
 - The Attachments panel shows each file under its sanitized `fileName` (it showed the raw `../../evil:name?.sat`), and
   Save uses that name and the attachment's MIME type. `attachmentDetails[].name` / `attachments` stay the raw PDF names.
+- **One file-name rule for `exportFormat` results and `PDF3D.suggestedFileName(format, opts)`** (same opts): STEP
+  `{ body: 'fitted' }` → `<stem>-surfaces-only.stp`, `{ body: 'both' }` → `<stem>-surfaces.stp`, mesh → `<stem>.stp`, also
+  when the fit falls back to mesh (`browser_unsupported`, fit limit) or merges mesh leftovers into a fitted file
+  (`<stem>.stp` before; its `FILE_NAME` matches). STL `{ encoding: 'ascii' }` → `<stem>-ascii.stl`; `_partial` while
+  damaged. `test/run.js` checks `result.filename === suggestedFileName(format, opts)` for every format and mode.
+- Advanced `#statusBadge` ("NO 3D STREAM • … ATTACHMENT: {name}") shows the sanitized `fileName`, not the raw PDF name
+  (Designer's note).
+- README `saveAttachment` sample retries `createWritable()` once, as export-flow does.
+- Designer's `export-flow.js/.css` and `simple-mode.js/.css` from b1555e2.
+- CAD worker cache key `1.6.2-w1`.
 - **Damaged U3D loads what decodes** (Tester's 1.6.1 fuzz): a block that fails to decode is skipped instead of failing the
   whole stream, and a block header that is not U3D (impossible type, metadata or data past the end) is skipped with a
   resync to the next valid pair of block headers. g01-zero0.3 / zero0.6 failed completely while a truncated tail loaded
@@ -48,6 +68,9 @@
   `DECODE_ERROR` to `'ok'` (81 parts, `damaged` set) for the same reason; its expect entry is updated.
 
 ### Fixed
+- **Parasolid Save as no longer turns into a download in Chrome (export-flow, Designer).** Chrome's
+  `showSaveFilePicker` throws a TypeError for `.x_t` in the `types` filter, so every Parasolid Save as silently fell
+  back to a browser download. The picker now gets a type filter only for extensions of letters, digits and `+`.
 - **STEP strings are encoded per ISO 10303-21** in every STEP writer (mesh, fitted, Both, step-merge): `FILE_NAME`,
   `FILE_DESCRIPTION` and the mesh writer's part names double `'` and `\` and write other non-printable-ASCII characters
   as `\X2\…\X0\` (`\X4\…\X0\` beyond the BMP). A PDF named `O'Brien bracket – ø20 ü.pdf` produced an unterminated

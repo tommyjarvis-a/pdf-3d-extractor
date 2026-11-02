@@ -348,6 +348,28 @@ body.sm-simple .sm-empty {
 .sm-empty > div[data-tone="warn"] .sm-empty-title { color: #fbbf24; }
 .sm-empty-line { display: block; line-height: 1.45; }
 .sm-empty-hint { display: block; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
+/* attachment card (lastLoad.attachmentDetails): cyan left border, one Save button per readable file */
+.sm-empty > div[data-tone="att"] { max-width: 460px; border-style: solid; border-left-width: 3px; border-left-color: var(--cyan); text-align: left; }
+.sm-att { display: grid; gap: 6px; margin-top: 6px; }
+.sm-att[hidden], .sm-att [hidden] { display: none !important; }
+.sm-att-line { display: block; line-height: 1.45; }
+.sm-att-line--warn { color: #fbbf24; }
+.sm-att-list { display: grid; gap: 6px; margin-top: 4px; }
+.sm-att-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sm-att-save { max-width: 330px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; justify-content: flex-start; }
+.sm-att-save[aria-disabled="true"] { opacity: .55; cursor: default; }
+.sm-att-save:focus-visible, .sm-att-more:focus-visible, .sm-damaged-x:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.sm-att-size { font: 500 11px var(--mono); color: var(--text-2); white-space: nowrap; }
+.sm-att-more { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--cyan); font: 600 11.5px var(--sans); cursor: pointer; }
+.sm-att-more:hover { text-decoration: underline; }
+/* partial load note beside the status chip (lastLoad.damaged) */
+.sm-damaged { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px 2px 8px; border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 999px; background: rgba(245, 158, 11, 0.08); color: #fbbf24; font-size: 11.5px; }
+.sm-damaged[hidden] { display: none !important; }
+.sm-damaged-ico { width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; background: var(--amber); color: #03101d; font: 700 9.5px var(--sans); }
+.sm-damaged-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-damaged-x { flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: 600 14px/1 var(--sans); cursor: pointer; }
+.sm-damaged-x:hover { background: rgba(245, 158, 11, 0.18); }
 
 /* ---------------------------------------------------------------- About dialog */
 .sm-dialog {
@@ -440,6 +462,8 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
   body.sm-simple .sm-pill .btn { padding: 0 11px; }
   body.sm-simple .sm-pill .sm-pill-v { display: none; }   /* current display mode lives in the menu */
   .sm-mi { min-height: 40px; }
+  .sm-att-save, .sm-att-more { min-height: 40px; }
+  .sm-damaged-x { width: 32px; height: 32px; }
   .sm-field .select-ctrl { min-height: 40px; }
   .sm-range input { height: 40px; }
   .sm-sec > summary { min-height: 40px; }
@@ -470,3 +494,9 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
 }
 @keyframes sm-pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes sm-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* narrow screens: the partial-load note wraps instead of truncating */
+@media (max-width: 720px) {
+  body.sm-simple .sm-doc { flex-wrap: wrap; }
+  .sm-damaged { border-radius: 10px; }
+  .sm-damaged-t { white-space: normal; }
+}

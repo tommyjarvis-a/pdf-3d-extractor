@@ -66,6 +66,9 @@ body.xf-on.sm-simple .xf-retry[aria-disabled="true"] { color: var(--text-2); cur
 /* big-download warning (no save picker, estimate > 300 MB), just above Save */
 .xf-big { margin: 6px 8px 2px; padding: 6px 8px; border: 1px solid var(--amber); border-left-width: 3px; border-radius: 6px; overflow-wrap: anywhere; }
 .xf-big[hidden] { display: none; }
+/* partial-load note above Save (lastLoad.damaged): quieter than the big-download box */
+.xf-dmg { margin: 6px 8px 2px; padding: 5px 8px; border-left: 3px solid var(--amber); border-radius: 4px; background: rgba(245, 158, 11, 0.08); }
+.xf-dmg[hidden] { display: none; }
 .xf-go { min-width: 110px; justify-content: center; }
 .xf-go:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 

@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.1
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.2
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.6.1';
+  const APP_VERSION = '1.6.2';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -3729,8 +3729,9 @@
       const path = ap.decodePath ? `${ap.decodePath.toUpperCase()} • ` : '';
       const warns = ap.warnings || [];
       const cadAtt = (state.attachments || []).filter((a) => a.isCAD);
-      statusBadge.textContent = !state.streams.length && (state.attachments || []).length
-        ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${(cadAtt[0] || state.attachments[0]).name}`
+      const att0 = cadAtt[0] || (state.attachments || [])[0];   // shown by its sanitized save name (attachmentDetails[i].fileName)
+      statusBadge.textContent = !state.streams.length && att0
+        ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${attachmentFileName(att0, state.attachments.indexOf(att0))}`
         : !state.parts.length
         ? `${path}NO MESH${warns.length ? ' • ' + warns[0].slice(0, 120) : ''}`
         : bounds.allWatertight
@@ -4097,15 +4098,23 @@
   function partialNote() { return ((window.PDF3D && window.PDF3D.lastLoad) || {}).damaged ? PARTIAL_NOTE : null; }
   // 'part.x_t' -> 'part_partial.x_t' (suffix before the last extension; no extension -> appended)
   function partialName(name) { const m = /^(.*?)(\.[A-Za-z0-9_]+)$/.exec(name); return m && m[1] ? m[1] + '_partial' + m[2] : name + '_partial'; }
-  // 1.6.2: the default file name PDF3D.exportFormat(format, opts) will use (step mesh/stl/obj/iges/xt/raw), with _partial
-  // while lastLoad.damaged is set. Fitted/Both STEP results may come back as <stem>-surfaces[-only].stp; read result.filename.
-  function suggestedFileName(format, opts) {
+  // 1.6.2: the one file-name rule for PDF3D.exportFormat(format, opts) results and PDF3D.suggestedFileName (before the
+  // _partial suffix): step mesh <stem>.stp, step { body: 'fitted' } <stem>-surfaces-only.stp, { body: 'both' }
+  // <stem>-surfaces.stp (whatever the fit outcome, also the mesh fallbacks), stl <stem>.stl / { encoding: 'ascii' }
+  // <stem>-ascii.stl, obj, iges .igs, xt .x_t, raw .prc / .u3d (active stream). null for an unknown format.
+  function exportBaseName(format, opts) {
     const fmt = String(format || '').toLowerCase(), o = opts || {}, stem = stemName();
     const st = state.streams && state.streams[state.activeStreamIdx];
-    const ext = { step: '.stp', stl: '.stl', obj: '.obj', iges: '.igs', xt: '.x_t', raw: st && st.subtype === 'PRC' ? '.prc' : '.u3d' }[fmt];
+    if (fmt === 'step') return stem + (o.body === 'fitted' ? '-surfaces-only' : o.body === 'both' ? '-surfaces' : '') + '.stp';
+    const ext = { stl: '.stl', obj: '.obj', iges: '.igs', xt: '.x_t', raw: st && st.subtype === 'PRC' ? '.prc' : '.u3d' }[fmt];
     if (!ext) return null;
-    const name = stem + (fmt === 'stl' && o.encoding === 'ascii' ? '-ascii' : '') + ext;
-    return partialNote() ? partialName(name) : name;
+    return stem + (fmt === 'stl' && o.encoding === 'ascii' ? '-ascii' : '') + ext;
+  }
+  // the name PDF3D.exportFormat(format, opts) will give its file (same opts: step body, stl encoding), with _partial while
+  // lastLoad.damaged is set; e.g. for showSaveFilePicker's suggestedName
+  function suggestedFileName(format, opts) {
+    const name = exportBaseName(format, opts);
+    return name && partialNote() ? partialName(name) : name;
   }
   function stemName() {
     return (state.fileName || 'cad-3d-pdf-assembly').replace(/\.(pdf|u3d|prc)$/i, '');
@@ -4681,7 +4690,7 @@
     const cleanReason = r.reason ? String(r.reason).replace(/\. Fitted-only export:.*$/, '') : null;
     if (!fittedOnly) return { ...r, summary };   // 'both': the engine already wrote fitted bodies + every mesh body
 
-    const filename = `${stem}.stp`;
+    const filename = exportBaseName('step', { body: 'fitted' });   // the merged file's FILE_NAME = the result name (no _partial)
     const left = parts.filter((p) => p.written === 'mesh');
     if (!solids.length && !left.length) {
       return { blob: null, filename: null, status: 'skipped', reasonCode: engineCode || 'no_fit', reason: cleanReason, summary };
@@ -4702,7 +4711,7 @@
     const bsize = blob._parts ? null : blob.size;
     progress({ stage: 'write', pct: 100, label: 'Done', bytes: bsize, totalBytes: bsize });
     const status = solids.length === parts.length ? 'solid' : solids.length ? 'partial' : 'mesh_only';
-    return { ...(blob._parts ? { ...blob, blob: null } : { blob }), filename: r.filename && solids.length && !left.length ? r.filename : filename, status,
+    return { ...(blob._parts ? { ...blob, blob: null } : { blob }), filename, status,
       reasonCode: status === 'solid' ? null : (engineCode || (parts.some((p) => p.status === 'shell') ? 'open_shell' : 'no_fit')),
       reason: status === 'solid' ? null : cleanReason, summary };
   }
@@ -4782,6 +4791,7 @@
   //   suggestedName (1.6.2): = filename on every result that has one (the name to offer in a save dialog / download).
   async function exportFormat(format, opts) {
     const r = await exportFormatDeliver(format, opts);
+    if (r && r.filename) r.filename = exportBaseName(format, opts) || r.filename;   // one rule with suggestedFileName
     const damaged = ((window.PDF3D && window.PDF3D.lastLoad) || {}).damaged;
     if (r && damaged && (r.status === 'ok' || r.status === 'mesh_only' || r.delivery)) {
       r.damaged = damaged; r.summary = { ...(r.summary || {}), damaged };   // copy: summary objects can be shared

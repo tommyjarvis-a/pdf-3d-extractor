@@ -13,7 +13,7 @@ Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECM
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.6.1 decodes
+## What 1.6.2 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|
@@ -203,8 +203,11 @@ bytes), for example from the `NO_3D` card's "Save {name}" button. Delivery works
 
 ```js
 const d = PDF3D.lastLoad.attachmentDetails[i];
-const h = await showSaveFilePicker({ suggestedName: d.fileName }); const w = await h.createWritable();
-const r = await PDF3D.saveAttachment(i, { writable: w, signal, onProgress });
+const h = await showSaveFilePicker({ suggestedName: d.fileName });
+let w = null;   // createWritable() once more if the first attempt rejects (as export-flow does)
+for (let k = 0; k < 2 && !w; k++) { try { w = await h.createWritable(); } catch (e) { /* retry once */ } }
+// both attempts failed: remove the empty picked file (h.remove(), Chrome 110+) and save without a writable (download)
+const r = await PDF3D.saveAttachment(i, w ? { writable: w, signal, onProgress } : { signal, onProgress });
 // opts.writable    -> written in ~1 MiB Uint8Array pieces, no Blob:
 //                     { status: 'ok', reasonCode: null, reason: null, blob: null, delivery: 'picker', size, name, filename, mime }
 // no opts.writable -> { status: 'ok', reasonCode: null, reason: null, blob, delivery: 'download', size, name, filename, mime }
