@@ -390,13 +390,23 @@ function syntheticAttachmentPDF(names) {
     check(A.renamePart(0, '  Flange A ') === 'Flange A' && A.renamePart(1, 'Flange A') === 'Flange A_2' && A.renamePart(2, ' \u202e\u0007 ') === null && A.renamePart(2, 'Mesh_3') === null
       && A.renamePart(3, 'Bolt\u202e\tM8') === 'BoltM8' && A.renamePart(99, 'x') === null, `renamePart rules: ${st.parts.map((p) => p.name).join(',')}`);
     { const obj = (await exportText(window, 'obj')).dl.toString('latin1'), stp = (await exportText(window, 'step')).dl.toString('latin1'), asc = (await exportText(window, 'stl', { encoding: 'ascii' })).dl.toString('latin1');
-      check(/^o Flange A$/m.test(obj) && /^o Flange A_2$/m.test(obj) && /^o Mesh_3$/m.test(obj) && /^o BoltM8$/m.test(obj) && !/Mesh_1|Flanged_Bearing/.test(obj), 'renamed names not in OBJ');
+      check(/^o Flange_A$/m.test(obj) && /^o Flange_A_2$/m.test(obj) && /^o Mesh_3$/m.test(obj) && /^o BoltM8$/m.test(obj) && !/Mesh_1|Flanged_Bearing/.test(obj), 'renamed names not in OBJ');
       check(stp.includes("'Flange A'") && stp.includes("'Flange A_2'") && !/Flanged_Bearing|'Mesh_1'/.test(stp), 'renamed names not in STEP');
       check(/^solid CAD_3D_PDF_Assembly$/m.test(asc) && !/Flange|Mesh_/.test(asc), 'ASCII STL should write no body names (one assembly solid)'); }
     await api.activateStream(1); await api.activateStream(0);
     check(api.getState().parts[0].name === 'Flange A', 'rename not kept when switching streams');
     A.renamePart(0, 'Mesh_1'); A.renamePart(1, 'Mesh_2'); A.renamePart(3, 'Mesh_4');
     check(api.getState().parts.map((p) => p.name).join(',') === 'Mesh_1,Mesh_2,Mesh_3,Mesh_4', 'rename back to the defaults');
+    // 1.8.0 QA: OBJ names are one token (L1); HTML in a name stays plain text in the data and is escaped in every HTML template (M1)
+    { const XSS = `<img src=x onerror=alert(1)>"'&`;
+      check(A.renamePart(0, 'a b\t#c') === 'a b#c' && A.renamePart(1, XSS) === XSS, 'rename keeps spaces / # / HTML characters as text');
+      const obj = (await exportText(window, 'obj')).dl.toString('utf8');
+      check(/^o a_b_c$/m.test(obj) && /^g a_b_c$/m.test(obj) && obj.includes(`o <img_src=x_onerror=alert(1)>"'&\n`), 'OBJ o/g names: whitespace and # -> _');
+      A.renamePart(0, 'Mesh_1'); A.renamePart(1, 'Mesh_2');
+      const appSrc = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+      const tpl = [...appSrc.matchAll(/(?:innerHTML|insertAdjacentHTML)\s*(?:=|\()([\s\S]*?);\n/g)].map((m) => m[1]).join('\n');
+      const raw = [...tpl.matchAll(/\$\{\s*((?:ft|st|p|a|n|r|att|part)\.[A-Za-z_.]+)\s*\}/g)].map((m) => m[1]).filter((v) => !/^(st\.rawBytes|a\.size|r\.counts)/.test(v));
+      check(!raw.length && /\$\{escHTML\(ft\.partName\)\}/.test(appSrc) && /\$\{escHTML\(ft\.label\)\}/.test(appSrc) && /\$\{escHTML\(st\.title\)\}/.test(appSrc), 'unescaped name / label in an HTML template: ' + raw.join(', ')); }
     // selection: one at a time, -1 / out of range clears; visibility
     A.selectPart(2); const s2 = api.getState().selectedPartIdx; A.selectPart(1); const s1 = api.getState().selectedPartIdx; A.selectPart(-1); const s0 = api.getState().selectedPartIdx; A.selectPart(42);
     check(s2 === 2 && s1 === 1 && s0 === -1 && api.getState().selectedPartIdx === -1, `selectPart ${s2} ${s1} ${s0} ${api.getState().selectedPartIdx}`);

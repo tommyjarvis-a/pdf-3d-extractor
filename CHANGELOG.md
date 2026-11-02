@@ -32,6 +32,13 @@ triangle limit. Exports are byte-identical to 1.7.0 except where a body name is 
 - Selection highlight is a clearer cyan tint (both renderers).
 - Worker cache key is now `1.8.0-w1`.
 
+### Fixed (QA gate a60f9d0)
+- Body names, feature labels and stream / file names are HTML-escaped in the Info sheet (features and streams lists);
+  a renamed body or a file named like HTML could inject markup before.
+- Double-clicking a name renames that row even when the face panel of a row above collapses on the first click.
+- OBJ `o` / `g` names are one token: whitespace and `#` become `_` (only names you type can contain them).
+- A Mesh-type body that still has some CAD face data shows its face counts instead of the "no CAD face data" line.
+
 ## 1.7.0 (alpha) — 2026-11-02
 
 Alpha: carries the 1.6.2 release candidate (below), a Simple-mode viewer refresh, and Simple as the only UI (the

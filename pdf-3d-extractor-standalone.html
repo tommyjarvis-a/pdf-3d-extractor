@@ -7491,8 +7491,9 @@ void main() { gl_FragColor = uRGBA; }`;
     const n = [0, 0, 0];
     for (const p of visibleParts) {
       const { vx, tv, nt, nv } = p.brep;
-      out.push(`o ${p.name}`);
-      out.push(`g ${p.name}`);
+      const on = objName(p.name);   // L1: one token per name (whitespace / '#' -> '_'), else importers split or cut it
+      out.push(`o ${on}`);
+      out.push(`g ${on}`);
       for (let i = 0; i < nv; i++) {
         if (out.pending) yield out.take();
         out.push(`v ${fmtNum(vx[3 * i] * scale)} ${fmtNum(vx[3 * i + 1] * scale)} ${fmtNum(vx[3 * i + 2] * scale)}`);
@@ -8076,6 +8077,9 @@ void main() { gl_FragColor = uRGBA; }`;
   // -------------------------------------------------------------------------
   // 10. UI Panels, Inspector Drawer & File Export Triggers
   // -------------------------------------------------------------------------
+  function objName(n) {
+    return String(n == null ? '' : n).replace(/[\s#]/g, '_') || 'body';
+  }
   function escHTML(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -8172,10 +8176,10 @@ void main() { gl_FragColor = uRGBA; }`;
         item.className = `stream-item${idx === state.activeStreamIdx ? ' active' : ''}`;
         item.innerHTML = `
           <div class="stream-meta">
-            <div class="stream-name">${st.title}</div>
-            <div class="stream-sub">Filter: /${st.filter} • Raw: ${(st.rawBytes.length / 1024).toFixed(1)} KB</div>
+            <div class="stream-name">${escHTML(st.title)}</div>
+            <div class="stream-sub">Filter: /${escHTML(st.filter)} • Raw: ${(st.rawBytes.length / 1024).toFixed(1)} KB</div>
           </div>
-          <span class="badge ${st.subtype === 'PRC' ? 'badge-emerald' : 'badge-cyan'}">${st.subtype}</span>
+          <span class="badge ${st.subtype === 'PRC' ? 'badge-emerald' : 'badge-cyan'}">${escHTML(st.subtype)}</span>
         `;
         item.addEventListener('click', () => activateStream(idx));
         streamListEl.appendChild(item);
@@ -8232,10 +8236,10 @@ void main() { gl_FragColor = uRGBA; }`;
       featureList.innerHTML = allFeatures.map((ft) => `
         <div class="feature-item">
           <div>
-            <strong>${ft.label}</strong>
-            <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);">${ft.partName}</div>
+            <strong>${escHTML(ft.label)}</strong>
+            <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);">${escHTML(ft.partName)}</div>
           </div>
-          <code>${ft.type}</code>
+          <code>${escHTML(ft.type)}</code>
         </div>
       `).join('');
     }
@@ -8402,11 +8406,23 @@ void main() { gl_FragColor = uRGBA; }`;
 
   let renaming = null;     // { idx, input } while a name is being edited
   let rowClickTimer = 0;   // a click on the selected row toggles its face panel after the double-click window
+  // M2: the row whose name got the first click of a possible double-click. Selecting that row can collapse the face
+  // panel of a row above it, so the second click (and the dblclick) can land on another element; rename this one.
+  let nameClick = null;
+  const NAME_DBL_MS = 600;
+  function onListDblClickCapture(ev) {
+    const nc = nameClick; nameClick = null;
+    if (!nc || performance.now() - nc.t > NAME_DBL_MS || ev.target.closest && ev.target.closest('.part-name-edit, .part-eye')) return;
+    if (state.parts[nc.idx] !== nc.part) return;   // the list changed (other stream / file) in between
+    ev.stopPropagation(); ev.preventDefault();
+    startRename(nc.idx);
+  }
   function renderPartList() {
     const el = document.getElementById('partList');
     if (!el) return;
     renaming = null;
     clearTimeout(rowClickTimer);
+    if (!el.dataset.renameBound) { el.dataset.renameBound = '1'; el.addEventListener('dblclick', onListDblClickCapture, true); }
     el.innerHTML = '';
     if (!state.parts.length) return;
     const head = document.createElement('div');
@@ -8440,6 +8456,7 @@ void main() { gl_FragColor = uRGBA; }`;
         if (ev.target.closest && ev.target.closest('.part-eye, .part-name-edit, .part-feat')) return;
         clearTimeout(rowClickTimer);
         if (ev.detail > 1) return;                    // 2nd click of a double-click
+        nameClick = ev.detail === 1 && ev.target.closest && ev.target.closest('.part-name') ? { idx, part: p, t: performance.now() } : null;
         if (state.selectedPartIdx !== idx) { selectPart(idx, 'list'); return; }
         // the selected row again: collapse / expand its face panel (C3), unless this turns out to be a double-click
         rowClickTimer = setTimeout(() => { state.facePanelOpen = !state.facePanelOpen; syncPartSelection(); }, ev.detail === 0 ? 0 : 260);
@@ -8482,9 +8499,12 @@ void main() { gl_FragColor = uRGBA; }`;
     const msg = (t, cls) => { box.innerHTML = `<div class="part-feat-msg${cls ? ' ' + cls : ''}">${escHTML(t)}</div>`; return box; };
     if (!p) return msg('');
     const kind = p.kind || bodyKind(p, state.streams[state.activeStreamIdx]);
-    if (kind === 'Mesh') return msg("This body is a mesh with no CAD face data, so face types can't be detected.");
     const api = window.PDF3D && window.PDF3D.faceTypes;
     const r = typeof api === 'function' ? api(idx) : { status: 'unavailable', reason: 'single_file' };
+    // L4: a Mesh-type body can still carry a little PRC face data (e.g. one tessellated face); show its counts when the
+    // worker found any, the mesh line otherwise
+    if (kind === 'Mesh' && (!r || r.status === 'none' || r.status === 'unavailable' || r.status === 'error'))
+      return msg("This body is a mesh with no CAD face data, so face types can't be detected.");
     if (!r || r.status === 'none') return msg("No CAD face data in this body, so face types can't be detected.");
     if (r.status === 'unavailable') return msg(FACE_UNAVAILABLE[r.reason] || FACE_UNAVAILABLE.browser_unsupported);
     if (r.status === 'pending') return msg('Finding face types…', 'is-pending');
