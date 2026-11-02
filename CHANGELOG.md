@@ -42,6 +42,12 @@ Advanced UI is removed). Exports are byte-identical to 1.6.2.
 - The STEP text preview, the `.x_t` text preview / entity table (`?xt=1`), Copy Preview and the raw 3D stream block list.
 - Units, body type and reduce detail live only in the Export dialog (same values and defaults as before).
 
+### Fixed (before release)
+- View → Top / Front / Right have their full hover titles again: **Top (XY)**, **Front (XZ)**, **Right (YZ)**.
+- On-screen wording says **body / bodies** instead of "part(s)" to match Solid Bodies / Bodies Detected (damaged-load
+  note, Show all N bodies, export result cards, Leave unfitted bodies out, OBJ "Mesh with body groups", messages and
+  progress). Text written into exported files, reason codes and API fields are unchanged.
+
 ## 1.6.2 (alpha) — 2026-11-01
 
 Alpha: Simple mode now handles PDFs without a 3D model but with embedded files, and partial (damaged) loads. Its wording may still change.
