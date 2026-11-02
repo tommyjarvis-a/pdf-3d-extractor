@@ -457,6 +457,49 @@ void main() { gl_FragColor = uRGBA; }`;
     this.stats.gpuBytes = total;
   };
 
+  // 1.8.0: the selected body's emissive cyan tint (B1; was rgb(28,38,45) in 1.7.0); app.js's Canvas 2D fallback matches it
+  const SEL_ADD = [16 / 255, 66 / 255, 82 / 255];
+
+  // v.pick(x, y) -> part index under CSS pixel (x, y) of the canvas in the last drawn frame, nearest first; -1 for empty space.
+  // CPU ray-cast against the same preview triangles the GPU drew (same MVP, so it matches the picture in both projections).
+  VP.pick = function (x, y) {
+    const P = this._pickInfo; if (!P) return -1;
+    const M = P.M, C = P.C, w = P.w, h = P.h;
+    let best = -1, bestZ = Infinity;
+    const sx = new Float64Array(3), sy = new Float64Array(3), sz = new Float64Array(3);
+    for (const it of P.items) {
+      const g = it.g, vx = g.vx, tv = g.tv, nt = g.nt != null ? g.nt : (tv.length / 3) | 0, o = it.offset || [0, 0, 0];
+      const nv = (vx.length / 3) | 0;
+      const px = new Float64Array(nv), py = new Float64Array(nv), pz = new Float64Array(nv), ok = new Uint8Array(nv);
+      let anyIn = false;
+      for (let i = 0; i < nv; i++) {
+        const X = vx[3 * i] + o[0] - C[0], Y = vx[3 * i + 1] + o[1] - C[1], Z = vx[3 * i + 2] + o[2] - C[2];
+        const cw = M[3] * X + M[7] * Y + M[11] * Z + M[15];
+        if (!(cw > 1e-9)) continue;
+        px[i] = ((M[0] * X + M[4] * Y + M[8] * Z + M[12]) / cw + 1) * 0.5 * w;
+        py[i] = (1 - (M[1] * X + M[5] * Y + M[9] * Z + M[13]) / cw) * 0.5 * h;
+        pz[i] = (M[2] * X + M[6] * Y + M[10] * Z + M[14]) / cw; ok[i] = 1; anyIn = true;
+      }
+      if (!anyIn) continue;
+      for (let t = 0; t < nt; t++) {
+        const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
+        if (!ok[a] || !ok[b] || !ok[c]) continue;
+        sx[0] = px[a]; sx[1] = px[b]; sx[2] = px[c];
+        if ((x < sx[0] && x < sx[1] && x < sx[2]) || (x > sx[0] && x > sx[1] && x > sx[2])) continue;
+        sy[0] = py[a]; sy[1] = py[b]; sy[2] = py[c];
+        if ((y < sy[0] && y < sy[1] && y < sy[2]) || (y > sy[0] && y > sy[1] && y > sy[2])) continue;
+        const d = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
+        if (Math.abs(d) < 1e-12) continue;
+        const l1 = ((x - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (y - sy[0])) / d;
+        const l2 = ((sx[1] - sx[0]) * (y - sy[0]) - (x - sx[0]) * (sy[1] - sy[0])) / d;
+        if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+        const z = pz[a] + l1 * (pz[b] - pz[a]) + l2 * (pz[c] - pz[a]);
+        if (z < bestZ && z >= -1) { bestZ = z; best = it.pIdx; }
+      }
+    }
+    return best;
+  };
+
   VP._draw = function () {
     const s = this.scene, gl = this.gl, canvas = this.canvas;
     if (!s || this.lost || gl.isContextLost()) return;
@@ -525,6 +568,8 @@ void main() { gl_FragColor = uRGBA; }`;
     const offOf = (origin, off) => [origin[0] + off[0] - C[0], origin[1] + off[1] - C[1], origin[2] + off[2] - C[2]];
 
     const mode = s.renderMode || 'shaded-edges', sel = s.selectedPartIdx;
+    // 1.8.0 viewport picking (v.pick): what this frame drew, in CSS px
+    this._pickInfo = { M, C, w, h, items: items.map((it) => ({ g: it.g, pIdx: it.pIdx, offset: it.offset })) };
 
     // 1. datum grid (background, not depth tested, like the legacy view)
     if (s.grid) this._drawGrid(s.grid, M, C, !!s.lightBg);
@@ -549,7 +594,7 @@ void main() { gl_FragColor = uRGBA; }`;
         gl.uniform3fv(pf.u.uOff, offOf(e.origin, it.offset));
         gl.uniform3fv(pf.u.uColor, it.color);
         gl.uniform1f(pf.u.uFaceShift, (it.pIdx * 2) % 6);
-        gl.uniform3fv(pf.u.uSelAdd, sel === it.pIdx ? [28 / 255, 38 / 255, 45 / 255] : [0, 0, 0]);
+        gl.uniform3fv(pf.u.uSelAdd, sel === it.pIdx ? SEL_ADD : [0, 0, 0]);
         this._bindDraw(pf, f, gl.TRIANGLES);
       }
       gl.disable(gl.POLYGON_OFFSET_FILL);

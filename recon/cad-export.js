@@ -23,7 +23,7 @@
 
   const LIMITS = {
     maxTris: 1000000,    // above: 'too_large' (skipped) - the WASM heap would run out (2-4 GB limit)
-    maxFitTris: 200000,  // above: mesh body only (fitting would take many minutes and >1.5 GB)
+    warnFitTris: 200000, // 1.8.0: above this the export flow warns before fitting (slow, may crash the tab) - it never blocks
   };
   const KERNEL_BYTES = 13719175;  // gzip transfer size of opencascade.full.wasm (50.3 MB raw)
   const LS_KEY = 'pdf3d.cadKernel';
@@ -77,12 +77,10 @@
     const fittable = !!(stream && stream.subtype === 'PRC' && stream.rawBytes && parsed && parsed.decodePath !== 'sample');
     let mode = 'fit', cause = null;
     if (!fittable) { mode = 'mesh_only'; cause = noFaceDataCause(stream); }
-    else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; cause = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + ')'; }
     // why: the preflight / mesh_only text; cause: the same without the mesh clause (fitted-only skips write nothing)
     // model-wide reason no part was fitted (1.6.1, summary.fitSkippedReason): the card can show one line instead of per-part rows
-    const skip = mode === 'fit' ? { fitSkippedReason: null }
-      : fittable ? { fitSkippedReason: 'too_many_tris', fitSkippedTris: tris, fitSkippedLimit: LIMITS.maxFitTris }
-        : { fitSkippedReason: 'no_face_data' };
+    // 1.8.0: no triangle limit on fitting any more (the old 200k fit cap is gone); the UI asks first above LIMITS.warnFitTris
+    const skip = mode === 'fit' ? { fitSkippedReason: null } : { fitSkippedReason: 'no_face_data' };
     return { st, ids, parts, tris, stream, mode, cause, skip, why: cause && cause + ', so only the mesh body is exported' };
   }
   // the source format of the active stream: payload magic first (the /Subtype can lie), then the decoder's format, then /Subtype
@@ -108,7 +106,7 @@
 
   function canExportCadSurfaces(partIds) {
     const sel = selection(partIds);
-    const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode };
+    const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode, warnLarge: sel.mode === 'fit' && sel.tris > LIMITS.warnFitTris };
     const un = unavailableWhy();
     if (un) return { ok: false, reason: 'unavailable', message: un, estimate };
     if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible bodies first', estimate };
@@ -170,7 +168,7 @@
       if (!workerErr && wres && kernelFailed) { kernelFailed = false; updateCaps(); }
       if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only';
         if (fe.code === 'kernel_download' || fe.code === 'worker_failed') { kernelFailed = true; updateCaps(); } }
-      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
+      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = 'no_face_data'; cause = sel.cause; reason = sel.why; }
       else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
       else { status = 'shell'; reasonCode = 'open_shell'; reason = parts.filter((p) => p.status !== 'solid').map((p) => p.summary.name + ': ' + (p.reason || p.status)).join('; '); }
@@ -296,6 +294,39 @@
     return retrying;
   }
 
+  // PDF3D.faceTypes(partIdx) (1.8.0, the Bodies list's face panel): the face types found in one body, from the worker's
+  // 'classify' command (segmentation + primitive classification only: no CAD kernel, no B-spline fitting). The first call for
+  // a stream starts one worker that classifies every body, the asked-for one first (later asks jump the queue); results are
+  // cached per stream, and switching streams terminates the worker. Returns synchronously:
+  //   { status: 'ready', counts: { plane, cylinder, cone, sphere, torus, freeform } } | { status: 'pending' }
+  //   | { status: 'none', reason: 'no_face_data' } | { status: 'unavailable', reason: 'single_file' | 'file_url' | 'browser_unsupported' }
+  //   | { status: 'error', reason } ; document event 'pdf3d:facetypes' { detail: { idx } } fires when a result arrives.
+  const faces = { stream: null, res: new Map(), w: null };
+  const faceStop = () => { if (faces.w) { try { faces.w.terminate(); } catch (e) { /* gone */ } faces.w = null; } };
+  const faceEvt = (idx) => { try { document.dispatchEvent(new CustomEvent('pdf3d:facetypes', { detail: { idx } })); } catch (e) { /* no DOM */ } };
+  function faceTypes(idx) {
+    const st = appState(); const stream = st && st.streams && st.streams[st.activeStreamIdx];
+    if (!st || !stream || !st.parts || !st.parts[idx]) return null;
+    if (faces.stream !== stream || faces.parts !== st.parts) { faceStop(); faces.stream = stream; faces.parts = st.parts; faces.res = new Map(); }
+    const parsed = stream.parsed;
+    if (!(sourceFormat(stream) === 'PRC' && stream.rawBytes && parsed && parsed.decodePath !== 'sample')) return { status: 'none', reason: 'no_face_data' };
+    const un = capReason(); if (un && un !== 'kernel_download') return { status: 'unavailable', reason: un };
+    if (faces.res.has(idx)) return faces.res.get(idx);
+    if (faces.w) { faces.w.postMessage({ cmd: 'prioritize', partIdx: idx }); return { status: 'pending' }; }
+    let w; try { w = new Worker(WORKER_URL); } catch (e) { return { status: 'unavailable', reason: 'browser_unsupported' }; }
+    faces.w = w; const res = faces.res;
+    const failAll = (reason) => { faceStop(); st.parts.forEach((p, i) => { if (!res.has(i)) { res.set(i, { status: 'error', reason }); faceEvt(i); } }); };
+    w.onmessage = (ev) => { const m = ev.data || {}; if (faces.w !== w) return;
+      if (m.type === 'faces') { res.set(m.idx, m.counts ? { status: 'ready', counts: m.counts } : { status: 'none', reason: m.reason || 'no_face_data' }); faceEvt(m.idx); }
+      else if (m.type === 'classified') { faceStop(); }
+      else if (m.type === 'error') failAll(String(m.message || 'error')); };
+    w.onerror = (e) => { if (e && e.preventDefault) e.preventDefault(); if (faces.w === w) failAll((e && e.message) || 'worker error'); };
+    const order = [idx].concat(st.parts.map((p, i) => i).filter((i) => i !== idx));
+    const prc = stream.rawBytes.slice().buffer;
+    w.postMessage({ cmd: 'classify', prc, order }, [prc]);
+    return { status: 'pending' };
+  }
+
   // UI: Designer's cad-export-ui.js (Export menu item, progress/cancel toast) drives this API.
 
   if (!NS.exportCadSurfaces || NS.exportCadSurfaces.__cadStub) {
@@ -303,6 +334,7 @@
     NS.exportCadSurfaces = exportCadSurfaces;
     NS.cadSurfaceLimits = LIMITS;
     NS.retryCadKernel = retryCadKernel;
+    NS.faceTypes = faceTypes;
     updateCaps();
     window.addEventListener('online', () => { if (kernelFailed) { kernelFailed = false; updateCaps(); } });
   }

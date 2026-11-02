@@ -35,9 +35,9 @@
     ['Scroll', 'Zoom'],
     ['Fit', 'Reset zoom and pan'],
     ['Reset', 'Back to the starting view'],
-    [BODIES, 'Click a body to highlight it; tick boxes show or hide bodies'],
+    [BODIES, 'Click a body in the list or the view to select it; the eye shows or hides it; double-click a name to rename it'],
     ['Open or drop', 'Open a 3D PDF, .u3d or .prc file, or drop it anywhere on the page'],
-    ['Esc', 'Close a menu, panel or dialog']
+    ['Esc', 'Clear the selection, or close a menu, panel or dialog']
   ];
   const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
   const VIEW_TITLES = { iso: 'Iso', top: 'Top (XY)', front: 'Front (XZ)', right: 'Right (YZ)' };   // hover titles (as the <= 1.6.2 view buttons)
@@ -448,8 +448,7 @@
     document.addEventListener('pdf3d:status', syncStatus);
     // a new PDF3D.lastLoad without a status change (stream switch, test stubs): re-read it
     document.addEventListener('pdf3d:lastload', () => syncStatus());
-    observe($('partList'), syncPartCount, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
-    $('partList').addEventListener('change', () => setTimeout(syncPartCount, 0));
+    observe($('partList'), syncPartCount, { childList: true });
 
     // ---------- global keyboard / pointer handling
     document.addEventListener('pointerdown', (ev) => {
@@ -616,10 +615,11 @@
   function syncPartCount() {
     const list = $('partList');
     if (!list || !ui.partCount) return;
-    const chks = list.querySelectorAll('.part-chk');
-    const vis = [...chks].filter((c) => c.checked).length;
-    ui.partCount.textContent = chks.length ? (vis === chks.length ? String(chks.length) : `${vis}/${chks.length}`) : '0';
-    ui.btnParts.title = chks.length ? `${vis} of ${chks.length} solid bodies visible` : 'No solid bodies';
+    // 1.8.0: the eye button replaced the checkbox; a hidden body's row has class is-hidden
+    const rows = list.querySelectorAll('.part-item');
+    const vis = [...rows].filter((r) => !r.classList.contains('is-hidden')).length;
+    ui.partCount.textContent = rows.length ? (vis === rows.length ? String(rows.length) : `${vis}/${rows.length}`) : '0';
+    ui.btnParts.title = rows.length ? `${vis} of ${rows.length} bodies visible` : 'No bodies';
     syncBodies();
     syncEmpty();
   }

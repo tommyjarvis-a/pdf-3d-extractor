@@ -390,6 +390,8 @@
     }
     let R2 = R.filter(r => Rby.has(r.face));
     tm.mergeMs = nowMs() - t0; t0 = nowMs();
+    // 1.8.0 face-type panel (cad-worker 'classify'): the face types after merging, no splitting / freeform fitting / kernel
+    if (opt.classifyOnly) return { classifyOnly: true, regions: R2.map(r => ({ face: r.face, type: r.type, ntris: r.ntris })), stats: { fragments: nFrag, merged: nMerged }, timings: tm };
     // corner flags: vertices touching >= 3 regions (before periodic splitting)
     const vfc = new Map(); for (let t = 0; t < m; t++) for (let k = 0; k < 3; k++) { const v = T[3 * t + k]; let s = vfc.get(v); if (!s) vfc.set(v, s = new Set()); s.add(F[t]); }
     const corner = v => { const s = vfc.get(v); return !!s && s.size >= 3; };

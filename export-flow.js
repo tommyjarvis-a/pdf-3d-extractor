@@ -186,7 +186,18 @@
       h('hr', { class: 'sm-sep' }), ui.nameRow,
       ui.big = h('p', { class: 'xf-note xf-note--warn xf-big', 'data-xf': 'big-note', role: 'note', hidden: true }),
       ui.dmgNote = h('p', { class: 'xf-note xf-note--warn xf-dmg', 'data-xf': 'damaged-note', role: 'note', hidden: true, text: DMG_NOTE }),
-      h('div', { class: 'xf-foot' }, ui.go));
+      ui.scope = h('p', { class: 'xf-note xf-scope', 'data-xf': 'scope-note', role: 'note', hidden: true }),
+      // 1.8.0 D2: asked before fitting a large model (no limit any more); each button is a fresh click for the save picker
+      ui.fitWarn = h('div', { class: 'xf-fitwarn', 'data-xf': 'fit-warning', role: 'alert', hidden: true },
+        ui.fitWarnText = h('p', { class: 'xf-note xf-note--warn' }),
+        h('div', { class: 'xf-fitwarn-btns' },
+          ui.fwGo = h('button', { type: 'button', class: 'btn btn-primary', 'data-xf': 'fit-continue', text: 'Continue' }),
+          ui.fwMesh = h('button', { type: 'button', class: 'btn', 'data-xf': 'fit-mesh', text: 'Export mesh STEP instead' }),
+          ui.fwBack = h('button', { type: 'button', class: 'btn btn-ghost', 'data-xf': 'fit-back', text: 'Back' }))),
+      ui.foot = h('div', { class: 'xf-foot' }, ui.go));
+    ui.fwGo.addEventListener('click', (ev) => { ev.stopPropagation(); showFitWarn(0, true); doSave({ confirmed: true }); });
+    ui.fwMesh.addEventListener('click', (ev) => { ev.stopPropagation(); showFitWarn(0, true); doSave({ confirmed: true, mesh: true }); });
+    ui.fwBack.addEventListener('click', (ev) => { ev.stopPropagation(); showFitWarn(0); ui.go.focus({ preventScroll: true }); });
 
     // Safari never focuses a pressed button: ignore focus loss while a pointer is down in the popover
     ui.pop.addEventListener('pointerdown', () => { ptrInside = true; }, true);
@@ -198,7 +209,7 @@
       if (!ui.pop.contains(a) && a !== lastTrigger && document.hasFocus()) close(false);
     }, 0));
     ui.pop.addEventListener('keydown', popKeys);
-    ui.opts.addEventListener('change', () => estimateSoon());    // units / detail / B-Rep proxies, radios
+    ui.opts.addEventListener('change', () => { showFitWarn(0); estimateSoon(); });    // units / detail / B-Rep proxies, radios
     document.addEventListener('pointerdown', (ev) => {
       if (open && !ui.pop.contains(ev.target) && !(lastTrigger && lastTrigger.contains(ev.target))) close(false);
     }, true);
@@ -234,7 +245,7 @@
   function openPop(btn) {
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
-    renderList(); renderOpts(); syncDamagedNote();
+    renderList(); renderOpts(); syncDamagedNote(); syncScope(); showFitWarn(0, true);
     if (!ui.result.hidden) { ui.result.hidden = true; stashed = true; }
     ui.pop.hidden = false;
     open = true;
@@ -246,6 +257,7 @@
   function close(returnFocus) {
     if (!open) return;
     open = false;
+    showFitWarn(0, true);
     ui.pop.hidden = true;
     ui.btnSimple.setAttribute('aria-expanded', 'false');
     if (stashed) { stashed = false; ui.result.hidden = false; }   // closed without a new export: the last card comes back
@@ -301,6 +313,7 @@
   }
   function select(id, keepFocus) {
     if (!FMT[id] || !available(FMT[id])) return;
+    if (id !== prefs.format) showFitWarn(0);
     prefs.format = id; save();
     for (const b of ui.list.querySelectorAll('.xf-fmt')) {
       const on = b.dataset.xfFormat === id;
@@ -436,6 +449,26 @@
     const ll = NS().lastLoad; return !!(ll && ll.status === 'ok' && nonEmpty(ll.damaged));
   }
   function resDamaged(res) { return !!(res && (nonEmpty(res.damaged) || (res.summary && nonEmpty(res.summary.damaged)))) || loadDamaged(); }
+  // 1.8.0: with a body selected (list or viewport click) the export covers that body only - say so, with the way back
+  function syncScope() {
+    const s = appState(), ids = sel();
+    const p = ids && s && s.parts[ids[0]];
+    ui.scope.hidden = !p;
+    if (p) ui.scope.textContent = 'Only the selected body (' + p.name + ') will be exported. Press Esc or click empty space in the view to export all visible bodies.';
+  }
+  // D2 (1.8.0): fitted STEP above PDF3D.cadSurfaceLimits.warnFitTris (200k) asks first; n = triangles (0 hides it)
+  function showFitWarn(n, quiet) {
+    const on = n > 0;
+    if (on) ui.fitWarnText.textContent = 'This model has ' + fmtK(n) + ' triangles. Fitting surfaces may take a long time and can crash the browser tab on very large models.';
+    ui.fitWarn.hidden = !on; ui.foot.hidden = on;
+    if (!quiet && open) { position(); (on ? ui.fwGo : ui.go).focus({ preventScroll: true }); }
+  }
+  // triangles of a fitted STEP export that needs the D2 question first, else 0
+  function largeFit(f, opts) {
+    if (f.id !== 'step' || opts.body === 'mesh') return 0;
+    const pf = preflight(), e = pf && pf.estimate;
+    return e && e.warnLarge && pf.ok !== false ? (+e.tris || 1) : 0;
+  }
   function syncDamagedNote() {
     const on = loadDamaged();
     if (ui.dmgNote.hidden === !on) return;
@@ -485,11 +518,15 @@
   }
 
   // ------------------------------------------------------------------ save
-  async function doSave() {
+  // ov (1.8.0 D2): { confirmed: true } = the large-model question was answered; mesh: true = 'Export mesh STEP instead'
+  async function doSave(ov) {
+    ov = ov || {};
     if (running) { close(true); showCard(); return; }
     const f = FMT[prefs.format];
     if (!f || !available(f)) return;
     const opts = optsFor(f);
+    if (ov.mesh && f.id === 'step') { opts.body = 'mesh'; opts.fittedOnly = false; }
+    if (!ov.confirmed) { const n = largeFit(f, opts); if (n) { showFitWarn(n); return; } }
     let name = fileName(), handle = null;
     if (pickerOK()) {
       // Must be the first await in the click gesture (Chrome throws SecurityError after long async work).
@@ -920,7 +957,8 @@
     return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
   }
 
-  // Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
+  // Legacy (<= 1.7.0 engines / hooks): 1.8.0 has no fitting limit (D1) and never reports fit_limit; kept so an older engine's
+  // result still reads right. Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
   // card says so once ("Exported as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
   // lists no part rows. Triggers: top-level reasonCode fit_limit, every part fit_limit, or the engine's too-many-triangles text.
   // Counts: PDF3D.lastLoad.trisParsed (1.6.2), else summary.tris, else the reason text; limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).

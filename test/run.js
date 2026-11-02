@@ -33,6 +33,9 @@
  * $NX_PDF (or <corpus>/../nx2512-input.pdf) must give 37,196 triangles.
  * 1.7.0 (always): Simple labels (Transparent, Solid Bodies, Background / Projection choices, Help list), ?v=1.7.0 (worker
  *   key 1.7.0-w1), PDF3DView defaults / set validation / localStorage round trip, perspective eye distance at Fit.
+ * 1.8.0 (always): Bodies list helpers (triangle count format, default names Body_ / Sheet_ / Mesh_ per type, rename rules,
+ *   renamed names in OBJ / STEP (ASCII STL writes none), selection / visibility API), no fit limit (cadSurfaceLimits, sample estimate),
+ *   fit.js classifyOnly face types on a synthetic cylinder, cad-worker 'classify' / renamed fitted name wiring, D2 popover markup.
  */
 const fs = require('fs'); const path = require('path'); const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
@@ -353,7 +356,7 @@ function syntheticAttachmentPDF(names) {
       const ok = X.set('units', 'in') && X.get().units === 'in' && !X.set('units', 'yd') && X.get().units === 'in' && !X.set('nope', 1);
       X.set('units', 'mm');
       check(ok && X.get().units === 'mm', 'exportSettings.set accept / reject'); }
-    check(!/[?&]v=1\.6\.2/.test(html) && /recon\/cad-export\.js\?v=1\.7\.0"/.test(html), 'index.html ?v= not 1.7.0 (worker key 1.7.0-w1)');
+    check(!/[?&]v=1\.(6\.2|7\.0)/.test(html) && /recon\/cad-export\.js\?v=1\.8\.0"/.test(html) && (html.match(/\?v=1\.8\.0"/g) || []).length === 18, 'index.html ?v= not 1.8.0 everywhere (worker key 1.8.0-w1)');
     check(/WORKER_REV = '1'/.test(fs.readFileSync(path.join(ROOT, 'recon/cad-export.js'), 'utf8')), 'WORKER_REV is not 1');
     const V = window.PDF3DView; const d = V && V.get();
     check(d && d.background === 'default' && d.grid === true && d.projection === 'perspective', `PDF3DView defaults ${JSON.stringify(d)}`);
@@ -370,6 +373,56 @@ function syntheticAttachmentPDF(names) {
     check(dd > 1.5 * r0 && Math.abs(dd * sc * Math.tan(P.PERSP_FOV / 2) - 400) < 1e-6, `perspective distance ${dd}`);
     check(P && P.perspective(sc * 8, 1280, 800, r0) === 1.5 * r0, 'perspective distance not clamped at 1.5 r');
     console.log(`1.7.0 UI: labels ok, PDF3DView defaults ${JSON.stringify(d)}, remembered ${JSON.stringify(b)}, perspective eye ${(dd / r0).toFixed(2)} r at Fit`); }
+
+  // 3b. 1.8.0 Bodies list (A), selection (B), face types (C), no fit limit (D)
+  { const A = window.CAD3DExtractor, P = window.PDF3D;
+    const fmt = [[0, '0'], [7, '7'], [999, '999'], [1000, '1k'], [1499, '1k'], [612345, '612k'], [999499, '999k'], [999500, '1.0M'], [1000000, '1.0M'], [1234567, '1.2M'], [12345678, '12.3M']];
+    const badFmt = fmt.filter(([n, w]) => A.formatTriCount(n) !== w).map(([n, w]) => `${n}->${A.formatTriCount(n)} (want ${w})`);
+    check(!badFmt.length, `formatTriCount: ${badFmt.join(', ')}`);
+    const dn = A.defaultBodyNames(['Solid', 'Sheet', 'Solid', 'Mesh', 'Sheet', 'Mesh']).join(',');
+    check(dn === 'Body_1,Sheet_1,Body_2,Mesh_1,Sheet_2,Mesh_2', `defaultBodyNames ${dn}`);
+    await decodeFile(api, path.join(ROOT, 'sample-cad-assembly-3d.pdf')); await api.activateStream(0);
+    const st = api.getState();
+    const names = st.parts.map((p) => p.name).join(','), kinds = st.parts.map((p) => p.kind).join(','), src = st.parts.map((p) => p.sourceName).join(',');
+    check(names === 'Mesh_1,Mesh_2,Mesh_3,Mesh_4' && kinds === 'Mesh,Mesh,Mesh,Mesh', `sample default names ${names} kinds ${kinds}`);
+    check(src === 'Flanged_Bearing_Housing,Precision_Drive_Shaft,Retainer_End_Cap,Hex_Mount_Bolt_M8', `sample sourceName ${src}`);
+    // rename: kept per stream, used by OBJ / STEP (ASCII STL has one assembly solid); duplicates get _2; control / bidi characters dropped; blank / unchanged keeps the name (null)
+    check(A.renamePart(0, '  Flange A ') === 'Flange A' && A.renamePart(1, 'Flange A') === 'Flange A_2' && A.renamePart(2, ' \u202e\u0007 ') === null && A.renamePart(2, 'Mesh_3') === null
+      && A.renamePart(3, 'Bolt\u202e\tM8') === 'BoltM8' && A.renamePart(99, 'x') === null, `renamePart rules: ${st.parts.map((p) => p.name).join(',')}`);
+    { const obj = (await exportText(window, 'obj')).dl.toString('latin1'), stp = (await exportText(window, 'step')).dl.toString('latin1'), asc = (await exportText(window, 'stl', { encoding: 'ascii' })).dl.toString('latin1');
+      check(/^o Flange A$/m.test(obj) && /^o Flange A_2$/m.test(obj) && /^o Mesh_3$/m.test(obj) && /^o BoltM8$/m.test(obj) && !/Mesh_1|Flanged_Bearing/.test(obj), 'renamed names not in OBJ');
+      check(stp.includes("'Flange A'") && stp.includes("'Flange A_2'") && !/Flanged_Bearing|'Mesh_1'/.test(stp), 'renamed names not in STEP');
+      check(/^solid CAD_3D_PDF_Assembly$/m.test(asc) && !/Flange|Mesh_/.test(asc), 'ASCII STL should write no body names (one assembly solid)'); }
+    await api.activateStream(1); await api.activateStream(0);
+    check(api.getState().parts[0].name === 'Flange A', 'rename not kept when switching streams');
+    A.renamePart(0, 'Mesh_1'); A.renamePart(1, 'Mesh_2'); A.renamePart(3, 'Mesh_4');
+    check(api.getState().parts.map((p) => p.name).join(',') === 'Mesh_1,Mesh_2,Mesh_3,Mesh_4', 'rename back to the defaults');
+    // selection: one at a time, -1 / out of range clears; visibility
+    A.selectPart(2); const s2 = api.getState().selectedPartIdx; A.selectPart(1); const s1 = api.getState().selectedPartIdx; A.selectPart(-1); const s0 = api.getState().selectedPartIdx; A.selectPart(42);
+    check(s2 === 2 && s1 === 1 && s0 === -1 && api.getState().selectedPartIdx === -1, `selectPart ${s2} ${s1} ${s0} ${api.getState().selectedPartIdx}`);
+    A.setPartVisible(1, false); const hid = api.getState().parts[1].visible; A.setPartVisible(1, true);
+    check(hid === false && api.getState().parts[1].visible === true, 'setPartVisible');
+    check(A.pickPartAt(-5, -5) === -1, 'pickPartAt outside the view is not -1');
+    // D1 / D2: no fit limit; warnLarge only for a fittable selection above 200k
+    const L = P.cadSurfaceLimits || {}; const pf = P.canExportCadSurfaces(null);
+    check(!('maxFitTris' in L) && L.warnFitTris === 200000 && L.maxTris === 1000000, `cadSurfaceLimits ${JSON.stringify(L)}`);
+    check(pf && pf.estimate && pf.estimate.warnLarge === false && pf.estimate.tris === api.getState().parts.reduce((k, q) => k + q.faces.length, 0), `sample preflight estimate ${JSON.stringify(pf && pf.estimate)}`);
+    const ceSrc = fs.readFileSync(path.join(ROOT, 'recon/cad-export.js'), 'utf8'), wkSrc = fs.readFileSync(path.join(ROOT, 'recon/cad-worker.js'), 'utf8'), xfSrc = fs.readFileSync(path.join(ROOT, 'export-flow.js'), 'utf8');
+    check(!/maxFitTris|too_many_tris|fitSkippedLimit/.test(ceSrc), 'cad-export.js still has the fit limit');
+    check(/Pipe\.baseName\(\(m\.names && m\.names\[0\]\)/.test(wkSrc) && /m\.cmd === 'classify'/.test(wkSrc) && /m\.cmd === 'prioritize'/.test(wkSrc), 'cad-worker.js: renamed fitted name / classify wiring');
+    check(['fit-warning', 'fit-continue', 'fit-mesh', 'fit-back', 'scope-note'].every((k) => xfSrc.includes(`'data-xf': '${k}'`)) && /Fitting surfaces may take a long time and can crash the browser tab on very large models/.test(xfSrc)
+      && /Export mesh STEP instead/.test(xfSrc), 'export-flow.js: D2 warning markup / text');
+    check(typeof P.faceTypes === 'function' && JSON.stringify(P.faceTypes(0)) === '{"status":"none","reason":"no_face_data"}', `faceTypes(0) on the sample ${JSON.stringify(P.faceTypes && P.faceTypes(0))}`);
+    // fit.js classifyOnly: a 48-gon cylinder with exact corner normals (side face 0, caps 1 / 2) -> 1 cylinder + 2 planes
+    const Fit = require(path.join(ROOT, 'recon/fit.js')); const n = 48, r = 10, hgt = 30; const V = [], T = [], F = [], NN = [], CN = [];
+    for (let i = 0; i < n; i++) { const a = 2 * Math.PI * i / n, c = Math.cos(a), sn = Math.sin(a); V.push(r * c, r * sn, 0, r * c, r * sn, hgt); NN.push(c, sn, 0, c, sn, 0); }
+    const c0 = V.length / 3, nz = NN.length / 3; V.push(0, 0, 0, 0, 0, hgt); NN.push(0, 0, -1, 0, 0, 1);
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n, a = 2 * i, b = a + 1, c = 2 * j, d = c + 1;
+      T.push(a, c, d, a, d, b); F.push(0, 0); CN.push(a, c, d, a, d, b); T.push(c0, c, a, c0 + 1, b, d); F.push(1, 2); CN.push(nz, nz, nz, nz + 1, nz + 1, nz + 1); }
+    const fr = Fit.fitMesh({ V: Float64Array.from(V), T: Int32Array.from(T), F: Int32Array.from(F), NN: Float64Array.from(NN), CN: Int32Array.from(CN) }, { classifyOnly: true });
+    const types = (fr.regions || []).map((g) => g.type).sort().join(',');
+    check(fr.classifyOnly && types === 'CYLINDER,PLANE,PLANE', `classifyOnly cylinder: ${types}`);
+    console.log(`1.8.0 bodies: formatTriCount ${fmt.length} cases, sample ${names}, rename -> OBJ / STEP ok, no fit limit (warnFitTris ${L.warnFitTris}), classifyOnly cylinder ${types}`); }
 
   // 4. corpus
   if (corpus) {

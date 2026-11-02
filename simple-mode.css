@@ -392,25 +392,6 @@ body.sm-simple .sm-empty {
   .sm-range input { height: 40px; }
   .sm-sec > summary { min-height: 40px; }
   .sm-sheet .part-item, .sm-sheet .stream-item { min-height: 44px; }
-  /* part visibility checkbox: 40x40 hit area, 18px drawn box; negative margins keep the row height */
-  .sm-sheet .part-chk {
-    appearance: none;
-    -webkit-appearance: none;
-    flex-shrink: 0;
-    width: 40px;
-    height: 40px;
-    margin: -12px -10px -12px -12px;
-    position: relative;
-    z-index: 1;               /* the box overhangs the row edge; keep it above the neighbouring row */
-    border: 0;
-    border-radius: 8px;
-    cursor: pointer;
-    background: center / 18px 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%230b111c' stroke='%235b7db0' stroke-width='1.5'/%3E%3C/svg%3E");
-  }
-  .sm-sheet .part-chk:checked {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%2322d3ee' stroke='%2322d3ee' stroke-width='1.5'/%3E%3Cpath d='M5 9.5l2.6 2.6L13 6.5' fill='none' stroke='%2303101d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  }
-  .sm-sheet .part-chk:focus-visible { outline: 2px solid var(--cyan); outline-offset: -6px; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .sm-pop:not([hidden]) { animation: sm-pop-in 0.12s ease-out; }
@@ -423,4 +404,60 @@ body.sm-simple .sm-empty {
   body.sm-simple .sm-doc { flex-wrap: wrap; }
   .sm-damaged { border-radius: 10px; }
   .sm-damaged-t { white-space: normal; }
+}
+
+/* ===================================================================== 1.8.0 Bodies list
+   row = eye | swatch | name | type | watertight | triangles; the selected row carries the face-type panel */
+.part-head, .part-row {
+  display: grid;
+  grid-template-columns: 26px 11px minmax(0, 1fr) 44px 30px 40px;
+  align-items: center;
+  column-gap: 7px;
+}
+.part-head {
+  padding: 0 10px 2px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  user-select: none;
+}
+.part-head span:nth-child(n+4), .part-row > .part-type, .part-row > .part-wt, .part-row > .part-tris { text-align: right; }
+.part-item { gap: 0; }
+.part-row > .part-name { min-width: 0; }
+.part-type, .part-wt, .part-tris { font-family: var(--mono); font-size: 10.5px; color: var(--text-1); white-space: nowrap; }
+.part-wt[data-wt="yes"] { color: var(--emerald); }
+.part-wt[data-wt="no"] { color: var(--amber); }
+.part-eye {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin: -4px 0;
+  padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text-1); cursor: pointer;
+}
+.part-eye:hover { background: var(--bg-3); color: var(--text-0); }
+.part-eye:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.part-item.is-hidden .part-eye { color: var(--text-2); }
+.part-item.is-hidden .part-name, .part-item.is-hidden .swatch { opacity: 0.5; }
+.part-name-edit {
+  min-width: 0; width: 100%;
+  font: 600 12px var(--sans);
+  color: var(--text-0); background: var(--bg-0);
+  border: 1px solid var(--cyan); border-radius: 4px;
+  padding: 1px 4px; outline: none;
+}
+.part-feat {
+  margin: 7px -9px -7px; padding: 6px 12px 8px 46px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 0 0 6px 6px;
+  font-size: 11px; color: var(--text-1);
+  cursor: default;
+}
+.part-feat-title { font-size: 10px; color: var(--text-2); margin-bottom: 2px; }
+.part-feat-row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.part-feat-n { font-family: var(--mono); color: var(--text-0); }
+.part-feat-msg { color: var(--text-2); }
+.part-feat-msg.is-error { color: var(--amber); }
+@media (pointer: coarse) {
+  .sm-sheet .part-eye { width: 40px; height: 40px; margin: -10px -7px -10px -7px; }
+  .sm-sheet .part-head, .sm-sheet .part-row { grid-template-columns: 26px 11px minmax(0, 1fr) 44px 30px 40px; }
 }

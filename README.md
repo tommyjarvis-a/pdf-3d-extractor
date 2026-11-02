@@ -47,8 +47,8 @@ After every load (`CAD3DExtractor.loadPDFBuffer`) and stream switch (`activateSt
 | `'no3d'` | `'NO_3D'` | no `/3D` or `/RichMedia` stream at all (attachment-only PDFs included) | `format: null`, `streams: 0`, `message` |
 
 Triangle counts on `'ok'` (1.6.2): `tris` is what the viewer draws, the HUD "Tris" shows and mesh exports write: after the
-B-Rep weld drops degenerate (zero-area) triangles. `trisParsed` is the count as decoded from the file, before that; the CAD
-export fit limit (`fitSkippedTris`) and the large-model banner use it. They differ only by the degenerate triangles
+B-Rep weld drops degenerate (zero-area) triangles. `trisParsed` is the count as decoded from the file, before that; the
+large-model banner uses it (1.8.0 has no CAD fit limit; the large-model fitting question counts drawn `tris`). They differ only by the degenerate triangles
 (r08: `trisParsed` 429,271, `tris` 427,503; g09: 11,516 / 11,514). Show `tris` as "triangles"; compare limits with `trisParsed`.
 
 Damaged streams (1.6.2): the decoder loads what decodes. A U3D block that fails to decode, or a block header that is not a
@@ -152,7 +152,11 @@ const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', pa
 // body: 'both' also gives each part fittedBody ('<name>_fitted' for a solid or open shell, else null) and meshBody ('<name>_mesh'),
 // the bodies actually in the file (`written` keeps the Fitted-mode meaning: 'solid' only for closed solids)
 // STEP 'fitted' / 'both' summary (1.6.1) adds a model-wide reason no part was fitted, so the card can show one line:
-//   fitSkippedReason: null (fitting ran) | 'too_many_tris' (with fitSkippedTris, fitSkippedLimit: 200000) | 'no_face_data' | 'browser_unsupported'
+//   fitSkippedReason: null (fitting ran) | 'no_face_data' | 'browser_unsupported'
+//   (1.8.0: no fit limit, so 'too_many_tris' is gone; canExportCadSurfaces().estimate.warnLarge is true above
+//   PDF3D.cadSurfaceLimits.warnFitTris (200,000) and the export popover asks Continue / Export mesh STEP instead first)
+// PDF3D.faceTypes(partIdx) (1.8.0) -> { status: 'ready', counts: { plane, cylinder, cone, sphere, torus, freeform } }
+//   | { status: 'pending' | 'none' | 'unavailable' | 'error', reason }; 'pdf3d:facetypes' { idx } fires when one arrives
 // exportFormat('xt') summary adds: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, estimatedBytes }
 // too large for the Parasolid writer: { blob: null, status: 'error', reasonCode: 'XT_TOO_LARGE', summary: { estimatedBytes } }
 // PDF3D.capabilities.cadSurfaces: false with cadSurfacesReason 'single_file' | 'file_url' | 'browser_unsupported' | 'kernel_download'

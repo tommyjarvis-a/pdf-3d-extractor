@@ -32,7 +32,7 @@ onProgress({ stage: 'kernel'|'segment'|'fit'|'build'|'validate'|'write', pct, do
 ```
 
 Extras beyond the agreed contract (all additive):
-- `reasonCode`: `unavailable`, `too_large`, `no_parts`, `no_face_data`, `fit_limit`, `no_fit`, `open_shell`, `out_of_memory`,
+- `reasonCode`: `unavailable`, `too_large`, `no_parts`, `no_face_data`, `fit_limit` (1.7.0 and older only), `no_fit`, `open_shell`, `out_of_memory`,
   `kernel_download` (CAD kernel could not be downloaded: offline, blocked, or an HTTP error), `worker_failed` (the fitting
   worker could not start), `error` or `cancelled`. `reason` is always user-facing text (raw "Failed to fetch" /
   "worker error" are mapped to the two codes above). The no-face-data reason names the actual source format, read from
@@ -50,7 +50,7 @@ Extras beyond the agreed contract (all additive):
 | no parts selected / visible | `no_parts` → `skipped` |
 | selection > 1,000,000 tris (r05 grinder, r13) | `too_large` → `skipped` |
 | U3D (dice), bundled legacy sample, any non-PRC stream | `mesh_only` (mesh body only), kernel not loaded |
-| PRC selection > 200,000 tris (r17 engine, r16, r07, r08) | `mesh_only` (fit limit) |
+| PRC selection > 200,000 tris (r17 engine, r16, r07, r08) | fitted as usual since 1.8.0 (no fit limit); the export popover warns first (`estimate.warnLarge`) |
 | fit fails for every part / worker crashes / runs out of memory | `mesh_only` with the reason |
 | some parts closed, others shells or unfit | `shell` |
 | every part closed and valid | `solid` |
@@ -111,7 +111,7 @@ and finished (never after a cancel or a failure).
 
     Contract notes for the UI (no change needed on either side):
     - When `canExportCadSurfaces` returns `ok: true` with a non-empty `message` (`estimate.mode: 'mesh_only'`: U3D,
-      bundled sample, above 200k triangles), the UI doesn't show that message before the run. The result toast shows it
+      bundled sample), the UI doesn't show that message before the run. The result toast shows it
       as the `mesh_only` reason afterwards. The old export-bar button asked for confirmation first.
     - `summary.unfitFaces` is an array of `{ part, face }`, and the UI counts it. `cancelled` has `summary: null`, which the UI tolerates.
 

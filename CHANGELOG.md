@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.8.0 (alpha) — 2026-11-02
+
+Alpha: the Solid Bodies list redesign, list / viewport selection sync, a face-types panel per body, and no fitted STEP
+triangle limit. Exports are byte-identical to 1.7.0 except where a body name is written: bodies now get default names
+(below), so STEP and OBJ name strings change (geometry unchanged); binary / ASCII STL, .x_t, IGES and raw are identical.
+
+### Changed (Solid Bodies list)
+- Each row is **name | type | watertight | triangles**: type Solid / Sheet / Mesh, watertight Yes / No, triangles as
+  `999`, `612k`, `1.2M`. The vertex, triangle and B-rep surface counts per row are gone.
+- An **eye** button replaces the visibility checkbox (eye with an X = hidden; tooltip Hide / Show).
+- **Default names** `Body_1`, `Sheet_1`, `Mesh_1`…, numbered per type in file order (the name in the file is in the
+  row tooltip). **Double-click a name (or F2) to rename** it: Enter saves, Esc cancels. Names are kept per stream and
+  used by every export that writes a body name (STEP, OBJ, fitted STEP); a name already taken gets `_2`.
+
+### Added
+- **Selection sync**: click a row to highlight the body in the view; click a body in the view to select its row (scrolled
+  into view); click empty space or press Esc to clear both. One selection at a time. With a body selected the export
+  popover says the export covers that body only (as before), and how to clear it.
+- **Face types panel** under the selected row: planes, cylinders, cones, spheres, tori and freeform counts (zero rows
+  hidden); click the row again to fold it. Computed in a background worker (segmentation + primitive classification,
+  no CAD kernel), the selected body first; a one-line message for meshes, the single-file build / `file://`, or while
+  it runs. `PDF3D.faceTypes(idx)` and the `'pdf3d:facetypes'` event expose it.
+- `CAD3DExtractor.selectPart / renamePart / setPartVisible / pickPartAt / formatTriCount / bodyKind / defaultBodyNames`.
+
+### Changed (export)
+- **No fitted STEP triangle limit** (`cadSurfaceLimits.maxFitTris` and `fitSkippedReason: 'too_many_tris'` removed).
+  Above 200k triangles (`warnFitTris`, `estimate.warnLarge`) the popover asks first: "may take a long time and can
+  crash the browser tab on very large models", with **Continue** / **Export mesh STEP instead** / Back. Fitting keeps
+  its progress bar and Cancel. Models under 200k fit exactly as in 1.7.0.
+- Selection highlight is a clearer cyan tint (both renderers).
+- Worker cache key is now `1.8.0-w1`.
+
 ## 1.7.0 (alpha) — 2026-11-02
 
 Alpha: carries the 1.6.2 release candidate (below), a Simple-mode viewer refresh, and Simple as the only UI (the

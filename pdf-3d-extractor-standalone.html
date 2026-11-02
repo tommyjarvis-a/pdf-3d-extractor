@@ -339,7 +339,7 @@
  * Integration: <link rel="stylesheet" href="affordance.css" /> in <head>, BEFORE simple-mode.css.
  *
  * Which list rows are really clickable (checked in app.js):
- *   .part-item   -> click selects/highlights the part; .part-chk toggles visibility      => INTERACTIVE
+ *   .part-item   -> click selects/highlights the part; .part-eye shows / hides it        => INTERACTIVE
  *   .stream-item -> click calls activateStream(idx)                                    => INTERACTIVE
  *   #attachList button[data-att] ("Save")                                              => INTERACTIVE (button only)
  *   .tree-row (#treeList), .feature-item (#featureList / #attachList rows), .kv-box,
@@ -395,7 +395,6 @@ label:has(> input[type="checkbox"]) { cursor: pointer; }
   box-shadow: inset 3px 0 0 var(--cyan);
 }
 .part-item.selected .part-name, .stream-item.active .stream-name { color: var(--cyan); }
-.part-chk { cursor: pointer; }
 .part-item:focus-visible, .stream-item:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
 
 /* ===================================================================== INFORMATION (quiet) */
@@ -830,25 +829,6 @@ body.sm-simple .sm-empty {
   .sm-range input { height: 40px; }
   .sm-sec > summary { min-height: 40px; }
   .sm-sheet .part-item, .sm-sheet .stream-item { min-height: 44px; }
-  /* part visibility checkbox: 40x40 hit area, 18px drawn box; negative margins keep the row height */
-  .sm-sheet .part-chk {
-    appearance: none;
-    -webkit-appearance: none;
-    flex-shrink: 0;
-    width: 40px;
-    height: 40px;
-    margin: -12px -10px -12px -12px;
-    position: relative;
-    z-index: 1;               /* the box overhangs the row edge; keep it above the neighbouring row */
-    border: 0;
-    border-radius: 8px;
-    cursor: pointer;
-    background: center / 18px 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%230b111c' stroke='%235b7db0' stroke-width='1.5'/%3E%3C/svg%3E");
-  }
-  .sm-sheet .part-chk:checked {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Crect x='1' y='1' width='16' height='16' rx='4' fill='%2322d3ee' stroke='%2322d3ee' stroke-width='1.5'/%3E%3Cpath d='M5 9.5l2.6 2.6L13 6.5' fill='none' stroke='%2303101d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  }
-  .sm-sheet .part-chk:focus-visible { outline: 2px solid var(--cyan); outline-offset: -6px; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .sm-pop:not([hidden]) { animation: sm-pop-in 0.12s ease-out; }
@@ -861,6 +841,62 @@ body.sm-simple .sm-empty {
   body.sm-simple .sm-doc { flex-wrap: wrap; }
   .sm-damaged { border-radius: 10px; }
   .sm-damaged-t { white-space: normal; }
+}
+
+/* ===================================================================== 1.8.0 Bodies list
+   row = eye | swatch | name | type | watertight | triangles; the selected row carries the face-type panel */
+.part-head, .part-row {
+  display: grid;
+  grid-template-columns: 26px 11px minmax(0, 1fr) 44px 30px 40px;
+  align-items: center;
+  column-gap: 7px;
+}
+.part-head {
+  padding: 0 10px 2px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  user-select: none;
+}
+.part-head span:nth-child(n+4), .part-row > .part-type, .part-row > .part-wt, .part-row > .part-tris { text-align: right; }
+.part-item { gap: 0; }
+.part-row > .part-name { min-width: 0; }
+.part-type, .part-wt, .part-tris { font-family: var(--mono); font-size: 10.5px; color: var(--text-1); white-space: nowrap; }
+.part-wt[data-wt="yes"] { color: var(--emerald); }
+.part-wt[data-wt="no"] { color: var(--amber); }
+.part-eye {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin: -4px 0;
+  padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text-1); cursor: pointer;
+}
+.part-eye:hover { background: var(--bg-3); color: var(--text-0); }
+.part-eye:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.part-item.is-hidden .part-eye { color: var(--text-2); }
+.part-item.is-hidden .part-name, .part-item.is-hidden .swatch { opacity: 0.5; }
+.part-name-edit {
+  min-width: 0; width: 100%;
+  font: 600 12px var(--sans);
+  color: var(--text-0); background: var(--bg-0);
+  border: 1px solid var(--cyan); border-radius: 4px;
+  padding: 1px 4px; outline: none;
+}
+.part-feat {
+  margin: 7px -9px -7px; padding: 6px 12px 8px 46px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 0 0 6px 6px;
+  font-size: 11px; color: var(--text-1);
+  cursor: default;
+}
+.part-feat-title { font-size: 10px; color: var(--text-2); margin-bottom: 2px; }
+.part-feat-row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.part-feat-n { font-family: var(--mono); color: var(--text-0); }
+.part-feat-msg { color: var(--text-2); }
+.part-feat-msg.is-error { color: var(--amber); }
+@media (pointer: coarse) {
+  .sm-sheet .part-eye { width: 40px; height: 40px; margin: -10px -7px -10px -7px; }
+  .sm-sheet .part-head, .sm-sheet .part-row { grid-template-columns: 26px 11px minmax(0, 1fr) 44px 30px 40px; }
 }
 
 </style>
@@ -1079,6 +1115,13 @@ body.xf-on.sm-simple .xf-retry[aria-disabled="true"] { color: var(--text-2); cur
   .xf-r-close, .xf-r-cancel { min-width: 40px; min-height: 40px; }
   .xf-result { right: 12px; left: 12px; width: auto; bottom: 12px; }
 }
+
+/* 1.8.0: scope note (a body is selected) and the large-model fitting question (D2) */
+.xf-scope { color: var(--text-1); }
+.xf-fitwarn { padding: 2px 4px 2px; }
+.xf-fitwarn .xf-note { margin: 0 6px 8px; }
+.xf-foot[hidden], .xf-fitwarn[hidden], .xf-scope[hidden] { display: none; }
+.xf-fitwarn-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 
 </style>
 </head>
@@ -3987,6 +4030,49 @@ void main() { gl_FragColor = uRGBA; }`;
     this.stats.gpuBytes = total;
   };
 
+  // 1.8.0: the selected body's emissive cyan tint (B1; was rgb(28,38,45) in 1.7.0); app.js's Canvas 2D fallback matches it
+  const SEL_ADD = [16 / 255, 66 / 255, 82 / 255];
+
+  // v.pick(x, y) -> part index under CSS pixel (x, y) of the canvas in the last drawn frame, nearest first; -1 for empty space.
+  // CPU ray-cast against the same preview triangles the GPU drew (same MVP, so it matches the picture in both projections).
+  VP.pick = function (x, y) {
+    const P = this._pickInfo; if (!P) return -1;
+    const M = P.M, C = P.C, w = P.w, h = P.h;
+    let best = -1, bestZ = Infinity;
+    const sx = new Float64Array(3), sy = new Float64Array(3), sz = new Float64Array(3);
+    for (const it of P.items) {
+      const g = it.g, vx = g.vx, tv = g.tv, nt = g.nt != null ? g.nt : (tv.length / 3) | 0, o = it.offset || [0, 0, 0];
+      const nv = (vx.length / 3) | 0;
+      const px = new Float64Array(nv), py = new Float64Array(nv), pz = new Float64Array(nv), ok = new Uint8Array(nv);
+      let anyIn = false;
+      for (let i = 0; i < nv; i++) {
+        const X = vx[3 * i] + o[0] - C[0], Y = vx[3 * i + 1] + o[1] - C[1], Z = vx[3 * i + 2] + o[2] - C[2];
+        const cw = M[3] * X + M[7] * Y + M[11] * Z + M[15];
+        if (!(cw > 1e-9)) continue;
+        px[i] = ((M[0] * X + M[4] * Y + M[8] * Z + M[12]) / cw + 1) * 0.5 * w;
+        py[i] = (1 - (M[1] * X + M[5] * Y + M[9] * Z + M[13]) / cw) * 0.5 * h;
+        pz[i] = (M[2] * X + M[6] * Y + M[10] * Z + M[14]) / cw; ok[i] = 1; anyIn = true;
+      }
+      if (!anyIn) continue;
+      for (let t = 0; t < nt; t++) {
+        const a = tv[3 * t], b = tv[3 * t + 1], c = tv[3 * t + 2];
+        if (!ok[a] || !ok[b] || !ok[c]) continue;
+        sx[0] = px[a]; sx[1] = px[b]; sx[2] = px[c];
+        if ((x < sx[0] && x < sx[1] && x < sx[2]) || (x > sx[0] && x > sx[1] && x > sx[2])) continue;
+        sy[0] = py[a]; sy[1] = py[b]; sy[2] = py[c];
+        if ((y < sy[0] && y < sy[1] && y < sy[2]) || (y > sy[0] && y > sy[1] && y > sy[2])) continue;
+        const d = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
+        if (Math.abs(d) < 1e-12) continue;
+        const l1 = ((x - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (y - sy[0])) / d;
+        const l2 = ((sx[1] - sx[0]) * (y - sy[0]) - (x - sx[0]) * (sy[1] - sy[0])) / d;
+        if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+        const z = pz[a] + l1 * (pz[b] - pz[a]) + l2 * (pz[c] - pz[a]);
+        if (z < bestZ && z >= -1) { bestZ = z; best = it.pIdx; }
+      }
+    }
+    return best;
+  };
+
   VP._draw = function () {
     const s = this.scene, gl = this.gl, canvas = this.canvas;
     if (!s || this.lost || gl.isContextLost()) return;
@@ -4055,6 +4141,8 @@ void main() { gl_FragColor = uRGBA; }`;
     const offOf = (origin, off) => [origin[0] + off[0] - C[0], origin[1] + off[1] - C[1], origin[2] + off[2] - C[2]];
 
     const mode = s.renderMode || 'shaded-edges', sel = s.selectedPartIdx;
+    // 1.8.0 viewport picking (v.pick): what this frame drew, in CSS px
+    this._pickInfo = { M, C, w, h, items: items.map((it) => ({ g: it.g, pIdx: it.pIdx, offset: it.offset })) };
 
     // 1. datum grid (background, not depth tested, like the legacy view)
     if (s.grid) this._drawGrid(s.grid, M, C, !!s.lightBg);
@@ -4079,7 +4167,7 @@ void main() { gl_FragColor = uRGBA; }`;
         gl.uniform3fv(pf.u.uOff, offOf(e.origin, it.offset));
         gl.uniform3fv(pf.u.uColor, it.color);
         gl.uniform1f(pf.u.uFaceShift, (it.pIdx * 2) % 6);
-        gl.uniform3fv(pf.u.uSelAdd, sel === it.pIdx ? [28 / 255, 38 / 255, 45 / 255] : [0, 0, 0]);
+        gl.uniform3fv(pf.u.uSelAdd, sel === it.pIdx ? SEL_ADD : [0, 0, 0]);
         this._bindDraw(pf, f, gl.TRIANGLES);
       }
       gl.disable(gl.POLYGON_OFFSET_FILL);
@@ -4317,7 +4405,7 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="app.js">
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.7.0
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.8.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -4334,7 +4422,7 @@ void main() { gl_FragColor = uRGBA; }`;
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.0';
+  const APP_VERSION = '1.8.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: offered while buildParasolidXT writes the NX 2512 form
@@ -7713,11 +7801,30 @@ void main() { gl_FragColor = uRGBA; }`;
     viewportRaf = raf(() => { viewportRaf = 0; renderViewport(); });
   }
 
+  // part index under client point (cx, cy) as last drawn (WebGL or Canvas 2D); -1 = empty space or hidden bodies only
+  let lastPick = null;
+  function pickPartAt(cx, cy) {
+    const canvas = document.getElementById('viewportCanvas');
+    if (!canvas || !lastPick) return -1;
+    const rc = canvas.getBoundingClientRect(); const x = cx - rc.left, y = cy - rc.top;
+    if (lastPick.gl) return typeof lastPick.glv.pick === 'function' ? lastPick.glv.pick(x, y) : -1;
+    const { triScr: T, triDepth: Dp, triItem: TI, nDraw, pIdx } = lastPick;
+    let best = -1, bestD = Infinity;
+    for (let k = 0; k < nDraw; k++) {
+      const x0 = T[6 * k], y0 = T[6 * k + 1], x1 = T[6 * k + 2], y1 = T[6 * k + 3], x2 = T[6 * k + 4], y2 = T[6 * k + 5];
+      const d = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0); if (Math.abs(d) < 1e-9) continue;
+      const l1 = ((x - x0) * (y2 - y0) - (x2 - x0) * (y - y0)) / d, l2 = ((x1 - x0) * (y - y0) - (x - x0) * (y1 - y0)) / d;
+      if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+      if (Dp[k] < bestD) { bestD = Dp[k]; best = pIdx[TI[k]]; }
+    }
+    return best;
+  }
+
   function renderViewport() {
     const canvas = document.getElementById('viewportCanvas');
     if (!canvas) return;
     const glv = window.PDF3DViewerGL ? window.PDF3DViewerGL.attach(canvas) : null;
-    if (glv) { renderViewportGL(glv); return; }
+    if (glv) { lastPick = { gl: true, glv }; renderViewportGL(glv); return; }
     const hudRender = document.getElementById('hudRenderStats');
     if (hudRender) hudRender.textContent = 'Canvas 2D renderer (no WebGL)';
     // ---- Canvas 2D fallback (no WebGL): painter's algorithm ----
@@ -7853,6 +7960,9 @@ void main() { gl_FragColor = uRGBA; }`;
       }
     });
 
+    // 1.8.0 viewport picking in the Canvas 2D fallback: the triangles of this frame in CSS px (smaller depth = nearer)
+    lastPick = { gl: false, triScr, triDepth, triItem, nDraw, pIdx: items.map((it) => it.pIdx) };
+
     // Painter's algorithm sort (back to front: higher y2 is further away in our camera convention)
     const order = new Uint32Array(nDraw);
     for (let i = 0; i < nDraw; i++) order[i] = i;
@@ -7887,9 +7997,9 @@ void main() { gl_FragColor = uRGBA; }`;
         let b = Math.min(255, Math.round(baseRGB[2] * 255 * shade));
 
         if (state.selectedPartIdx === it.pIdx) {
-          r = Math.min(255, r + 28);
-          g = Math.min(255, g + 38);
-          b = Math.min(255, b + 45);
+          r = Math.min(255, r + 16);   // 1.8.0: same emissive cyan tint as viewer-gl.js SEL_ADD
+          g = Math.min(255, g + 66);
+          b = Math.min(255, b + 82);
         }
 
         pathTri(k);
@@ -8072,45 +8182,8 @@ void main() { gl_FragColor = uRGBA; }`;
       });
     }
 
-    // Part hierarchy list
-    const partListEl = document.getElementById('partList');
-    if (partListEl) {
-      partListEl.innerHTML = '';
-      state.parts.forEach((p, idx) => {
-        const [r, g, b] = p.color.map((c) => Math.round(c * 255));
-        const item = document.createElement('div');
-        item.className = `part-item${state.selectedPartIdx === idx ? ' selected' : ''}`;
-        item.innerHTML = `
-          <div class="part-top">
-            <div class="part-left">
-              <input type="checkbox" class="part-chk" data-idx="${idx}" ${p.visible ? 'checked' : ''} />
-              <span class="swatch" style="background:rgb(${r},${g},${b})"></span>
-              <span class="part-name" title="${p.name}">${p.name}</span>
-            </div>
-            <span class="badge ${p.brep.isWatertight ? 'badge-emerald' : 'badge-amber'}">
-              ${p.brep.mergedFaces.length} B-Rep Faces
-            </span>
-          </div>
-          <div class="part-stats">
-            <span>${p.materialName}</span>
-            <span>${p.brep.weldedVerts.length}v • ${p.brep.tris.length}t</span>
-          </div>
-        `;
-        item.addEventListener('click', (ev) => {
-          if (ev.target && ev.target.classList.contains('part-chk')) return;
-          state.selectedPartIdx = state.selectedPartIdx === idx ? -1 : idx;
-          refreshAllUI();
-        });
-        const chk = item.querySelector('.part-chk');
-        if (chk) {
-          chk.addEventListener('change', (ev) => {
-            p.visible = ev.target.checked;
-            refreshAllUI();
-          });
-        }
-        partListEl.appendChild(item);
-      });
-    }
+    // Bodies list (1.8.0)
+    renderPartList();
 
     // Bounding Box & Topology KV Grid
     const unitBadge = document.getElementById('unitBadge');
@@ -8229,14 +8302,248 @@ void main() { gl_FragColor = uRGBA; }`;
     }
     state.wires = st.parsed.wires || [];
     state.tree = st.parsed.tree || null;
-    state.parts = (st.parsed.parts || []).map((p, i) => ({
+    // 1.8.0: every body gets a default name per type (Body_n / Sheet_n / Mesh_n, file order); the file's own label stays
+    // as sourceName. Renames are kept on the stream (bodyNames) and used by all exports.
+    const srcParts = st.parsed.parts || [];
+    const kinds = srcParts.map((p) => bodyKind(p, st));
+    if (!st.bodyNames || st.bodyNames.length !== srcParts.length) st.bodyNames = defaultBodyNames(kinds);
+    state.parts = srcParts.map((p, i) => ({
       ...p,
+      sourceName: p.name,
+      name: st.bodyNames[i],
+      kind: kinds[i],
       color: p.color || PALETTE[i % PALETTE.length],
       visible: true
     }));
     state.selectedPartIdx = -1;
+    state.facePanelOpen = false;
     setLastLoad(loadResultFor(st, idx));
     refreshAllUI();
+  }
+
+  // -------------------------------------------------------------------------
+  // 1.8.0 Bodies list: name | type | watertight | triangles, eye = show / hide, double-click (or F2) renames,
+  // selection synced with the viewport, face-type panel under the selected row
+  // -------------------------------------------------------------------------
+  // the stream's bodies carry CAD face data (exact PRC B-rep or multi-face PRC tessellation) - the same streams the
+  // CAD-surface export / face detection can use; U3D and the built-in sample are meshes
+  function streamHasFaceData(st) {
+    const pz = st && st.parsed;
+    return !!(pz && /^PRC/i.test(String(pz.format || st.subtype || '')) && pz.decodePath !== 'sample' && st.rawBytes);
+  }
+  // 'Solid' (closed CAD body), 'Sheet' (open CAD surfaces), 'Mesh' (triangles only: U3D, sample, single-face tessellation)
+  function bodyKind(part, st) {
+    const cad = streamHasFaceData(st) && (part.source === 'brep' || (part.numTessFaces | 0) > 1);
+    if (!cad) return 'Mesh';
+    const b = part.brep;
+    return b && b.isWatertight ? 'Solid' : 'Sheet';
+  }
+  const KIND_PREFIX = { Solid: 'Body', Sheet: 'Sheet', Mesh: 'Mesh' };
+  // default names: Body_1.. / Sheet_1.. / Mesh_1.., numbered per type in file order
+  function defaultBodyNames(kinds) {
+    const n = { Solid: 0, Sheet: 0, Mesh: 0 };
+    return kinds.map((k) => `${KIND_PREFIX[k] || 'Mesh'}_${++n[k]}`);
+  }
+  // 999 -> "999", 612345 -> "612k", 1234567 -> "1.2M"
+  function formatTriCount(n) {
+    n = Math.max(0, Math.round(+n || 0));
+    if (n < 1000) return String(n);
+    const k = Math.round(n / 1000);
+    return k < 1000 ? `${k}k` : `${(n / 1e6).toFixed(1)}M`;
+  }
+  // a typed name: control / bidi-override characters removed, trimmed, at most 100 characters ('' = keep the old name)
+  function cleanBodyName(v) {
+    return Array.from(String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim()).slice(0, 100).join('').trim();
+  }
+  // rename body idx (used by every export from then on); a name another body has gets _2, _3...; returns the name kept,
+  // or null when nothing changed (empty / unknown body)
+  function renamePart(idx, name) {
+    const p = state.parts[idx];
+    if (!p) return null;
+    let n = cleanBodyName(name);
+    if (!n || n === p.name) return null;
+    const taken = new Set(state.parts.filter((q, i) => i !== idx).map((q) => q.name));
+    if (taken.has(n)) { let k = 2; while (taken.has(`${n}_${k}`)) k++; n = `${n}_${k}`; }
+    p.name = n;
+    const st = state.streams[state.activeStreamIdx];
+    if (st && st.bodyNames) st.bodyNames[idx] = n;   // kept when you switch streams and come back
+    renderPartList();
+    try { document.dispatchEvent(new CustomEvent('pdf3d:rename', { detail: { idx, name: n } })); } catch (e) { /* no DOM */ }
+    return n;
+  }
+  // select body idx (-1 clears) in both the list and the viewport; one selection at a time. The face panel opens with it.
+  function selectPart(idx, source) {
+    idx = Number.isInteger(idx) && idx >= 0 && idx < state.parts.length ? idx : -1;
+    const changed = idx !== state.selectedPartIdx;
+    state.selectedPartIdx = idx;
+    state.facePanelOpen = idx >= 0;
+    syncPartSelection();
+    if (idx >= 0 && source === 'viewport') {
+      const row = partRow(idx);
+      if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+    }
+    if (changed) {
+      requestViewportRender();
+      try { document.dispatchEvent(new CustomEvent('pdf3d:selection', { detail: { idx, source: source || 'api' } })); } catch (e) { /* no DOM */ }
+    }
+    return idx;
+  }
+  function setPartVisible(idx, on) {
+    const p = state.parts[idx];
+    if (!p) return;
+    p.visible = !!on;
+    refreshAllUI();
+  }
+  const partRow = (idx) => { const el = document.getElementById('partList'); return el ? el.querySelector(`.part-item[data-idx="${idx}"]`) : null; };
+
+  const EYE_PATH = '<path d="M1.6 10S4.7 4.6 10 4.6 18.4 10 18.4 10 15.3 15.4 10 15.4 1.6 10 1.6 10z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>';
+  const EYE_SVG = `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">${EYE_PATH}<circle cx="10" cy="10" r="2.6" fill="currentColor"/></svg>`;
+  const EYE_OFF_SVG = `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">${EYE_PATH}<path d="M4 3.5l12 13M16 3.5l-12 13" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
+
+  let renaming = null;     // { idx, input } while a name is being edited
+  let rowClickTimer = 0;   // a click on the selected row toggles its face panel after the double-click window
+  function renderPartList() {
+    const el = document.getElementById('partList');
+    if (!el) return;
+    renaming = null;
+    clearTimeout(rowClickTimer);
+    el.innerHTML = '';
+    if (!state.parts.length) return;
+    const head = document.createElement('div');
+    head.className = 'part-head';
+    head.setAttribute('aria-hidden', 'true');
+    head.innerHTML = '<span></span><span></span><span>Name</span><span>Type</span><span title="Watertight (closed body)">WT</span><span title="Triangles">Tris</span>';
+    el.appendChild(head);
+    const st = state.streams[state.activeStreamIdx];
+    state.parts.forEach((p, idx) => {
+      const [r, g, b] = p.color.map((c) => Math.round(c * 255));
+      const kind = p.kind || bodyKind(p, st);
+      const wt = !!(p.brep && p.brep.isWatertight);
+      const nt = p.brep ? (p.brep.nt | 0) : 0;
+      const nameTip = `${p.name}${p.sourceName && p.sourceName !== p.name ? `\nName in file: ${p.sourceName}` : ''}\nDouble-click to rename`;
+      const item = document.createElement('div');
+      item.className = `part-item${state.selectedPartIdx === idx ? ' selected' : ''}${p.visible ? '' : ' is-hidden'}`;
+      item.dataset.idx = String(idx);
+      item.innerHTML =
+        `<div class="part-row">` +
+        `<button type="button" class="part-eye" data-idx="${idx}" title="${p.visible ? 'Hide' : 'Show'}" aria-label="${p.visible ? 'Hide' : 'Show'} ${escHTML(p.name)}">${p.visible ? EYE_SVG : EYE_OFF_SVG}</button>` +
+        `<span class="swatch" style="background:rgb(${r},${g},${b})"></span>` +
+        `<span class="part-name" title="${escHTML(nameTip)}">${escHTML(p.name)}</span>` +
+        `<span class="part-type" data-kind="${kind.toLowerCase()}">${kind}</span>` +
+        `<span class="part-wt" data-wt="${wt ? 'yes' : 'no'}" title="${wt ? 'Closed (watertight)' : 'Has open edges'}">${wt ? 'Yes' : 'No'}</span>` +
+        `<span class="part-tris" title="${nt.toLocaleString()} triangles">${formatTriCount(nt)}</span>` +
+        `</div>`;
+      item.querySelector('.part-eye').addEventListener('click', (ev) => { ev.stopPropagation(); setPartVisible(idx, !p.visible); });
+      item.querySelector('.part-eye').addEventListener('dblclick', (ev) => ev.stopPropagation());
+      item.querySelector('.part-name').addEventListener('dblclick', (ev) => { ev.stopPropagation(); ev.preventDefault(); startRename(idx); });
+      item.addEventListener('click', (ev) => {
+        if (ev.target.closest && ev.target.closest('.part-eye, .part-name-edit, .part-feat')) return;
+        clearTimeout(rowClickTimer);
+        if (ev.detail > 1) return;                    // 2nd click of a double-click
+        if (state.selectedPartIdx !== idx) { selectPart(idx, 'list'); return; }
+        // the selected row again: collapse / expand its face panel (C3), unless this turns out to be a double-click
+        rowClickTimer = setTimeout(() => { state.facePanelOpen = !state.facePanelOpen; syncPartSelection(); }, ev.detail === 0 ? 0 : 260);
+      });
+      item.addEventListener('keydown', (ev) => {
+        if (ev.key === 'F2' && ev.target === item) { ev.preventDefault(); startRename(idx); }
+      });
+      el.appendChild(item);
+    });
+    syncPartSelection();
+  }
+  // selection classes + the face panel, updated in place (no rebuild: keeps focus, scroll and double-clicks working)
+  function syncPartSelection() {
+    const el = document.getElementById('partList');
+    if (!el) return;
+    el.querySelectorAll('.part-feat').forEach((n) => n.remove());
+    el.querySelectorAll('.part-item').forEach((row) => {
+      const on = +row.dataset.idx === state.selectedPartIdx;
+      row.classList.toggle('selected', on);
+      row.classList.toggle('feat-open', on && !!state.facePanelOpen);
+    });
+    const row = partRow(state.selectedPartIdx);
+    if (row && state.facePanelOpen) row.appendChild(buildFacePanel(state.selectedPartIdx));
+  }
+  const FACE_ROWS = [['plane', 'Planes'], ['cylinder', 'Cylinders'], ['cone', 'Cones'], ['sphere', 'Spheres'], ['torus', 'Tori'], ['freeform', 'Freeform']];
+  const FACE_UNAVAILABLE = {
+    single_file: "Face types can't be detected in the single-file version; open the web version to see them.",
+    file_url: "Face types can't be detected when the page is opened as a local file; open it from a web address.",
+    browser_unsupported: "Face types can't be detected in this browser (no Web Workers)."
+  };
+  // C1-C4: face counts by type for the selected body (zero rows hidden), or one line saying why there are none (yet)
+  function buildFacePanel(idx) {
+    const p = state.parts[idx];
+    const box = document.createElement('div');
+    box.className = 'part-feat';
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', `Face types of ${p ? p.name : ''}`);
+    box.addEventListener('click', (ev) => ev.stopPropagation());
+    box.addEventListener('dblclick', (ev) => ev.stopPropagation());
+    const msg = (t, cls) => { box.innerHTML = `<div class="part-feat-msg${cls ? ' ' + cls : ''}">${escHTML(t)}</div>`; return box; };
+    if (!p) return msg('');
+    const kind = p.kind || bodyKind(p, state.streams[state.activeStreamIdx]);
+    if (kind === 'Mesh') return msg("This body is a mesh with no CAD face data, so face types can't be detected.");
+    const api = window.PDF3D && window.PDF3D.faceTypes;
+    const r = typeof api === 'function' ? api(idx) : { status: 'unavailable', reason: 'single_file' };
+    if (!r || r.status === 'none') return msg("No CAD face data in this body, so face types can't be detected.");
+    if (r.status === 'unavailable') return msg(FACE_UNAVAILABLE[r.reason] || FACE_UNAVAILABLE.browser_unsupported);
+    if (r.status === 'pending') return msg('Finding face types…', 'is-pending');
+    if (r.status === 'error') return msg("Face types couldn't be detected for this body.", 'is-error');
+    const rows = FACE_ROWS.filter(([k]) => (r.counts[k] | 0) > 0);
+    if (!rows.length) return msg('No faces detected.');
+    box.innerHTML = '<div class="part-feat-title">Faces</div>' + rows.map(([k, label]) =>
+      `<div class="part-feat-row" data-type="${k}"><span>${label}</span><span class="part-feat-n">${(r.counts[k] | 0).toLocaleString()}</span></div>`).join('');
+    return box;
+  }
+  // B3: Esc clears the selection (list + viewport) - unless a text field, an open popover / dialog or an export toast owns it
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape' || state.selectedPartIdx < 0 || ev.defaultPrevented) return;
+    const t = ev.target && ev.target.closest ? ev.target : null;
+    if (t && t.closest('input, textarea, select, [contenteditable="true"], .sm-pop, .sm-dialog, .cad-toast, .xf-result')) return;
+    if (document.querySelector('.sm-pop:not([hidden]), .sm-dialog:not([hidden])')) return;
+    ev.preventDefault(); ev.stopPropagation();
+    selectPart(-1, 'key');
+  }, true);
+  document.addEventListener('pdf3d:facetypes', (ev) => {
+    if (ev.detail && ev.detail.idx === state.selectedPartIdx && state.facePanelOpen) syncPartSelection();
+  });
+  // A5: inline rename. Enter / leaving the field saves, Esc cancels; an empty name keeps the old one.
+  function startRename(idx) {
+    const row = partRow(idx), p = state.parts[idx];
+    if (!row || !p) return;
+    clearTimeout(rowClickTimer);
+    if (renaming) finishRename(false);
+    const nameEl = row.querySelector('.part-name');
+    if (!nameEl) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'part-name-edit';
+    input.value = p.name;
+    input.maxLength = 100;
+    input.spellcheck = false;
+    input.setAttribute('aria-label', `Rename ${p.name}`);
+    nameEl.replaceWith(input);
+    renaming = { idx, input, nameEl };
+    const stop = (ev) => ev.stopPropagation();
+    input.addEventListener('click', stop);
+    input.addEventListener('dblclick', stop);
+    input.addEventListener('mousedown', stop);
+    input.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();   // Esc / Enter / arrows belong to the field, not the list or the page
+      if (ev.key === 'Enter') { ev.preventDefault(); finishRename(true, true); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); finishRename(false, true); }
+    });
+    input.addEventListener('blur', () => finishRename(true));
+    input.focus();
+    input.select();
+  }
+  function finishRename(save, refocus) {
+    const r = renaming;
+    if (!r) return;
+    renaming = null;
+    const kept = save ? renamePart(r.idx, r.input.value) : null;
+    if (!kept && r.input.isConnected) r.input.replaceWith(r.nameEl);
+    if (refocus) { const row = partRow(r.idx); if (row) row.focus(); }
   }
 
   // Outcome of the last load / stream activation, published as window.PDF3D.lastLoad (see README "Load result").
@@ -8391,6 +8698,15 @@ void main() { gl_FragColor = uRGBA; }`;
       window.addEventListener('mouseup', () => {
         state.camera.Dragging = false;
       });
+      // 1.8.0 B2/B3: a click (no drag) on a body selects it and its list row; on empty space it clears the selection
+      let pickDown = null;
+      canvas.addEventListener('mousedown', (ev) => { pickDown = ev.button === 0 ? { x: ev.clientX, y: ev.clientY } : null; }, true);
+      canvas.addEventListener('click', (ev) => {
+        const d = pickDown; pickDown = null;
+        if (!d || ev.button !== 0 || Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 4) return;
+        if (!state.parts.length) return;
+        selectPart(pickPartAt(ev.clientX, ev.clientY), 'viewport');
+      });
       canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
       canvas.addEventListener('wheel', (ev) => {
         ev.preventDefault();
@@ -8520,6 +8836,9 @@ void main() { gl_FragColor = uRGBA; }`;
     loadSample,
     activateStream,
     showAllParts, invertParts,
+    // 1.8.0 Bodies list: selectPart(idx|-1), renamePart(idx, name) -> kept name | null, setPartVisible(idx, bool),
+    // pickPartAt(clientX, clientY) -> idx | -1, formatTriCount(n), bodyKind(part, stream), defaultBodyNames(kinds)
+    selectPart, renamePart, setPartVisible, pickPartAt, formatTriCount, bodyKind, defaultBodyNames,
     // 1.7.0: load status { text, title, tone: 'ok' | 'warn' } (also sent as 'pdf3d:status')
     getStatus: () => Object.assign({ text: '', title: '', tone: '' }, state.status),
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
@@ -9040,7 +9359,7 @@ void main() { gl_FragColor = uRGBA; }`;
 
   const LIMITS = {
     maxTris: 1000000,    // above: 'too_large' (skipped) - the WASM heap would run out (2-4 GB limit)
-    maxFitTris: 200000,  // above: mesh body only (fitting would take many minutes and >1.5 GB)
+    warnFitTris: 200000, // 1.8.0: above this the export flow warns before fitting (slow, may crash the tab) - it never blocks
   };
   const KERNEL_BYTES = 13719175;  // gzip transfer size of opencascade.full.wasm (50.3 MB raw)
   const LS_KEY = 'pdf3d.cadKernel';
@@ -9094,12 +9413,10 @@ void main() { gl_FragColor = uRGBA; }`;
     const fittable = !!(stream && stream.subtype === 'PRC' && stream.rawBytes && parsed && parsed.decodePath !== 'sample');
     let mode = 'fit', cause = null;
     if (!fittable) { mode = 'mesh_only'; cause = noFaceDataCause(stream); }
-    else if (tris > LIMITS.maxFitTris) { mode = 'mesh_only'; cause = 'Too many triangles to fit surfaces in the browser (' + fmtK(tris) + ', fitting limit ' + fmtK(LIMITS.maxFitTris) + ')'; }
     // why: the preflight / mesh_only text; cause: the same without the mesh clause (fitted-only skips write nothing)
     // model-wide reason no part was fitted (1.6.1, summary.fitSkippedReason): the card can show one line instead of per-part rows
-    const skip = mode === 'fit' ? { fitSkippedReason: null }
-      : fittable ? { fitSkippedReason: 'too_many_tris', fitSkippedTris: tris, fitSkippedLimit: LIMITS.maxFitTris }
-        : { fitSkippedReason: 'no_face_data' };
+    // 1.8.0: no triangle limit on fitting any more (the old 200k fit cap is gone); the UI asks first above LIMITS.warnFitTris
+    const skip = mode === 'fit' ? { fitSkippedReason: null } : { fitSkippedReason: 'no_face_data' };
     return { st, ids, parts, tris, stream, mode, cause, skip, why: cause && cause + ', so only the mesh body is exported' };
   }
   // the source format of the active stream: payload magic first (the /Subtype can lie), then the decoder's format, then /Subtype
@@ -9125,7 +9442,7 @@ void main() { gl_FragColor = uRGBA; }`;
 
   function canExportCadSurfaces(partIds) {
     const sel = selection(partIds);
-    const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode };
+    const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode, warnLarge: sel.mode === 'fit' && sel.tris > LIMITS.warnFitTris };
     const un = unavailableWhy();
     if (un) return { ok: false, reason: 'unavailable', message: un, estimate };
     if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible bodies first', estimate };
@@ -9187,7 +9504,7 @@ void main() { gl_FragColor = uRGBA; }`;
       if (!workerErr && wres && kernelFailed) { kernelFailed = false; updateCaps(); }
       if (workerErr) { status = 'mesh_only'; const fe = friendlyError(workerErr); reasonCode = fe.code; cause = fe.text; reason = cause + ' — exported the mesh body only';
         if (fe.code === 'kernel_download' || fe.code === 'worker_failed') { kernelFailed = true; updateCaps(); } }
-      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = sel.tris > LIMITS.maxFitTris ? 'fit_limit' : 'no_face_data'; cause = sel.cause; reason = sel.why; }
+      else if (sel.mode !== 'fit') { status = 'mesh_only'; reasonCode = 'no_face_data'; cause = sel.cause; reason = sel.why; }
       else if (!bodiesOk.length) { status = 'mesh_only'; reasonCode = 'no_fit'; reason = cause = 'No clean surface fit: ' + (parts.map((p) => p.reason).filter(Boolean)[0] || 'no face could be fitted'); }
       else if (bodiesOk.length === parts.length && parts.every((p) => p.status === 'solid')) status = 'solid';
       else { status = 'shell'; reasonCode = 'open_shell'; reason = parts.filter((p) => p.status !== 'solid').map((p) => p.summary.name + ': ' + (p.reason || p.status)).join('; '); }
@@ -9313,6 +9630,39 @@ void main() { gl_FragColor = uRGBA; }`;
     return retrying;
   }
 
+  // PDF3D.faceTypes(partIdx) (1.8.0, the Bodies list's face panel): the face types found in one body, from the worker's
+  // 'classify' command (segmentation + primitive classification only: no CAD kernel, no B-spline fitting). The first call for
+  // a stream starts one worker that classifies every body, the asked-for one first (later asks jump the queue); results are
+  // cached per stream, and switching streams terminates the worker. Returns synchronously:
+  //   { status: 'ready', counts: { plane, cylinder, cone, sphere, torus, freeform } } | { status: 'pending' }
+  //   | { status: 'none', reason: 'no_face_data' } | { status: 'unavailable', reason: 'single_file' | 'file_url' | 'browser_unsupported' }
+  //   | { status: 'error', reason } ; document event 'pdf3d:facetypes' { detail: { idx } } fires when a result arrives.
+  const faces = { stream: null, res: new Map(), w: null };
+  const faceStop = () => { if (faces.w) { try { faces.w.terminate(); } catch (e) { /* gone */ } faces.w = null; } };
+  const faceEvt = (idx) => { try { document.dispatchEvent(new CustomEvent('pdf3d:facetypes', { detail: { idx } })); } catch (e) { /* no DOM */ } };
+  function faceTypes(idx) {
+    const st = appState(); const stream = st && st.streams && st.streams[st.activeStreamIdx];
+    if (!st || !stream || !st.parts || !st.parts[idx]) return null;
+    if (faces.stream !== stream || faces.parts !== st.parts) { faceStop(); faces.stream = stream; faces.parts = st.parts; faces.res = new Map(); }
+    const parsed = stream.parsed;
+    if (!(sourceFormat(stream) === 'PRC' && stream.rawBytes && parsed && parsed.decodePath !== 'sample')) return { status: 'none', reason: 'no_face_data' };
+    const un = capReason(); if (un && un !== 'kernel_download') return { status: 'unavailable', reason: un };
+    if (faces.res.has(idx)) return faces.res.get(idx);
+    if (faces.w) { faces.w.postMessage({ cmd: 'prioritize', partIdx: idx }); return { status: 'pending' }; }
+    let w; try { w = new Worker(WORKER_URL); } catch (e) { return { status: 'unavailable', reason: 'browser_unsupported' }; }
+    faces.w = w; const res = faces.res;
+    const failAll = (reason) => { faceStop(); st.parts.forEach((p, i) => { if (!res.has(i)) { res.set(i, { status: 'error', reason }); faceEvt(i); } }); };
+    w.onmessage = (ev) => { const m = ev.data || {}; if (faces.w !== w) return;
+      if (m.type === 'faces') { res.set(m.idx, m.counts ? { status: 'ready', counts: m.counts } : { status: 'none', reason: m.reason || 'no_face_data' }); faceEvt(m.idx); }
+      else if (m.type === 'classified') { faceStop(); }
+      else if (m.type === 'error') failAll(String(m.message || 'error')); };
+    w.onerror = (e) => { if (e && e.preventDefault) e.preventDefault(); if (faces.w === w) failAll((e && e.message) || 'worker error'); };
+    const order = [idx].concat(st.parts.map((p, i) => i).filter((i) => i !== idx));
+    const prc = stream.rawBytes.slice().buffer;
+    w.postMessage({ cmd: 'classify', prc, order }, [prc]);
+    return { status: 'pending' };
+  }
+
   // UI: Designer's cad-export-ui.js (Export menu item, progress/cancel toast) drives this API.
 
   if (!NS.exportCadSurfaces || NS.exportCadSurfaces.__cadStub) {
@@ -9320,6 +9670,7 @@ void main() { gl_FragColor = uRGBA; }`;
     NS.exportCadSurfaces = exportCadSurfaces;
     NS.cadSurfaceLimits = LIMITS;
     NS.retryCadKernel = retryCadKernel;
+    NS.faceTypes = faceTypes;
     updateCaps();
     window.addEventListener('online', () => { if (kernelFailed) { kernelFailed = false; updateCaps(); } });
   }
@@ -9364,9 +9715,9 @@ void main() { gl_FragColor = uRGBA; }`;
     ['Scroll', 'Zoom'],
     ['Fit', 'Reset zoom and pan'],
     ['Reset', 'Back to the starting view'],
-    [BODIES, 'Click a body to highlight it; tick boxes show or hide bodies'],
+    [BODIES, 'Click a body in the list or the view to select it; the eye shows or hides it; double-click a name to rename it'],
     ['Open or drop', 'Open a 3D PDF, .u3d or .prc file, or drop it anywhere on the page'],
-    ['Esc', 'Close a menu, panel or dialog']
+    ['Esc', 'Clear the selection, or close a menu, panel or dialog']
   ];
   const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
   const VIEW_TITLES = { iso: 'Iso', top: 'Top (XY)', front: 'Front (XZ)', right: 'Right (YZ)' };   // hover titles (as the <= 1.6.2 view buttons)
@@ -9777,8 +10128,7 @@ void main() { gl_FragColor = uRGBA; }`;
     document.addEventListener('pdf3d:status', syncStatus);
     // a new PDF3D.lastLoad without a status change (stream switch, test stubs): re-read it
     document.addEventListener('pdf3d:lastload', () => syncStatus());
-    observe($('partList'), syncPartCount, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
-    $('partList').addEventListener('change', () => setTimeout(syncPartCount, 0));
+    observe($('partList'), syncPartCount, { childList: true });
 
     // ---------- global keyboard / pointer handling
     document.addEventListener('pointerdown', (ev) => {
@@ -9945,10 +10295,11 @@ void main() { gl_FragColor = uRGBA; }`;
   function syncPartCount() {
     const list = $('partList');
     if (!list || !ui.partCount) return;
-    const chks = list.querySelectorAll('.part-chk');
-    const vis = [...chks].filter((c) => c.checked).length;
-    ui.partCount.textContent = chks.length ? (vis === chks.length ? String(chks.length) : `${vis}/${chks.length}`) : '0';
-    ui.btnParts.title = chks.length ? `${vis} of ${chks.length} solid bodies visible` : 'No solid bodies';
+    // 1.8.0: the eye button replaced the checkbox; a hidden body's row has class is-hidden
+    const rows = list.querySelectorAll('.part-item');
+    const vis = [...rows].filter((r) => !r.classList.contains('is-hidden')).length;
+    ui.partCount.textContent = rows.length ? (vis === rows.length ? String(rows.length) : `${vis}/${rows.length}`) : '0';
+    ui.btnParts.title = rows.length ? `${vis} of ${rows.length} bodies visible` : 'No bodies';
     syncBodies();
     syncEmpty();
   }
@@ -10757,7 +11108,18 @@ void main() { gl_FragColor = uRGBA; }`;
       h('hr', { class: 'sm-sep' }), ui.nameRow,
       ui.big = h('p', { class: 'xf-note xf-note--warn xf-big', 'data-xf': 'big-note', role: 'note', hidden: true }),
       ui.dmgNote = h('p', { class: 'xf-note xf-note--warn xf-dmg', 'data-xf': 'damaged-note', role: 'note', hidden: true, text: DMG_NOTE }),
-      h('div', { class: 'xf-foot' }, ui.go));
+      ui.scope = h('p', { class: 'xf-note xf-scope', 'data-xf': 'scope-note', role: 'note', hidden: true }),
+      // 1.8.0 D2: asked before fitting a large model (no limit any more); each button is a fresh click for the save picker
+      ui.fitWarn = h('div', { class: 'xf-fitwarn', 'data-xf': 'fit-warning', role: 'alert', hidden: true },
+        ui.fitWarnText = h('p', { class: 'xf-note xf-note--warn' }),
+        h('div', { class: 'xf-fitwarn-btns' },
+          ui.fwGo = h('button', { type: 'button', class: 'btn btn-primary', 'data-xf': 'fit-continue', text: 'Continue' }),
+          ui.fwMesh = h('button', { type: 'button', class: 'btn', 'data-xf': 'fit-mesh', text: 'Export mesh STEP instead' }),
+          ui.fwBack = h('button', { type: 'button', class: 'btn btn-ghost', 'data-xf': 'fit-back', text: 'Back' }))),
+      ui.foot = h('div', { class: 'xf-foot' }, ui.go));
+    ui.fwGo.addEventListener('click', (ev) => { ev.stopPropagation(); showFitWarn(0, true); doSave({ confirmed: true }); });
+    ui.fwMesh.addEventListener('click', (ev) => { ev.stopPropagation(); showFitWarn(0, true); doSave({ confirmed: true, mesh: true }); });
+    ui.fwBack.addEventListener('click', (ev) => { ev.stopPropagation(); showFitWarn(0); ui.go.focus({ preventScroll: true }); });
 
     // Safari never focuses a pressed button: ignore focus loss while a pointer is down in the popover
     ui.pop.addEventListener('pointerdown', () => { ptrInside = true; }, true);
@@ -10769,7 +11131,7 @@ void main() { gl_FragColor = uRGBA; }`;
       if (!ui.pop.contains(a) && a !== lastTrigger && document.hasFocus()) close(false);
     }, 0));
     ui.pop.addEventListener('keydown', popKeys);
-    ui.opts.addEventListener('change', () => estimateSoon());    // units / detail / B-Rep proxies, radios
+    ui.opts.addEventListener('change', () => { showFitWarn(0); estimateSoon(); });    // units / detail / B-Rep proxies, radios
     document.addEventListener('pointerdown', (ev) => {
       if (open && !ui.pop.contains(ev.target) && !(lastTrigger && lastTrigger.contains(ev.target))) close(false);
     }, true);
@@ -10805,7 +11167,7 @@ void main() { gl_FragColor = uRGBA; }`;
   function openPop(btn) {
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
-    renderList(); renderOpts(); syncDamagedNote();
+    renderList(); renderOpts(); syncDamagedNote(); syncScope(); showFitWarn(0, true);
     if (!ui.result.hidden) { ui.result.hidden = true; stashed = true; }
     ui.pop.hidden = false;
     open = true;
@@ -10817,6 +11179,7 @@ void main() { gl_FragColor = uRGBA; }`;
   function close(returnFocus) {
     if (!open) return;
     open = false;
+    showFitWarn(0, true);
     ui.pop.hidden = true;
     ui.btnSimple.setAttribute('aria-expanded', 'false');
     if (stashed) { stashed = false; ui.result.hidden = false; }   // closed without a new export: the last card comes back
@@ -10872,6 +11235,7 @@ void main() { gl_FragColor = uRGBA; }`;
   }
   function select(id, keepFocus) {
     if (!FMT[id] || !available(FMT[id])) return;
+    if (id !== prefs.format) showFitWarn(0);
     prefs.format = id; save();
     for (const b of ui.list.querySelectorAll('.xf-fmt')) {
       const on = b.dataset.xfFormat === id;
@@ -11007,6 +11371,26 @@ void main() { gl_FragColor = uRGBA; }`;
     const ll = NS().lastLoad; return !!(ll && ll.status === 'ok' && nonEmpty(ll.damaged));
   }
   function resDamaged(res) { return !!(res && (nonEmpty(res.damaged) || (res.summary && nonEmpty(res.summary.damaged)))) || loadDamaged(); }
+  // 1.8.0: with a body selected (list or viewport click) the export covers that body only - say so, with the way back
+  function syncScope() {
+    const s = appState(), ids = sel();
+    const p = ids && s && s.parts[ids[0]];
+    ui.scope.hidden = !p;
+    if (p) ui.scope.textContent = 'Only the selected body (' + p.name + ') will be exported. Press Esc or click empty space in the view to export all visible bodies.';
+  }
+  // D2 (1.8.0): fitted STEP above PDF3D.cadSurfaceLimits.warnFitTris (200k) asks first; n = triangles (0 hides it)
+  function showFitWarn(n, quiet) {
+    const on = n > 0;
+    if (on) ui.fitWarnText.textContent = 'This model has ' + fmtK(n) + ' triangles. Fitting surfaces may take a long time and can crash the browser tab on very large models.';
+    ui.fitWarn.hidden = !on; ui.foot.hidden = on;
+    if (!quiet && open) { position(); (on ? ui.fwGo : ui.go).focus({ preventScroll: true }); }
+  }
+  // triangles of a fitted STEP export that needs the D2 question first, else 0
+  function largeFit(f, opts) {
+    if (f.id !== 'step' || opts.body === 'mesh') return 0;
+    const pf = preflight(), e = pf && pf.estimate;
+    return e && e.warnLarge && pf.ok !== false ? (+e.tris || 1) : 0;
+  }
   function syncDamagedNote() {
     const on = loadDamaged();
     if (ui.dmgNote.hidden === !on) return;
@@ -11056,11 +11440,15 @@ void main() { gl_FragColor = uRGBA; }`;
   }
 
   // ------------------------------------------------------------------ save
-  async function doSave() {
+  // ov (1.8.0 D2): { confirmed: true } = the large-model question was answered; mesh: true = 'Export mesh STEP instead'
+  async function doSave(ov) {
+    ov = ov || {};
     if (running) { close(true); showCard(); return; }
     const f = FMT[prefs.format];
     if (!f || !available(f)) return;
     const opts = optsFor(f);
+    if (ov.mesh && f.id === 'step') { opts.body = 'mesh'; opts.fittedOnly = false; }
+    if (!ov.confirmed) { const n = largeFit(f, opts); if (n) { showFitWarn(n); return; } }
     let name = fileName(), handle = null;
     if (pickerOK()) {
       // Must be the first await in the click gesture (Chrome throws SecurityError after long async work).
@@ -11491,7 +11879,8 @@ void main() { gl_FragColor = uRGBA; }`;
     return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
   }
 
-  // Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
+  // Legacy (<= 1.7.0 engines / hooks): 1.8.0 has no fitting limit (D1) and never reports fit_limit; kept so an older engine's
+  // result still reads right. Whole-model fitting limit (r08: 429k triangles over the 200k limit): nothing was fitted for one model-wide reason, so the
   // card says so once ("Exported as mesh STEP" / "Too large to fit surfaces in the browser (429k triangles, limit 200k).") and
   // lists no part rows. Triggers: top-level reasonCode fit_limit, every part fit_limit, or the engine's too-many-triangles text.
   // Counts: PDF3D.lastLoad.trisParsed (1.6.2), else summary.tris, else the reason text; limit: summary.fitLimit / PDF3D.cadSurfaceLimits.maxFitTris (else the reason).

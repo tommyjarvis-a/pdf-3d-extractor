@@ -7,6 +7,9 @@
  * out: {type:'progress', stage, pct (0..1 within the worker's share), done, total, bytes, totalBytes, label}
  *      {type:'done', fittedStep:ArrayBuffer|null, byType (face count per STEP surface type)|null, parts:[{idx, status, reason, summary}], timings, wasmHeapPeak}
  *      {type:'error', message}
+ * in : {cmd:'classify', prc:ArrayBuffer, order:[partIdx..]} (1.8.0 face-type panel: no kernel, segmentation + primitive
+ *       classification only); {cmd:'prioritize', partIdx} moves a body to the front of the queue
+ * out: {type:'faces', idx, counts:{plane, cylinder, cone, sphere, torus, freeform}|null, reason} per body, then {type:'classified'}
  */
 'use strict';
 importScripts('../prc-brep.js', '../prc-decoder.js', 'fit-linalg.js', 'fit.js', 'occ-build.js', 'pipeline.js');
@@ -54,6 +57,31 @@ async function loadKernel(post, cacheName) {
   return { oc, downloadMs: tDl, initMs: now() - t - tDl };
 }
 
+// face types per body for the Bodies list (1.8.0): one body at a time, yielding between bodies so 'prioritize' gets through
+let classifyQueue = null;
+const FACE_KEY = { PLANE: 'plane', CYLINDER: 'cylinder', CONE: 'cone', SPHERE: 'sphere', TORUS: 'torus', FREEFORM: 'freeform' };
+async function classifyAll(m) {
+  try {
+    const r = self.PRCDecoder.parsePRC(new Uint8Array(m.prc), { warnings: [], withNormals: true });
+    const dparts = r.parts.filter(q => q.faces && q.faces.length);
+    classifyQueue = (m.order || []).slice();
+    while (classifyQueue.length) {
+      await new Promise(res => setTimeout(res, 0));
+      const i = classifyQueue.shift(); const p = dparts[i];
+      if (!p) { self.postMessage({ type: 'faces', idx: i, counts: null, reason: 'not_found' }); continue; }
+      if (!p.faceIndexPerTriangle || p.faceIndexPerTriangle.length !== p.faces.length) { self.postMessage({ type: 'faces', idx: i, counts: null, reason: 'no_face_data' }); continue; }
+      const fit = self.PDF3DFit.fitMesh(Pipe.meshFromPart(p, r.units && r.units.unitsInMM), { classifyOnly: true });
+      const counts = { plane: 0, cylinder: 0, cone: 0, sphere: 0, torus: 0, freeform: 0 };
+      for (const g of fit.regions || []) counts[FACE_KEY[g.type] || 'freeform']++;
+      self.postMessage({ type: 'faces', idx: i, counts });
+    }
+    self.postMessage({ type: 'classified' });
+  } catch (e) {
+    self.postMessage({ type: 'error', message: String((e && e.message) || e), stage: 'classify' });
+  }
+  classifyQueue = null;
+}
+
 self.onmessage = async (ev) => {
   const m = ev.data;
   // probe (PDF3D.retryCadKernel): a fresh kernel download / Cache Storage read + init in this new worker, nothing else
@@ -62,6 +90,8 @@ self.onmessage = async (ev) => {
     catch (e) { self.postMessage({ type: 'error', message: String((e && e.message) || e), stage: 'kernel', oom: /memory|Aborted\(OOM|allocation/i.test(String(e && e.message || e)) }); }
     return;
   }
+  if (m && m.cmd === 'prioritize') { if (classifyQueue) { const k = classifyQueue.indexOf(m.partIdx); if (k > 0) { classifyQueue.splice(k, 1); classifyQueue.unshift(m.partIdx); } } return; }
+  if (m && m.cmd === 'classify') { await classifyAll(m); return; }
   if (!m || m.cmd !== 'run') return;
   const T0 = now(); const timings = {}; let heapPeak = 0; let oc = null;
   const heap = () => { if (oc && oc.HEAP8 && oc.HEAP8.length > heapPeak) heapPeak = oc.HEAP8.length; };
@@ -109,7 +139,7 @@ self.onmessage = async (ev) => {
     post({ stage: 'write', pct: 0.97, label: 'Writing fitted surfaces…' }, true);
     t = now(); let fitted = null;
     let byType = null;
-    if (bodies.length) { const bytes = Pipe.writeFitted(oc, bodies, Pipe.baseName(dparts[sel[0]].name)); fitted = bytes.slice().buffer; byType = Pipe.stepFaceTypes(new Uint8Array(fitted)); }
+    if (bodies.length) { const bytes = Pipe.writeFitted(oc, bodies, Pipe.baseName((m.names && m.names[0]) || dparts[sel[0]].name)); fitted = bytes.slice().buffer; byType = Pipe.stepFaceTypes(new Uint8Array(fitted)); }
     timings.writeFitted = Math.round(now() - t); heap();
     timings.worker = Math.round(now() - T0);
     self.postMessage({ type: 'done', fittedStep: fitted, byType, parts, timings, wasmHeapPeak: heapPeak }, fitted ? [fitted] : []);

@@ -8,7 +8,7 @@
  * Integration: <link rel="stylesheet" href="affordance.css" /> in <head>, BEFORE simple-mode.css.
  *
  * Which list rows are really clickable (checked in app.js):
- *   .part-item   -> click selects/highlights the part; .part-chk toggles visibility      => INTERACTIVE
+ *   .part-item   -> click selects/highlights the part; .part-eye shows / hides it        => INTERACTIVE
  *   .stream-item -> click calls activateStream(idx)                                    => INTERACTIVE
  *   #attachList button[data-att] ("Save")                                              => INTERACTIVE (button only)
  *   .tree-row (#treeList), .feature-item (#featureList / #attachList rows), .kv-box,
@@ -64,7 +64,6 @@ label:has(> input[type="checkbox"]) { cursor: pointer; }
   box-shadow: inset 3px 0 0 var(--cyan);
 }
 .part-item.selected .part-name, .stream-item.active .stream-name { color: var(--cyan); }
-.part-chk { cursor: pointer; }
 .part-item:focus-visible, .stream-item:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
 
 /* ===================================================================== INFORMATION (quiet) */

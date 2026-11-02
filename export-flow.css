@@ -135,3 +135,10 @@ body.xf-on.sm-simple .xf-retry[aria-disabled="true"] { color: var(--text-2); cur
   .xf-r-close, .xf-r-cancel { min-width: 40px; min-height: 40px; }
   .xf-result { right: 12px; left: 12px; width: auto; bottom: 12px; }
 }
+
+/* 1.8.0: scope note (a body is selected) and the large-model fitting question (D2) */
+.xf-scope { color: var(--text-1); }
+.xf-fitwarn { padding: 2px 4px 2px; }
+.xf-fitwarn .xf-note { margin: 0 6px 8px; }
+.xf-foot[hidden], .xf-fitwarn[hidden], .xf-scope[hidden] { display: none; }
+.xf-fitwarn-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
