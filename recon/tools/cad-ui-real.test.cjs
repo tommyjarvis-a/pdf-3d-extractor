@@ -3,6 +3,9 @@
 // Usage: NODE_PATH=/tmp/pwrun/node_modules BASE=http://127.0.0.1:PORT/ [STANDALONE=file:///…/standalone.html] [OUT=dir]
 //        node recon/tools/cad-ui-real.test.cjs
 // BASE must serve this worktree (or a git-archive copy of it). Uses sample2.pdf (screw) and the g01 dice (U3D).
+// 1.7.0: the Advanced checks (#cadExportBtn, ?ui=advanced) are removed with the Advanced UI. STALE: the Simple checks
+// below still drive the old Export ▾ menu item (#smMenuExport, [data-cad="simple"]), which export-flow.js replaced;
+// they need porting to the Export dialog (export-flow.js) before this heavy real-engine test can pass again.
 const { chromium } = require('playwright-core');
 const fs = require('fs');
 const BASE = process.env.BASE || 'http://127.0.0.1:8951/';
@@ -39,7 +42,7 @@ const openMenu = async (p) => { if (!(await p.isVisible(MENU))) await p.click(TR
 
   // 1. Simple, screw, full run (fitted + mesh) through the menu item
   {
-    const { p, ctx } = await page('index.html?ui=simple', SCREW);
+    const { p, ctx } = await page('index.html', SCREW);
     ok('no legacy Advanced CAD button in the page', (await p.$$('#btnExportCAD, #cadExportPanel')).length === 0);
     await openMenu(p);
     const mi = await p.$eval(MI, (e) => ({ dis: e.getAttribute('aria-disabled'), label: e.querySelector('.sm-mi-label').textContent, sub: e.querySelector('.cad-mi-sub').textContent, sub2: e.querySelector('.cad-mi-sub2').textContent }));
@@ -85,24 +88,9 @@ const openMenu = async (p) => { if (!(await p.isVisible(MENU))) await p.click(TR
     await p.evaluate(() => { window.PDF3D.cadSurfaceLimits.maxTris = window.__lim; window.PDF3DCadExportUI.refresh(); });
     await ctx.close();
   }
-  // 3. Advanced, screw, fitted only via the checkbox
-  {
-    const { p, ctx } = await page('index.html?ui=advanced', SCREW);
-    ok('advanced: one CAD button (Designer), legacy button absent', (await p.$$('#cadExportBtn')).length === 1 && (await p.$$('#btnExportCAD')).length === 0);
-    await p.check('#cadFittedOnly');
-    await p.click('#cadExportBtn');
-    await waitDone(p);
-    const t = await toast(p);
-    ok('advanced: fitted-only result', t.status === 'solid' && /No mesh body \(fitted solid only\)/.test(t.text) && /Mesh body\s*not included/.test(t.text), t.title);
-    await settle(p, 800);
-    ok('advanced: downloaded sample2-surfaces-only.stp', p.downloads.length === 1 && p.downloads[0].suggestedFilename() === 'sample2-surfaces-only.stp', p.downloads.map((d) => d.suggestedFilename()).join(','));
-    if (p.downloads.length) { const f = await saveDl(p, 0, 'ui-advanced-sample2-surfaces-only.stp'); const txt = fs.readFileSync(f, 'utf8');
-      ok('advanced: fitted-only STEP has no mesh body', /'screw_fitted'/.test(txt) && !/'screw_mesh'/.test(txt), (fs.statSync(f).size / 1048576).toFixed(1) + ' MB'); }
-    await ctx.close();
-  }
   // 4. U3D dice: mesh body only
   {
-    const { p, ctx } = await page('index.html?ui=simple', DICE);
+    const { p, ctx } = await page('index.html', DICE);
     await openMenu(p);
     ok('dice: item enabled (mesh-only export allowed)', (await p.$eval(MI, (e) => e.getAttribute('aria-disabled'))) === 'false');
     await p.click(MI);
@@ -117,15 +105,11 @@ const openMenu = async (p) => { if (!(await p.isVisible(MENU))) await p.click(TR
   if (process.env.STANDALONE) {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await ctx.newPage();
     p.on('pageerror', (e) => errors.push('standalone :: PAGEERROR ' + e.message));
-    await p.goto(process.env.STANDALONE + '?ui=simple');
+    await p.goto(process.env.STANDALONE);
     await p.waitForFunction(() => window.CAD3DExtractor && window.CAD3DExtractor.getState().parts.length > 0, null, { timeout: 60000 }); await settle(p, 800);
     await openMenu(p);
     const s = await p.$eval(MI, (e) => ({ dis: e.getAttribute('aria-disabled'), reason: e.dataset.reason, sub: e.querySelector('.cad-mi-sub').textContent }));
     ok('standalone: Simple item disabled, reason unavailable', s.dis === 'true' && s.reason === 'unavailable' && /single-file/.test(s.sub), JSON.stringify(s));
-    await p.goto(process.env.STANDALONE + '?ui=advanced');
-    await p.waitForFunction(() => window.CAD3DExtractor && window.CAD3DExtractor.getState().parts.length > 0, null, { timeout: 60000 }); await settle(p, 800);
-    const a = await p.$eval('#cadExportBtn', (e) => ({ dis: e.getAttribute('aria-disabled'), note: document.querySelector('#cadAdvNote').textContent }));
-    ok('standalone: Advanced button disabled with note', a.dis === 'true' && /single-file/.test(a.note), JSON.stringify(a));
     await ctx.close();
   }
   ok('no console/page errors', errors.length === 0, errors.slice(0, 5).join(' || '));

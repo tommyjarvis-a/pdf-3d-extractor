@@ -2,7 +2,8 @@
 
 ## 1.7.0 (alpha) — 2026-11-02
 
-Alpha: carries the 1.6.2 release candidate (below) plus a Simple-mode viewer refresh. Exports are byte-identical to 1.6.2.
+Alpha: carries the 1.6.2 release candidate (below), a Simple-mode viewer refresh, and Simple as the only UI (the
+Advanced UI is removed). Exports are byte-identical to 1.6.2.
 
 ### Included from 1.6.2
 - Everything listed under 1.6.2 below: `PDF3D.saveAttachment`, `attachmentDetails[].fileName` / `.mime`,
@@ -27,6 +28,19 @@ Alpha: carries the 1.6.2 release candidate (below) plus a Simple-mode viewer ref
 - `window.PDF3DView` (`get()`, `set(key, value)`, `'pdf3d:viewprefs'` event); the three choices are remembered in
   `localStorage` (`pdf3d-extractor.viewPrefs`).
 - Worker cache key is now `1.7.0-w1`.
+- **Info → File & geometry** shows the active 3D stream size: `3D stream size: X compressed • Y uncompressed` (moved from
+  the Advanced stream drawer).
+- Script hooks the UI now uses directly: `PDF3DView.renderModes` / `state()` / `setRenderMode` / `preset` / `fit` /
+  `setOrbitMode` / `setExplode` (`'pdf3d:viewchange'` event); `PDF3D.exportSettings` (`get` / `set`, units, body type,
+  reduce detail; `'pdf3d:exportsettings'` event); `CAD3DExtractor.getStatus` / `loadSample` / `showAllParts` /
+  `invertParts` (`'pdf3d:status'` event). Existing `PDF3D` export hooks are unchanged.
+
+### Removed
+- The Advanced UI (workbench, inspector, export bar, stream telemetry drawer, `#statusBadge`): code deleted, not hidden.
+- The Simple / Advanced switch, `?ui=advanced` / `?ui=simple` and the remembered mode (`pdf3d-extractor.uiMode` is
+  cleared at start). Simple is the only UI.
+- The STEP text preview, the `.x_t` text preview / entity table (`?xt=1`), Copy Preview and the raw 3D stream block list.
+- Units, body type and reduce detail live only in the Export dialog (same values and defaults as before).
 
 ## 1.6.2 (alpha) — 2026-11-01
 

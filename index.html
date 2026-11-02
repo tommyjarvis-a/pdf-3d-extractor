@@ -40,23 +40,7 @@
     overflow: hidden;
   }
 
-  /* Top Bar */
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px;
-    background: linear-gradient(180deg, #131c2e 0%, #0d1422 100%);
-    border-bottom: 1px solid var(--border);
-    gap: 12px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  /* Brand badge (simple-mode.js top bar) */
   .brand-badge {
     width: 34px;
     height: 34px;
@@ -70,52 +54,6 @@
     font-size: 13px;
     letter-spacing: -0.5px;
     box-shadow: 0 0 16px rgba(34, 211, 238, 0.35);
-  }
-  .brand-title {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: -0.2px;
-    color: var(--text-0);
-  }
-  .brand-sub {
-    font-size: 11px;
-    color: var(--text-2);
-    font-family: var(--mono);
-  }
-  .top-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    min-width: 0;      /* 1.6.0: a long select option (B-Rep Mode) no longer widens the page on phones */
-    max-width: 100%;
-  }
-
-  /* Export Bar */
-  .exportbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 7px 16px;
-    background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
-    gap: 10px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .export-group {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
-  }
-  .export-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--text-2);
-    margin-right: 4px;
   }
 
   /* Buttons & Inputs */
@@ -154,24 +92,9 @@
     filter: brightness(1.08);
     border-color: #7dd3fc;
   }
-  .btn-emerald {
-    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-    color: #03150e;
-    border-color: #34d399;
-    font-weight: 700;
-    box-shadow: 0 2px 10px rgba(16, 185, 129, 0.24);
-  }
-  .btn-emerald:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
   .btn-sm {
     padding: 4px 8px;
     font-size: 11px;
-  }
-  .btn-active {
-    background: var(--cyan-dim);
-    border-color: var(--cyan);
-    color: var(--cyan);
   }
   .select-ctrl {
     background: var(--bg-2);
@@ -218,69 +141,9 @@
   .workbench {
     flex: 1;
     display: grid;
-    grid-template-columns: 390px 1fr;
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
-  }
-
-  /* Left Inspector Pane */
-  .inspector-pane {
-    background: var(--bg-1);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    padding: 12px;
-    gap: 12px;
-  }
-  .panel-card {
-    background: var(--bg-0);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 11px;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--border);
-    font-size: 11.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-1);
-  }
-  .panel-body {
-    padding: 10px 11px;
-  }
-
-  /* Dropzone */
-  .dropzone {
-    border: 1.5px dashed var(--border-hi);
-    border-radius: 8px;
-    padding: 12px;
-    text-align: center;
-    background: rgba(22, 32, 50, 0.45);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .dropzone:hover, .dropzone.dragover {
-    border-color: var(--cyan);
-    background: var(--cyan-dim);
-  }
-  .dropzone-title {
-    font-weight: 700;
-    color: var(--text-0);
-    font-size: 12.5px;
-    margin-bottom: 3px;
-  }
-  .dropzone-sub {
-    font-size: 11px;
-    color: var(--text-2);
-    font-family: var(--mono);
   }
 
   /* Stream list */
@@ -435,137 +298,13 @@
     font-size: 10.5px;
   }
 
-  /* Right Pane: Viewport + Bottom Drawer */
+  /* Viewport */
   .stage-pane {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     background: var(--bg-0);
-  }
-  .viewport-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 12px;
-    background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
-    gap: 8px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .toolbar-group {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-  }
-  /* Viewer controls (#viewerControls). Base button look, hover, focus ring and segmented tracks for
-     [data-render]/[data-view] come from affordance.css (loaded after this block). The rules here only add
-     what affordance.css does not cover: group captions, the Orbit segmented pair, Lines toggle buttons and
-     the Explode slider control. Selectors are scoped to #viewerControls so they win over affordance.css
-     without !important. */
-  #viewerControls {
-    column-gap: 16px;   /* room for the 4px segmented-track halo affordance.css draws around groups */
-  }
-  .toolbar-label {
-    font-size: 10px;
-    font-family: var(--mono);
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    cursor: default;
-    user-select: none;
-    margin-right: 2px;
-  }
-  /* Orbit: Free / Turntable is a radio pair -> same segmented look as Display */
-  #viewerControls .toolbar-group:has(> [data-orbit]) {
-    border-radius: 9px;
-    box-shadow: 0 0 0 3px rgba(9, 13, 20, 0.85), 0 0 0 4px var(--border);
-    background: rgba(9, 13, 20, 0.85);
-  }
-  #viewerControls [data-orbit].btn {
-    background: transparent;
-    border-color: rgba(59, 85, 128, 0.55);
-    color: var(--text-1);
-  }
-  #viewerControls [data-orbit].btn:hover:not(.btn-active) {
-    background: var(--bg-3);
-    border-color: #5b7db0;
-    color: var(--text-0);
-  }
-  #viewerControls [data-orbit].btn.btn-active {
-    background: var(--cyan);
-    border-color: var(--cyan);
-    color: #03101d;
-    box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
-  }
-  /* Lines: independent on/off toggles -> buttons with a check indicator (the checkbox stays in the DOM,
-     visually hidden, so app/viewer-gl/simple-mode bindings keep working) */
-  #viewerControls .btn-toggle {
-    position: relative;
-  }
-  #viewerControls .btn-toggle input {
-    position: absolute;
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    margin: 0;
-    pointer-events: none;
-  }
-  #viewerControls .btn-toggle::before {
-    content: '';
-    width: 9px;
-    height: 9px;
-    border-radius: 2px;
-    border: 1px solid var(--text-2);
-    background: transparent;
-    flex-shrink: 0;
-  }
-  #viewerControls .btn-toggle.is-on,
-  #viewerControls .btn-toggle:has(input:checked) {
-    background: var(--cyan-dim);
-    border-color: var(--cyan);
-    color: var(--cyan);
-  }
-  #viewerControls .btn-toggle.is-on::before,
-  #viewerControls .btn-toggle:has(input:checked)::before {
-    background: var(--cyan);
-    border-color: var(--cyan);
-  }
-  #viewerControls .btn-toggle:has(input:focus-visible) {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
-  }
-  /* Explode: one bordered control; focus ring on the wrapper, not twice */
-  #viewerControls .slider-ctrl {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 8px;
-    border: 1px solid var(--border-hi);
-    border-radius: 6px;
-    background: rgba(15, 22, 35, 0.35);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-0);
-    cursor: pointer;
-  }
-  #viewerControls .slider-ctrl:hover {
-    border-color: #5b7db0;
-    background: var(--bg-3);
-  }
-  #viewerControls .slider-ctrl input[type="range"] {
-    width: 75px;
-    accent-color: var(--cyan);
-    cursor: pointer;
-  }
-  #viewerControls .slider-ctrl input[type="range"]:focus-visible {
-    outline: none;
-  }
-  #viewerControls .slider-ctrl:has(input:focus-visible) {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
   }
   .viewport-wrap {
     position: relative;
@@ -587,124 +326,8 @@
   #viewportCanvas:active {
     cursor: grabbing;
   }
-  .viewport-hud-tl {
-    position: absolute;
-    top: 10px;
-    left: 12px;
-    pointer-events: none;
-    user-select: none;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 400;
-    color: var(--text-2);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
-  }
-  .viewport-hud-tl .hud-title {
-    color: var(--text-1);
-    font-weight: 600;
-  }
-  .viewport-hud-tl .hud-render {
-    opacity: 0.8;
-  }
-  .viewport-hud-bl {
-    position: absolute;
-    bottom: 10px;
-    left: 12px;
-    pointer-events: none;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--text-2);
-    opacity: 0.85;
-    user-select: none;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  }
-
-  /* Bottom Schema / Entity Drawer */
-  .drawer {
-    height: 235px;
-    background: var(--bg-1);
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-  .drawer-tabs {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12px;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--border);
-    height: 34px;
-    flex-shrink: 0;
-  }
-  .tab-list {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 100%;
-  }
-  .tab-btn {
-    height: 100%;
-    padding: 0 12px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-2);
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .tab-btn:hover {
-    color: var(--text-0);
-  }
-  .tab-btn.active {
-    color: var(--cyan);
-    border-bottom-color: var(--cyan);
-    background: rgba(34, 211, 238, 0.06);
-  }
-  .drawer-body {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 310px 1fr;
-    overflow: hidden;
-  }
-  .drawer-summary {
-    border-right: 1px solid var(--border);
-    padding: 8px 10px;
-    overflow-y: auto;
-    font-family: var(--mono);
-    font-size: 11px;
-    background: var(--bg-0);
-  }
-  .drawer-code {
-    padding: 8px 12px;
-    overflow: auto;
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.45;
-    color: #d1e0f6;
-    background: #070b11;
-    white-space: pre;
-  }
-  .entity-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 3px 4px;
-    border-bottom: 1px solid rgba(39, 55, 84, 0.45);
-  }
-  .entity-row span:first-child {
-    color: var(--cyan);
-  }
 </style>
-<!-- affordance first (both modes), then Simple-mode layout -->
+<!-- affordance first, then the UI layout (simple-mode) -->
 <link rel="stylesheet" href="affordance.css?v=1.7.0" />
 <link rel="stylesheet" href="simple-mode.css?v=1.7.0" />
 <link rel="stylesheet" href="cad-export-ui.css?v=1.7.0" />
@@ -712,212 +335,14 @@
 </head>
 <body>
 
-  <!-- Top Header -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="brand-badge">3D</div>
-      <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.7.0</span></div>
-        <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
-      </div>
-    </div>
-    <div class="top-controls">
-      <button class="btn btn-sm btn-active" id="btnLoadSample" title="Load built-in multi-part mechanical assembly 3D PDF">
-        Load Sample 3D PDF (NX-ASM-402)
-      </button>
-      <button class="btn btn-sm" id="btnOpenFile">Open 3D PDF / U3D / PRC…</button>
-      <input type="file" id="fileInput" accept=".pdf,.u3d,.prc" style="display:none" />
-      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Source Units:</label>
-      <select class="select-ctrl" id="unitSelect" title="CAD unit scaling for STEP/STL/OBJ/IGES export">
-        <option value="mm" selected>mm (NX default)</option>
-        <option value="cm">cm (10 mm)</option>
-        <option value="in">inch (25.4 mm)</option>
-        <option value="ft">foot (304.8 mm)</option>
-        <option value="m">meter (1000 mm)</option>
-      </select>
-      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
-      <select class="select-ctrl" id="brepModeSelect" style="max-width:100%" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
-        <option value="merged" selected>Merged Planar B-Rep (Auto Solid / Sheet)</option>
-        <option value="sheet-unsewn">Open Sheet Surfaces (NX House/Deck Recovery)</option>
-        <option value="merged-assembly">Multi-Body Assembly (STEP only; Parasolid always writes merged)</option>
-        <option value="faceted">Triangulated Faceted Sheet B-Rep (1:1 Mesh)</option>
-      </select>
-      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Reduce detail:</label>
-      <select class="select-ctrl" id="detailSelect" title="Optional decimation (vertex clustering) applied to exported files only. Off = full detail.">
-        <option value="1" selected>Off (full detail)</option>
-        <option value="0.5">50% of triangles</option>
-        <option value="0.25">25% of triangles</option>
-        <option value="0.1">10% of triangles</option>
-      </select>
-    </div>
-  </header>
-
-  <!-- Primary CAD Export Bar -->
-  <section class="exportbar">
-    <div class="export-group">
-      <span class="export-label">CAD Export (Siemens NX Ready):</span>
-      <button class="btn btn-primary" id="btnExportSTEP" title="Export ISO 10303-21 STEP AP214 (.stp) MANIFOLD_SOLID_BREP assembly">
-        Export STEP AP214 (.stp)
-      </button>
-      <button class="btn" id="btnExportSTL" title="Export Binary STL mesh of visible parts">
-        Export Binary STL (.stl)
-      </button>
-      <button class="btn btn-sm" id="btnExportSTLText" title="Export ASCII STL mesh">
-        ASCII STL
-      </button>
-      <button class="btn" id="btnExportOBJ" title="Export Wavefront OBJ with part groups and vertex normals">
-        Export OBJ (.obj)
-      </button>
-      <button class="btn btn-sm" id="btnExportIGES" title="Export IGES 5.3 feature-edge wireframe curves (.igs)">
-        IGES Wireframe (.igs)
-      </button>
-      <button class="btn btn-sm" id="btnExportRaw" title="Download extracted raw U3D or PRC stream bytes">
-        Raw Stream (.u3d/.prc)
-      </button>
-    </div>
-    <div class="export-group">
-      <span class="badge badge-emerald" id="statusBadge">READY • WATER-TIGHT 2-MANIFOLD</span>
-    </div>
-  </section>
-
-  <!-- Two-Pane Workbench -->
+  <!-- 1.7.0: simple-mode.js builds the whole UI (top bar, view menus, Parts / Info sheets) around this viewport -->
+  <input type="file" id="fileInput" accept=".pdf,.u3d,.prc" hidden />
   <main class="workbench">
-    <!-- Left Pane: Assembly & Stream Inspector -->
-    <aside class="inspector-pane">
-      <!-- File Dropzone -->
-      <div class="dropzone" id="dropZone">
-        <div class="dropzone-title" id="docFileName">sample-cad-assembly-3d.pdf</div>
-        <div class="dropzone-sub">Drop any 3D PDF (`.pdf`), `.u3d`, or `.prc` stream here</div>
-      </div>
-
-      <!-- Embedded /3D Streams -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Embedded PDF `/3D` &amp; `/RichMedia` Streams</span>
-          <span class="badge badge-cyan" id="streamCountBadge">2 Streams</span>
-        </div>
-        <div class="panel-body">
-          <div class="stream-list" id="streamList"></div>
-        </div>
-      </div>
-
-      <!-- Assembly Part Hierarchy -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Assembly Part Hierarchy</span>
-          <div style="display:flex;gap:4px;">
-            <button class="btn btn-sm" id="btnShowAllParts">Show All</button>
-            <button class="btn btn-sm" id="btnInvertParts">Invert</button>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="part-list" id="partList"></div>
-        </div>
-      </div>
-
-      <!-- Bounding Box & Topology Summary -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Bounding Box &amp; B-Rep Topology</span>
-          <span class="badge" id="unitBadge">mm</span>
-        </div>
-        <div class="panel-body">
-          <div class="kv-grid" id="bboxGrid"></div>
-        </div>
-      </div>
-
-      <!-- Detected Analytic CAD Features -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Detected Analytic CAD Features</span>
-          <span class="badge badge-amber" id="featureCountBadge">0</span>
-        </div>
-        <div class="panel-body">
-          <div class="feature-list" id="featureList"></div>
-        </div>
-      </div>
-
-      <!-- Product Tree, Wires & Embedded Attachments -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Product Tree &amp; Attachments</span>
-          <span class="badge badge-cyan" id="treeCountBadge">0 Attachments</span>
-        </div>
-        <div class="panel-body">
-          <div class="feature-list" id="treeList" style="max-height:220px;overflow:auto;font-size:11px;"></div>
-          <div class="feature-list" id="attachList"></div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Right Pane: 3D Orbit Viewport + Bottom Inspector Drawer -->
     <section class="stage-pane">
-      <!-- Viewport Toolbar -->
-      <!-- all viewer controls live in this one container (#viewerControls) so they can be moved as a unit -->
-      <div class="viewport-toolbar" id="viewerControls">
-        <div class="toolbar-group">
-          <span class="toolbar-label">Display</span>
-          <button class="btn btn-sm btn-active" data-render="shaded-edges">Shaded + CAD Edges</button>
-          <button class="btn btn-sm" data-render="brep-faces">B-Rep Face Groups</button>
-          <button class="btn btn-sm" data-render="shaded">Shaded Smooth</button>
-          <button class="btn btn-sm" data-render="wireframe">Wireframe</button>
-          <button class="btn btn-sm" data-render="xray">X-Ray Bore View</button>
-        </div>
-        <div class="toolbar-group">
-          <span class="toolbar-label">View</span>
-          <button class="btn btn-sm" data-view="iso">Iso</button>
-          <button class="btn btn-sm" data-view="top">Top (XY)</button>
-          <button class="btn btn-sm" data-view="front">Front (XZ)</button>
-          <button class="btn btn-sm" data-view="right">Right (YZ)</button>
-          <button class="btn btn-sm" id="btnFitView">Fit</button>
-          <button class="btn btn-sm" data-view="reset" title="Reset orientation, zoom and pan">Reset view</button>
-          <label class="slider-ctrl" title="Explode the assembly">Explode <input type="range" id="explodeSlider" min="0" max="100" value="0" /></label>
-        </div>
-        <div class="toolbar-group" id="orbitMode" role="group" aria-label="Orbit mode">
-          <span class="toolbar-label">Orbit</span>
-          <button class="btn btn-sm btn-active" data-orbit="free" aria-pressed="true" title="Free arcball: tumble past 180&deg; about any axis, no gimbal lock. Ctrl/Alt+drag (or middle-drag) twists about the view axis.">Free</button>
-          <button class="btn btn-sm" data-orbit="turntable" aria-pressed="false" title="Turntable: Z stays up, tilt limited to &plusmn;85&deg;">Turntable (Z-up)</button>
-        </div>
-        <div class="toolbar-group viewer-options" id="viewerOptions">
-          <span class="toolbar-label">Lines</span>
-          <label class="btn btn-sm btn-toggle" title="PRC wires / curves"><input type="checkbox" data-viewopt="wires" />Wires</label>
-          <label class="btn btn-sm btn-toggle" title="Show edges and wires hidden behind geometry, dimmed (WebGL)"><input type="checkbox" data-viewopt="hiddenLines" />Hidden</label>
-          <label class="btn btn-sm btn-toggle" title="Overlay the triangle mesh (WebGL)"><input type="checkbox" data-viewopt="meshWire" />Mesh</label>
-          <label class="btn btn-sm btn-toggle" title="Flat (faceted) shading instead of smooth normals with a 30&deg; crease angle (WebGL)"><input type="checkbox" data-viewopt="flat" />Flat</label>
-        </div>
-      </div>
-
       <!-- 3D Viewport Canvas -->
       <div id="bigModelBanner" style="display:none;padding:6px 12px;background:rgba(251,191,36,0.14);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;font-family:var(--mono);"></div>
       <div class="viewport-wrap">
         <canvas id="viewportCanvas"></canvas>
-        <div class="viewport-hud-tl" id="viewportHud">
-          <div class="hud-title" id="hudStreamTitle">Stream: /Subtype /U3D (ECMA-363)</div>
-          <div id="hudAssemblyStats">Parts: 4 | Merged B-Rep Faces: -- | Tris: 480</div>
-          <div id="hudBounds"></div>
-          <div id="hudScaleInfo">Units: mm • STEP AP214 export</div>
-          <div class="hud-render" id="hudRenderStats"></div>
-        </div>
-        <div class="viewport-hud-bl">
-          Drag: Orbit • Ctrl/Alt-drag: Twist • Shift/Right-drag: Pan • Scroll: Zoom • Click part in tree to highlight
-        </div>
-      </div>
-
-      <!-- Bottom Schema / Entity Inspector Drawer -->
-      <div class="drawer">
-        <div class="drawer-tabs">
-          <div class="tab-list">
-            <button class="tab-btn active" data-tab="step">STEP AP214 (`.stp`) B-Rep Inspector</button>
-            <button class="tab-btn" data-tab="pdf">PDF `/3D` Stream &amp; U3D/PRC Block Telemetry</button>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <button class="btn btn-sm" id="btnCopyInspector">Copy Preview</button>
-          </div>
-        </div>
-        <div class="drawer-body">
-          <div class="drawer-summary" id="drawerSummary"></div>
-          <pre class="drawer-code" id="drawerCode"></pre>
-        </div>
       </div>
     </section>
   </main>

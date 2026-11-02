@@ -296,7 +296,7 @@
     return retrying;
   }
 
-  // UI: Designer's cad-export-ui.js (Simple menu item + Advanced button, progress/cancel toast) drives this API.
+  // UI: Designer's cad-export-ui.js (Export menu item, progress/cancel toast) drives this API.
 
   if (!NS.exportCadSurfaces || NS.exportCadSurfaces.__cadStub) {
     NS.canExportCadSurfaces = canExportCadSurfaces;

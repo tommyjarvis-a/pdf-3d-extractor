@@ -2,7 +2,7 @@
 
 Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECMA-363 & `/Subtype /PRC` ISO 14739-1) from 3D PDF files, reconstructs watertight 2-manifold B-Rep faces and analytic hole/boss features, and exports CAD-ready geometry:
 
-- **Parasolid XT (`.x_t`)** — Siemens NX format (schema `SCH_3800173_37102`, the form NX 2512 writes), one merged planar B-Rep body in meters; verified importing into NX. Simple: Export → Parasolid; Advanced: Export Parasolid (.x_t).
+- **Parasolid XT (`.x_t`)** — Siemens NX format (schema `SCH_3800173_37102`, the form NX 2512 writes), one merged planar B-Rep body in meters; verified importing into NX. Export → Parasolid.
 - **STEP AP214 (`.stp`)** — Recommended for Siemens NX. ISO 10303-21 `MANIFOLD_SOLID_BREP` / `CLOSED_SHELL` / `ADVANCED_FACE` with outer and inner `FACE_BOUND` hole loops.
 - **Binary & ASCII STL (`.stl`)** — Per-solid watertight triangle meshes.
 - **Wavefront OBJ (`.obj`)** — Multi-body named groups (`o` / `g`) with vertex normals.
@@ -91,14 +91,23 @@ Example (VEA file with the RHAdobe decoder unavailable):
  "message":"This PDF has a 3D model, but it's stored in a format the app can't read yet (U3D, RHAdobeMeshResource)."}
 ```
 
-Simple mode does not show `message`. It renders its own load card from `reasonCode` (plus `format`/`detail` for
+The app does not show `message`. It renders its own load card from `reasonCode` (plus `format`/`detail` for
 `UNSUPPORTED_MESH`): amber "This 3D model can't be read yet", neutral "No 3D model in this PDF", or amber
 "Couldn't read this 3D model". For `DECODE_ERROR` the error text goes only to `console.warn`.
 
+## One UI (1.7.0 alpha)
+
+Since 1.7.0 there is only one UI (formerly "Simple mode"). The Advanced workbench, the Simple / Advanced switch,
+`?ui=advanced` / `?ui=simple` and the remembered mode (`pdf3d-extractor.uiMode`, cleared at start) are removed, along
+with the STEP text preview, the `.x_t` text preview / entity table (`?xt=1`), Copy Preview and the raw 3D stream block
+list. Units, body type and reduce detail are set in the Export dialog.
+
 ## Viewer (1.7.0 alpha)
 
-Simple mode's viewport: the bottom-left holds only the XYZ axis triad. The file / geometry readout (stream, solid
-bodies / faces / tris, bounds, units, renderer) is in **Info → File & geometry** and the controls list in **More → Help**.
+The viewport: the bottom-left holds only the XYZ axis triad. The file / geometry readout (stream, 3D stream size
+compressed / uncompressed, solid bodies / faces / tris, bounds, units, renderer) is in **Info → File & geometry**,
+followed by the stream list, bounding box & topology, detected features and the product tree. The controls list is in
+**More → Help**.
 The upper-right status reads `File loaded: name.pdf | Bodies Detected: N` (long names end in "…"; hover shows the full name).
 The tab bar is **Solid Bodies** | Display, View, Fit, Reset, More | **Info**.
 
@@ -115,10 +124,10 @@ PDF3DView.set('background', 'gradient'); // 'default' | 'black' | 'white' | 'gra
 document.addEventListener('pdf3d:viewprefs', (e) => console.log(e.detail));
 ```
 
-## Export in Simple mode (1.6.0 alpha)
+## Export (1.6.0 alpha; the only export UI since 1.7.0)
 
-Simple mode has one **Export** button (`export-flow.js` / `export-flow.css`, by Designer): pick a format, set its
-options, then **Save**. Advanced mode keeps its export bar unchanged.
+The app has one **Export** button (`export-flow.js` / `export-flow.css`, by Designer): pick a format, set its
+options, then **Save**.
 
 - **Formats:** STEP, STL (binary or ASCII), OBJ, IGES, raw stream, and Parasolid (only while `PDF3D.capabilities.parasolid`; always one merged body).
 - **STEP body:** *Fitted solid* (surfaces fitted by the CAD kernel, served pages only), *Mesh*, or *Both*.
@@ -134,8 +143,8 @@ options, then **Save**. Advanced mode keeps its export bar unchanged.
 - A selected body (Solid Bodies list) limits the export to that body.
 - The fitted kernel needs the multi-file app served over http(s); in `file://` pages and the single-file build the card says it is unavailable.
 
-All formats go through `PDF3D.exportFormat(format, opts)` in `app.js`, which calls the same writers as the Advanced
-buttons; STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical to the Advanced buttons' files:
+All formats go through `PDF3D.exportFormat(format, opts)` in `app.js`, which calls the same writers as the
+1.6.2 export bar did; STEP mesh, STL, OBJ, IGES, raw and Parasolid files are byte-identical to 1.6.2's files:
 
 ```js
 const r = await PDF3D.exportFormat('step', { body: 'fitted', onNoFit: 'mesh', partIds: null, signal, onProgress });

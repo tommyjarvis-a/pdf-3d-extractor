@@ -1,73 +1,19 @@
 /*
- * simple-mode.css — "Simple mode" add-on for pdf-3d-extractor.
- *
- * Every rule that affects existing markup is scoped under body.sm-simple, so when the
- * body lacks that class (Advanced mode) nothing in the original UI changes. The only
- * unscoped rules target elements this add-on creates (class prefix "sm-"), which are
- * either display:none or position:fixed in Advanced mode and therefore never move layout.
- * Integration: <link rel="stylesheet" href="simple-mode.css" /> in <head>.
+ * simple-mode.css — the pdf-3d-extractor UI chrome built by simple-mode.js (top bar, viewer pill, menus,
+ * Solid Bodies / Info sheets, dialogs). Since 1.7.0 this is the only UI; simple-mode.js adds body.sm-simple
+ * at start-up. Integration: <link rel="stylesheet" href="simple-mode.css" /> in <head>.
  */
 
 /* ---------------------------------------------------------------- shared add-on tokens */
-.sm-root, .sm-topbar, .sm-pill, .sm-pop, .sm-sheet, .sm-modeswitch, .sm-dialog, .sm-dropveil {
+.sm-root, .sm-topbar, .sm-pill, .sm-pop, .sm-sheet, .sm-dialog, .sm-dropveil {
   --sm-radius: 10px;
   --sm-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
   --sm-glass: rgba(15, 22, 35, 0.92);
 }
 [hidden].sm-pop, [hidden].sm-sheet, [hidden].sm-dialog, [hidden].sm-dropveil, [hidden].sm-empty { display: none !important; }
 
-/* ---------------------------------------------------------------- Simple | Advanced switch */
-.sm-modeswitch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  gap: 2px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-0);
-  font-family: var(--sans);
-  flex-shrink: 0;
-}
-.sm-modeswitch button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-2);
-  font: 600 11px/1 var(--sans);
-  padding: 5px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.sm-modeswitch button:hover { color: var(--text-0); }
-.sm-modeswitch button[aria-pressed="true"] {
-  background: var(--cyan-dim);
-  color: var(--cyan);
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45);
-}
-.sm-modeswitch button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
-/* Advanced mode: the switch floats over empty top-bar space (fixed => zero layout impact). */
-.sm-modeswitch.sm-modeswitch--float {
-  position: fixed;
-  top: 12px;
-  right: 16px;
-  z-index: 60;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-}
-/* ...or bottom-right when the top bar has no free space (single-row bar / narrow screens). */
-.sm-modeswitch.sm-modeswitch--float.sm-modeswitch--corner { top: auto; bottom: 12px; right: 12px; }
-
-/* ---------------------------------------------------------------- add-on chrome hidden in Advanced */
+/* ---------------------------------------------------------------- chrome hidden until simple-mode.js starts */
 .sm-topbar, .sm-pill, .sm-empty { display: none; }
-
-/* ================================================================ SIMPLE MODE ================ */
-body.sm-simple .topbar,
-body.sm-simple .exportbar,
-body.sm-simple .inspector-pane,
-body.sm-simple #viewerControls,
-body.sm-simple .viewport-toolbar,            /* 1.3.0 has no #viewerControls id */
-body.sm-simple .drawer { display: none !important; }
-body.sm-simple .workbench { grid-template-columns: minmax(0, 1fr); }
 
 /* ---------------------------------------------------------------- top bar */
 body.sm-simple .sm-topbar {
@@ -128,15 +74,6 @@ body.sm-simple .sm-doc { justify-content: flex-end; }
   outline: 2px solid var(--cyan); outline-offset: 1px;
 }
 
-/* split button */
-.sm-split { display: inline-flex; align-items: stretch; }
-.sm-split > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.sm-split > .btn + .btn {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 1px solid rgba(3, 16, 29, 0.35);
-  padding: 6px 8px;
-}
 .sm-caret { font-size: 9px; opacity: 0.85; }
 
 /* ---------------------------------------------------------------- popovers / menus */
@@ -237,11 +174,11 @@ body.sm-simple .sm-pill {
 .sm-pill-k { color: var(--text-2); font-weight: 500; }
 .sm-count { font: 600 10px var(--mono); color: var(--text-2); background: var(--bg-0); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
 
-/* 1.7.0: the viewport readout moved to Info > File & geometry and the controls help to More > Help;
+/* 1.7.0: the viewport readout lives in Info > File & geometry and the controls help in More > Help;
    the bottom-left of the viewport holds only the axis triad (drawn on the canvas) */
-body.sm-simple .viewport-hud-tl, body.sm-simple .viewport-hud-bl { display: none !important; }
 .sm-readout { display: grid; gap: 4px; font: 11px var(--mono); color: var(--text-1); }
 .sm-readout-r { overflow-wrap: anywhere; }
+.sm-readout-r:empty { display: none; }
 .sm-readout-r[data-hud="hudRenderStats"] { color: var(--text-2); }
 
 /* ---------------------------------------------------------------- side sheets */
@@ -276,17 +213,10 @@ body.sm-simple .viewport-hud-tl, body.sm-simple .viewport-hud-bl { display: none
 .sm-sheet-b { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .sm-close { padding: 3px 8px; font-size: 14px; line-height: 1; }
 
-/* moved original panel cards inside sheets */
-.sm-sheet .panel-card { border-radius: 8px; }
-.sm-sheet--parts .panel-card { border: 0; background: transparent; }
-.sm-sheet--parts .panel-header { background: transparent; padding: 0 0 8px; border-bottom: 0; }
-.sm-sheet--parts .panel-header > span { display: none; }   /* sheet title already says "Parts" */
-.sm-sheet--parts .panel-header > div { width: 100%; }
-.sm-sheet--parts .panel-header .btn { flex: 1; justify-content: center; }
-.sm-sheet--parts .panel-body { padding: 0; }
-.sm-sheet--info .panel-card { border: 0; background: transparent; }
-.sm-sheet--info .panel-header { display: none; }           /* title + badge mirrored into <summary> */
-.sm-sheet--info .panel-body { padding: 4px 2px 6px; }
+/* Solid Bodies: Show All / Invert above the list; Info: section bodies */
+.sm-parts-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.sm-parts-actions .btn { flex: 1; justify-content: center; }
+.sm-panel { padding: 4px 2px 6px; }
 
 .sm-sec { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0); flex-shrink: 0; }
 .sm-sec > summary {
@@ -406,25 +336,17 @@ body.sm-simple .sm-empty {
   body.sm-simple .sm-doc { flex-basis: 0; }
   body.sm-simple .sm-brand-ver { display: none; }
 }
-/* The pinned switch sits at the same fixed point in both modes; Simple reserves its width at the end of the top bar. */
-.sm-switch-slot { display: none; }
-body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
-@media (max-width: 720px) {
-  body.sm-simple .sm-switch-slot { width: auto !important; height: auto; }
-  body:not(.sm-simple) .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
-}
 @media (max-width: 720px) {
   body.sm-simple .sm-topbar { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
   body.sm-simple .sm-brand-title { font-size: 13px; }
   body.sm-simple .sm-doc { order: 3; flex: 1 1 100%; border-left: 0; padding-left: 0; }
   body.sm-simple .sm-actions { gap: 6px; }
-  /* phone: row 1 = brand + mode switch, row 2 = Open / overflow / Export, row 3 = file + status */
+  /* phone: row 1 = brand, row 2 = Open / overflow / Export, row 3 = file + status */
   body.sm-simple .sm-topbar { row-gap: 0; }
   body.sm-simple .sm-actions { display: contents; }
   body.sm-simple .sm-brand { order: 0; }
-  body.sm-simple .sm-actions > .sm-switch-slot { order: 1; margin-left: auto; }
   body.sm-simple .sm-topbar::after { content: ""; order: 2; flex-basis: 100%; height: 8px; }
-  body.sm-simple .sm-actions > :not(.sm-switch-slot) { order: 3; }
+  body.sm-simple .sm-actions > * { order: 3; }
   body.sm-simple .sm-actions .sm-btn-open { flex: 1 1 auto; }
   body.sm-simple .sm-doc { order: 4; margin-top: 8px; }
   body.sm-simple .sm-topbar .sm-btn-open .sm-long { display: none; }
@@ -459,8 +381,6 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
   body.sm-simple .sm-pill .btn,
   .sm-close,
   .sm-sheet .btn { min-height: 40px; min-width: 40px; justify-content: center; }
-  body.sm-simple .sm-modeswitch button { min-height: 40px; min-width: 40px; padding: 0 14px; }
-  body.sm-simple .sm-split > .btn + .btn { min-width: 40px; }
   .sm-close { font-size: 18px; }
   body.sm-simple .sm-pill { gap: 2px; padding: 3px; }
   body.sm-simple .sm-pill .btn { padding: 0 11px; }

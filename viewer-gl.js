@@ -782,17 +782,4 @@ void main() { gl_FragColor = uRGBA; }`;
   };
   window.PDF3DViewerGL = api;
   window.PDF3DCamera = Camera;
-  if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('DOMContentLoaded', () => {
-      const els = document.querySelectorAll ? document.querySelectorAll('input[data-viewopt]') : [];
-      for (const el of els) {
-        const k = el.getAttribute('data-viewopt');
-        // the checkbox is visually hidden inside a toggle-button label; mirror its state onto the label
-        const sync = () => { const lab = el.closest ? el.closest('.btn-toggle') : null; if (lab) lab.classList.toggle('is-on', !!el.checked); };
-        if (k in OPTIONS) el.checked = !!OPTIONS[k];
-        sync();
-        el.addEventListener('change', () => { sync(); api.setOption(k, !!el.checked); });
-      }
-    });
-  }
 })();

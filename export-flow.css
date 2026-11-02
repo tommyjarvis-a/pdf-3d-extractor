@@ -1,10 +1,7 @@
 /* export-flow.css — single "Export" button + format popover + persistent result card (pairs with export-flow.js).
  * Uses the app tokens and the Simple-mode popover look (.sm-pop / .sm-pop-h / .sm-sep / .sm-check from simple-mode.css). */
 
-/* SIMPLE MODE ONLY: the new button replaces the Simple split button + menu. Advanced mode is not touched
- * (its export bar, .cad-adv group and CAD toast stay exactly as they are). */
-body.xf-on.sm-simple .sm-topbar .sm-split, body.xf-on.sm-simple #smMenuExport { display: none !important; }
-body:not(.sm-simple) .xf-btn, body:not(.sm-simple) .xf-pop { display: none !important; }
+/* 1.7.0: the only export UI (the button sits in the simple-mode.js top bar). */
 .xf-btn { gap: 7px; }
 .xf-btn .xf-caret { font-size: 9px; opacity: .85; }
 .xf-btn[aria-expanded="true"] .xf-caret { transform: rotate(180deg); }
@@ -88,7 +85,6 @@ body.xf-on.sm-simple .xf-retry[aria-disabled="true"] { color: var(--text-2); cur
 }
 .xf-result:focus { outline: none; }
 .xf-result:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple stays readable after switching */
 .xf-r-ico { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; font: 700 11px var(--sans); color: #03101d; background: var(--cyan); }
 .xf-result[data-tone="ok"] { border-left-color: var(--emerald); }
 .xf-result[data-tone="ok"] .xf-r-ico { background: var(--emerald); }

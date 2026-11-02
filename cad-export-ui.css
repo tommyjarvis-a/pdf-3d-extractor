@@ -1,43 +1,14 @@
 /*
  * cad-export-ui.css — styles for cad-export-ui.js (CAD surfaces STEP export).
  * Only targets elements the add-on creates (class prefix "cad-"); uses the app's tokens
- * (--bg-*, --border*, --text-*, --cyan, --emerald, --amber, --rose) and the Simple-mode look
+ * (--bg-*, --border*, --text-*, --cyan, --emerald, --amber, --rose) and the simple-mode.css look
  * (glass panel, 10px radius, cyan focus ring). Integration: <link rel="stylesheet" href="cad-export-ui.css" />
  */
-.cad-toast, .cad-mi, .cad-adv {
+.cad-toast {
   --cad-glass: rgba(15, 22, 35, 0.94);
   --cad-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
 }
-[hidden].cad-toast, .cad-toast [hidden], .cad-mi [hidden], .cad-adv [hidden] { display: none !important; }
-
-/* ---------------------------------------------------------------- Simple: Export ▾ menu item */
-.sm-mi.cad-mi { align-items: flex-start; white-space: normal; }
-.cad-mi .cad-mi-ico { color: var(--cyan); font-size: 10px; line-height: 17px; }
-.cad-mi .sm-mi-ext { line-height: 17px; }
-.cad-mi-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.cad-mi-sub, .cad-mi-sub2 { font: 400 11px var(--sans); color: var(--text-2); max-width: 230px; }
-.cad-mi-sub2 { font-size: 10.5px; }
-/* disabled but still focusable (aria-disabled) so the reason can be read; reason stays legible */
-.sm-mi.cad-mi[aria-disabled="true"], .sm-mi.cad-mi-opt[aria-disabled="true"] { cursor: not-allowed; }
-.sm-mi.cad-mi[aria-disabled="true"]:hover, .sm-mi.cad-mi-opt[aria-disabled="true"]:hover { background: transparent; }
-.cad-mi[aria-disabled="true"] .sm-mi-label, .cad-mi[aria-disabled="true"] .cad-mi-ico, .cad-mi[aria-disabled="true"] .sm-mi-ext,
-.cad-mi-opt[aria-disabled="true"] > * { opacity: 0.45; }
-.cad-mi-sub.cad-why { color: var(--text-1); }
-.cad-mi-sub.cad-why::before { content: "⊘ "; color: var(--amber); }
-.sm-mi.cad-mi-opt { padding-left: 33px; }        /* sub-option of the CAD item */
-
-/* ---------------------------------------------------------------- Advanced: export bar */
-.cad-adv { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.cad-adv-btn::before { content: "◆"; color: var(--cyan); font-size: 9px; }
-.btn.cad-adv-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
-.btn.cad-adv-btn[aria-disabled="true"]:hover { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); }
-.btn.cad-adv-btn[aria-disabled="true"]:active { transform: none; filter: none; }
-.cad-adv-opt { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--sans); color: var(--text-1); cursor: pointer; user-select: none; }
-.cad-adv-opt:hover { color: var(--text-0); }
-.cad-adv-opt input { accent-color: var(--cyan); margin: 0; cursor: pointer; }
-.cad-adv-opt:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
-.cad-adv-note { font: 400 11px var(--sans); color: var(--text-2); cursor: default; }
-.cad-adv-note.cad-why::before { content: "⊘ "; color: var(--amber); }
+[hidden].cad-toast, .cad-toast [hidden] { display: none !important; }
 
 /* ---------------------------------------------------------------- progress / result toast (non-modal) */
 .cad-toast {
@@ -57,8 +28,6 @@
   color: var(--text-0);
   font: 400 12.5px var(--sans);
 }
-body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: switch moved to bottom-right corner */
-@media (max-width: 900px) { body:has(.sm-modeswitch--float) .cad-toast { bottom: 52px; } }
 .cad-toast:focus { outline: none; }
 .cad-toast:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .cad-toast[data-tone="ok"] { border-left-color: var(--emerald); }
@@ -92,9 +61,7 @@ body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: swi
 
 @media (max-width: 720px) {
   .cad-toast { left: 8px; right: 8px; bottom: 8px; width: auto; max-width: none; }
-  body:has(.sm-modeswitch--float) .cad-toast { bottom: 48px; }   /* Advanced: floating switch sits bottom-right below 900px */
   .cad-toast .btn { min-height: 40px; min-width: 40px; justify-content: center; }
-  .cad-mi-sub, .cad-mi-sub2 { max-width: none; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .cad-toast:not([hidden]) { animation: cad-in 0.16s ease-out; }

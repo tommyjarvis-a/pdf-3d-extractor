@@ -19,18 +19,12 @@
   const APP_VERSION = '1.7.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
-  // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
+  // Parasolid XT (.x_t) export: offered while buildParasolidXT writes the NX 2512 form
   // (SCH_3800173_37102), which Siemens NX imports (verified on screw.pdf). The UI always exports the
-  // merged B-Rep body, the mode tested in NX. ?xt=1 still forces the controls on for development.
+  // merged B-Rep body, the mode tested in NX.
   const XT_WRITER_FORM = 'nx-37102';
   const ENABLE_XT_EXPORT = XT_WRITER_FORM === 'nx-37102';
   const XT_UI_BREP_MODE = 'merged';
-  const XT_UI_ENABLED = ENABLE_XT_EXPORT || (() => {
-    try {
-      const loc = typeof window !== 'undefined' && window.location;
-      return !!(loc && typeof URLSearchParams !== 'undefined' && new URLSearchParams(loc.search || '').get('xt') === '1');
-    } catch (e) { return false; }
-  })();
 
   const PALETTE = [
     [0.22, 0.58, 0.88],
@@ -53,7 +47,6 @@
     brepMode: 'merged',   // 'merged' | 'faceted'
     renderMode: 'shaded-edges',
     explodeFactor: 0,
-    activeTab: 'step',   // 'xt' tab exists only while XT_UI_ENABLED
     camera: {
       mode: 'free',        // 'free' (quaternion arcball, unclamped) | 'turntable' (Z-up, pitch clamped); persisted
       q: null,             // world->view quaternion [w,x,y,z] for 'free' mode
@@ -66,9 +59,7 @@
       dragMode: 'orbit',
       lastX: 0,
       lastY: 0
-    },
-    cachedXT: null,
-    cachedSTEP: null
+    }
   };
 
   // 1.7.0 viewport preferences (UI only, never touch exports): background, floor grid, projection.
@@ -2781,21 +2772,6 @@
   }
   function textChunks(t) { return t == null ? [] : Array.isArray(t) ? t : [t]; }
   function textLength(t) { return textChunks(t).reduce((n, c) => n + c.length, 0); }
-  // First `max` lines + total line count, without splitting / copying the whole text.
-  function previewLines(t, max) {
-    const lines = []; let count = 1, cur = '';
-    for (const c of textChunks(t)) {
-      let p = 0;
-      for (;;) {
-        const q = c.indexOf('\n', p);
-        if (q < 0) { if (lines.length < max) cur += c.slice(p); break; }
-        if (lines.length < max) lines.push(cur + c.slice(p, q));
-        cur = ''; count++; p = q + 1;
-      }
-    }
-    if (lines.length < max) lines.push(cur);
-    return { lines, count };
-  }
   function forEachLine(t, fn) {
     for (const c of textChunks(t)) { const ls = c.split('\n'); for (let i = 0; i < ls.length; i++) fn(ls[i]); }
   }
@@ -3328,7 +3304,6 @@
 
   const PREVIEW_MAX_TRIS = 200000;   // viewer draws a vertex-clustered preview above this
   const PREVIEW_MAX_EDGES = 150000;
-  const INSPECTOR_MAX_TRIS = 200000; // XT/STEP inspector preview is skipped above this (use Export)
   const BIG_MODEL_TRIS = 1000000;    // warning banner threshold
   // Preview geometry of one compact part (vertex-clustered decimation cached per ratio when ratio < 1).
   function previewGeometry(b, ratio) {
@@ -3373,15 +3348,13 @@
       renderMode: state.renderMode || 'shaded-edges', selectedPartIdx: state.selectedPartIdx,
       items, wires: state.wires || [], palette: PALETTE,
       grid: state.viewPrefs.grid ? { z: bounds.min[2], step: 20, extent: 80 } : null,
-      projection: state.viewPrefs.projection, triad: triadCorner(), lightBg: isLightBackground(),
+      projection: state.viewPrefs.projection, triad: TRIAD_CORNER, lightBg: isLightBackground(),
       note: ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : ''
     });
   }
 
-  // 1.7.0: the axis triad sits lower-left in Simple mode (its bottom-left holds nothing else); Advanced keeps lower-right
-  function triadCorner() {
-    return document.body && document.body.classList && document.body.classList.contains('sm-simple') ? 'bl' : 'br';
-  }
+  // 1.7.0: the axis triad sits lower-left (the viewport's bottom-left holds nothing else)
+  const TRIAD_CORNER = 'bl';
   function isLightBackground() { return state.viewPrefs.background === 'white' || state.viewPrefs.background === 'gradient'; }
   function applyViewBackground() {
     const wrap = document.querySelector && document.querySelector('.viewport-wrap');
@@ -3412,13 +3385,6 @@
   function setCameraYawPitch(yaw, pitch) {
     if (window.PDF3DCamera) window.PDF3DCamera.setYawPitch(state.camera, yaw, pitch);
     else { state.camera.yaw = yaw; state.camera.pitch = pitch; }
-  }
-  function syncOrbitButtons() {
-    document.querySelectorAll('[data-orbit]').forEach((b) => {
-      const on = b.getAttribute('data-orbit') === state.camera.mode;
-      b.classList.toggle('btn-active', on);
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
   }
 
   // Coalesce pointer-driven redraws into one per animation frame (the Canvas 2D fallback renders synchronously).
@@ -3672,9 +3638,9 @@
         ctx.stroke();
       }
     }
-    // 3. decimation note + CAD XYZ orientation triad (shared drawing with viewer-gl.js; corner per triadCorner())
+    // 3. decimation note + CAD XYZ orientation triad (shared drawing with viewer-gl.js; corner per TRIAD_CORNER)
     const note = ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : '';
-    if (window.PDF3DViewerGL && window.PDF3DViewerGL.drawTriadAndNote) window.PDF3DViewerGL.drawTriadAndNote(ctx, w, h, vR, vU, note, triadCorner());
+    if (window.PDF3DViewerGL && window.PDF3DViewerGL.drawTriadAndNote) window.PDF3DViewerGL.drawTriadAndNote(ctx, w, h, vR, vU, note, TRIAD_CORNER);
 
     ctx.restore();
   }
@@ -3750,22 +3716,23 @@
       streamCountBadge.textContent = `${state.streams.length} Stream${state.streams.length === 1 ? '' : 's'}`;
     }
 
-    const statusBadge = document.getElementById('statusBadge');
-    if (statusBadge) {
+    // 1.7.0: load status (replaces the old status badge element) -> state.status { text, title, tone: 'ok' | 'warn' },
+    // read through CAD3DExtractor.getStatus() and announced with 'pdf3d:status' on document
+    {
       const ap = (state.streams[state.activeStreamIdx] || {}).parsed || {};
       const path = ap.decodePath ? `${ap.decodePath.toUpperCase()} • ` : '';
       const warns = ap.warnings || [];
       const cadAtt = (state.attachments || []).filter((a) => a.isCAD);
       const att0 = cadAtt[0] || (state.attachments || [])[0];   // shown by its sanitized save name (attachmentDetails[i].fileName)
-      statusBadge.textContent = !state.streams.length && att0
+      const text = !state.streams.length && att0
         ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${attachmentFileName(att0, state.attachments.indexOf(att0))}`
         : !state.parts.length
         ? `${path}NO MESH${warns.length ? ' • ' + warns[0].slice(0, 120) : ''}`
         : bounds.allWatertight
           ? `${path}WATER-TIGHT 2-MANIFOLD (${state.parts.length} SOLIDS)`
           : `${path}${state.parts.length} BODIES EXTRACTED`;
-      statusBadge.title = warns.join('\n');
-      statusBadge.className = 'badge ' + (state.parts.length ? (warns.length ? 'badge-amber' : 'badge-emerald') : 'badge-amber');
+      state.status = { text, title: warns.join('\n'), tone: state.parts.length && !warns.length ? 'ok' : 'warn' };
+      try { document.dispatchEvent(new CustomEvent('pdf3d:status', { detail: Object.assign({}, state.status) })); } catch (e) { /* no DOM (tests) */ }
     }
 
     // Stream list
@@ -3820,8 +3787,6 @@
         if (chk) {
           chk.addEventListener('change', (ev) => {
             p.visible = ev.target.checked;
-            state.cachedXT = null;
-            state.cachedSTEP = null;
             refreshAllUI();
           });
         }
@@ -3894,7 +3859,7 @@
     }
     const hudAssemblyStats = document.getElementById('hudAssemblyStats');
     if (hudAssemblyStats) {
-      hudAssemblyStats.textContent = `Solids: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
+      hudAssemblyStats.textContent = `Solid Bodies: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
     }
     const hudBounds = document.getElementById('hudBounds');
     if (hudBounds) {
@@ -3902,90 +3867,24 @@
     }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
-      hudScaleInfo.textContent = XT_UI_ENABLED
+      hudScaleInfo.textContent = ENABLE_XT_EXPORT
         ? `Parasolid XT: 1e-3 m/mm (res_size=1000, res_linear=1e-8) • Units: ${state.units}`
         : `Units: ${state.units} • STEP AP214 export`;
     }
+    // 1.7.0: compressed / uncompressed size of the active 3D stream (was in the Advanced stream telemetry drawer)
+    const hudStreamSizes = document.getElementById('hudStreamSizes');
+    if (hudStreamSizes) {
+      hudStreamSizes.textContent = activeStream
+        ? `3D stream size: ${streamSizeLabel(activeStream.compressedLength)} compressed • ${streamSizeLabel(activeStream.rawBytes && activeStream.rawBytes.length)} uncompressed`
+        : '';
+    }
 
-    updateInspectorDrawer();
     renderViewport();
   }
-
-  function updateInspectorDrawer() {
-    const summaryEl = document.getElementById('drawerSummary');
-    const codeEl = document.getElementById('drawerCode');
-    if (!summaryEl || !codeEl) return;
-    if (state.activeTab === 'xt' && !XT_UI_ENABLED) state.activeTab = 'step';
-
-    // Built lazily, only for the tab that is showing (huge models take seconds per exporter).
-    if (state.activeTab === 'xt' || state.activeTab === 'step') {
-      let nt = 0;
-      for (const p of state.parts) if (p.visible && p.brep) nt += p.brep.nt;
-      if (nt > INSPECTOR_MAX_TRIS) {
-        summaryEl.innerHTML = `<div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">${state.activeTab === 'xt' ? 'Parasolid XT' : 'STEP AP214'} preview skipped</div>` +
-          `<div class="entity-row"><span>Visible triangles</span><strong>${nt.toLocaleString()}</strong></div>`;
-        codeEl.textContent = `Model too large for an in-page text preview (> ${INSPECTOR_MAX_TRIS.toLocaleString()} tris). Use the Export buttons: the file is streamed part-by-part straight to disk.`;
-        return;
-      }
-    }
-    if (state.activeTab === 'xt' && !state.cachedXT) {
-      state.cachedXT = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName });
-      state.cachedXTStats = lastXTStats;
-    }
-    if (state.activeTab === 'step' && !state.cachedSTEP) {
-      state.cachedSTEP = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units });
-    }
-
-    if (state.activeTab === 'xt') {
-      const xtPrev = previewLines(state.cachedXT, 140);
-      const counts = { ASSEMBLY: 0, INSTANCE: 0, BODY: 0, REGION: 0, SHELL: 0, FACE: 0, LOOP: 0, FIN: 0, EDGE: 0, VERTEX: 0, PLANE: 0, LINE: 0, POINT: 0 };
-      let bodyKindLabel = 'Solid / Sheet B-Rep';
-      // The NX-form stream is wrapped at 80 columns, so node counts come from the writer, not from lines.
-      const xtSt = state.cachedXTStats || { counts: {}, bodyKinds: [] };
-      const XT_NAMES = { 10: 'ASSEMBLY', 11: 'INSTANCE', 12: 'BODY', 19: 'REGION', 13: 'SHELL', 14: 'FACE', 15: 'LOOP', 17: 'FIN', 16: 'EDGE', 18: 'VERTEX', 50: 'PLANE', 30: 'LINE', 29: 'POINT' };
-      for (const [code, n] of Object.entries(xtSt.counts)) if (XT_NAMES[code]) counts[XT_NAMES[code]] += n;
-      if (xtSt.bodyKinds.includes(3)) bodyKindLabel = 'Sheet Body (body_type=3)';
-      else if (xtSt.bodyKinds.includes(1)) bodyKindLabel = 'Solid Body (body_type=1)';
-
-      summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (${(state.cachedXTStats && state.cachedXTStats.schema) || XT_NX_SCHEMA})</div>
-        <div class="entity-row"><span>12 BODY (${bodyKindLabel})</span><strong>${counts.BODY}${counts.ASSEMBLY ? ' (' + counts.INSTANCE + ' Inst)' : ''}</strong></div>
-        <div class="entity-row"><span>19 REGION (Void / Solid)</span><strong>${counts.REGION}</strong></div>
-        <div class="entity-row"><span>13 SHELL (Connected Shells)</span><strong>${counts.SHELL}</strong></div>
-        <div class="entity-row"><span>14 FACE (Planar B-Rep)</span><strong>${counts.FACE}</strong></div>
-        <div class="entity-row"><span>15 LOOP (Outer + Hole Loops)</span><strong>${counts.LOOP}</strong></div>
-        <div class="entity-row"><span>17 FIN (Real + Dummy Half-Edges)</span><strong>${counts.FIN}</strong></div>
-        <div class="entity-row"><span>16 EDGE / 30 LINE</span><strong>${counts.EDGE}</strong></div>
-        <div class="entity-row"><span>18 VERTEX / 29 POINT</span><strong>${counts.VERTEX}</strong></div>
-        <div class="entity-row"><span>50 PLANE Surfaces</span><strong>${counts.PLANE}</strong></div>
-      `;
-      codeEl.textContent = xtPrev.lines.join('\n') +
-        (xtPrev.count > 140 ? `\n... (${xtPrev.count - 140} more Parasolid XT records — click "Export Parasolid XT (.x_t)" for full file)` : '');
-    } else if (state.activeTab === 'step') {
-      const stepPrev = previewLines(state.cachedSTEP, 140);
-      summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">STEP AP214 (ISO 10303-21) Summary</div>
-        <div class="entity-row"><span>Schema</span><strong>AUTOMOTIVE_DESIGN</strong></div>
-        <div class="entity-row"><span>Total STEP Entities</span><strong>${stepPrev.count - 10}</strong></div>
-        <div class="entity-row"><span>MANIFOLD_SOLID_BREP</span><strong>${state.parts.filter((p) => p.visible).length}</strong></div>
-        <div class="entity-row"><span>Units</span><strong>${state.units.toUpperCase()}</strong></div>
-      `;
-      codeEl.textContent = stepPrev.lines.join('\n') +
-        (stepPrev.count > 140 ? `\n... (${stepPrev.count - 140} more STEP entities)` : '');
-    } else {
-      const st = state.streams[state.activeStreamIdx];
-      const blocks = (st && st.parsed && st.parsed.blocks) || [];
-      summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">PDF /3D Stream &amp; Block Directory</div>
-        <div class="entity-row"><span>Active Stream</span><strong>${st ? st.subtype : 'None'}</strong></div>
-        <div class="entity-row"><span>Compressed Size</span><strong>${st ? st.compressedLength : 0} B</strong></div>
-        <div class="entity-row"><span>Decompressed Size</span><strong>${st ? st.rawBytes.length : 0} B</strong></div>
-        <div class="entity-row"><span>Parsed Blocks</span><strong>${blocks.length}</strong></div>
-      `;
-      codeEl.textContent = blocks.map((b, i) =>
-        `Block[${String(i).padStart(2, '0')}] @ 0x${b.offset.toString(16).padStart(6, '0')} | Type: 0x${(b.blockType >>> 0).toString(16).toUpperCase().padStart(8, '0')} | Data: ${b.dataSize} B | Meta: ${b.metaSize} B`
-      ).join('\n');
-    }
+  // "812 B", "37.4 KB", "2.31 MB"; '?' when the size is unknown
+  function streamSizeLabel(n) {
+    if (!(n >= 0)) return '?';
+    return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
   }
 
   async function activateStream(idx) {
@@ -4018,8 +3917,6 @@
       visible: true
     }));
     state.selectedPartIdx = -1;
-    state.cachedXT = null;
-    state.cachedSTEP = null;
     setLastLoad(loadResultFor(st, idx));
     refreshAllUI();
   }
@@ -4076,17 +3973,11 @@
     if (streams.length === 0) {
       setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0,
         message: state.attachments.length ? 'No 3D model in this PDF; it has embedded file attachments.' : 'No 3D model (U3D / PRC) in this PDF.' });
-      // Simple mode shows the NO_3D load card in the empty viewport instead of an alert (Advanced keeps the alert)
-      const simpleUI = typeof document !== 'undefined' && document.body && document.body.classList.contains('sm-simple');
+      // the UI shows the NO_3D load card in the empty viewport (no alert)
       // clear the previous model in every NO_3D case (the file name already changed; the HUD stream name must not linger)
       state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
-      state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
+      state.selectedPartIdx = -1;
       refreshAllUI();
-      if (state.attachments.length || simpleUI) {
-        // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
-        return;
-      }
-      alert('No embedded /3D (U3D / PRC) streams or file attachments found in this file.');
       return;
     }
     state.streams = streams;
@@ -4150,106 +4041,6 @@
   // -------------------------------------------------------------------------
   // 11. Event Listeners & Interactive Camera Controls
   // -------------------------------------------------------------------------
-  // Result message for Parasolid export: a small non-modal toast styled like the CAD export toast (cad-export-ui.css).
-  let xtToast = null, xtToastTimer = null;
-  function showExportResult(tone, title, lines) {
-    if (typeof document === 'undefined' || !document.body) return;
-    if (!xtToast) {
-      xtToast = document.createElement('section');
-      xtToast.className = 'cad-toast xt-toast';
-      xtToast.setAttribute('role', 'status');
-      xtToast.setAttribute('aria-live', 'polite');
-      xtToast.setAttribute('aria-labelledby', 'xtToastTitle');
-      xtToast.innerHTML = '<div class="cad-t-h"><span class="cad-t-ico" aria-hidden="true"></span><h2 class="cad-t-title" id="xtToastTitle"></h2>' +
-        '<button type="button" class="btn btn-sm cad-t-x" aria-label="Dismiss">\u00d7</button></div><div class="cad-t-msg"></div>';
-      xtToast.querySelector('.cad-t-x').addEventListener('click', () => { xtToast.hidden = true; });
-      xtToast.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); xtToast.hidden = true; } });
-      document.body.appendChild(xtToast);
-      document.addEventListener('pdf3d:cadexport', () => { xtToast.hidden = true; });   // the CAD toast uses the same corner
-    }
-    if (xtToastTimer) { clearTimeout(xtToastTimer); xtToastTimer = null; }
-    xtToast.dataset.state = 'done';
-    xtToast.dataset.tone = tone;
-    xtToast.querySelector('.cad-t-title').textContent = title;
-    const msg = xtToast.querySelector('.cad-t-msg');
-    msg.textContent = '';
-    for (const l of lines) { const p = document.createElement('p'); p.textContent = l; msg.appendChild(p); }
-    msg.hidden = !lines.length;
-    xtToast.hidden = false;
-    if (tone === 'ok') xtToastTimer = setTimeout(() => { if (xtToast && !xtToast.contains(document.activeElement)) xtToast.hidden = true; }, 10000);
-  }
-
-  // Parasolid (.x_t) export (Advanced button and Simple menu item): always the merged B-Rep body.
-  function exportParasolidXT() {
-    const filename = `${stemName()}.x_t`;
-    try {
-      const st = {};
-      const xt = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, stats: st });
-      const faces = st.faces || 0;   // FACE nodes written (counts[14]); an empty BODY node is written even with no faces
-      if (!faces) {
-        showExportResult('warn', 'Parasolid export: nothing to save', ['No visible part has B-Rep faces. Show a part with geometry and try again.']);
-        return false;
-      }
-      triggerDownload(xt, filename, 'text/plain');   // anchor download: the page cannot confirm the file was saved
-      const n = (v) => v.toLocaleString('en-US');
-      const big = (st.estimatedBytes || 0) > BIG_DOWNLOAD_BYTES;
-      const bigLine = `This file is about ${fmtBytes(st.estimatedBytes || 0)}. Chrome can cancel downloads this large without a message; if it isn't in your Downloads, hide some parts or use Reduce detail and export again.`;
-      const faceLine = `${n(faces)} flat face${faces === 1 ? '' : 's'}`;
-      if (st.bodyType === 'sheet') {
-        showExportResult('warn', 'Parasolid sheet body exported (open model)', [
-          'This part isn\'t closed, so it was saved as surfaces, not a solid. This form hasn\'t been tested in NX.',
-          `Download started: ${filename}, 1 sheet body, ${faceLine}, ${n(st.openEdges || 0)} open edges.`
-        ].concat(big ? [bigLine] : []));
-        return true;
-      }
-      const lines = [`1 solid body, ${faceLine}.`];
-      if (st.splitFaces) {
-        // the viewer counts merged faces; curved ones cannot be one flat Parasolid face, so they are written as their triangles
-        lines.push(`The viewer shows ${n(st.viewerFaces)} faces: ${n(st.splitFaces)} of them ${st.splitFaces === 1 ? 'is' : 'are'} not exactly flat, so ${st.splitFaces === 1 ? 'it was' : 'they were'} saved as ${n(st.splitTris)} flat triangles.`);
-      }
-      lines.push(`Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep. Stored in meters (Parasolid standard), opens at true size in NX.`);
-      if (big) lines.push(bigLine);
-      showExportResult(big ? 'warn' : 'ok', `Parasolid download started: ${filename}`, lines);
-      return true;
-    } catch (e) {
-      console.error('Parasolid export failed', e);
-      const tooLarge = e && e.code === 'XT_TOO_LARGE';
-      const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
-      showExportResult('err', tooLarge ? 'Parasolid export: model too large' : 'Parasolid export failed', [
-        tooLarge ? `The file would be about ${fmtBytes(e.estimatedBytes)}, more than the browser can save. Hide some parts or use Reduce detail, then try again.`
-          : oom ? 'The browser ran out of memory while writing the file. Hide some parts or use Reduce detail, then try again.'
-          : `Error: ${(e && e.message) || e}`,
-        'Nothing was saved.'
-      ]);
-      return false;
-    }
-  }
-
-  // Parasolid XT export button and inspector tab (created here, not in index.html, so they exist only while XT_UI_ENABLED).
-  function injectXTControls() {
-    if (!document.getElementById('btnExportXT')) {
-      const stepBtn = document.getElementById('btnExportSTEP');
-      if (stepBtn && stepBtn.parentNode) {
-        const b = document.createElement('button');
-        b.className = 'btn';
-        b.id = 'btnExportXT';
-        b.title = 'Faceted body, flat faces. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
-        b.textContent = 'Export Parasolid (.x_t)';
-        stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
-      }
-    }
-    if (!document.querySelector('.tab-btn[data-tab="xt"]')) {
-      const stepTab = document.querySelector('.tab-btn[data-tab="step"]');
-      if (stepTab && stepTab.parentNode) {
-        const t = document.createElement('button');
-        t.className = 'tab-btn';
-        t.setAttribute('data-tab', 'xt');
-        t.textContent = 'Parasolid .x_t Inspector';
-        stepTab.parentNode.insertBefore(t, stepTab.nextSibling);
-      }
-    }
-  }
-
   function initEvents() {
     const canvas = document.getElementById('viewportCanvas');
     if (canvas) {
@@ -4300,252 +4091,119 @@
       }
     }
 
-    // Render mode buttons
-    document.querySelectorAll('[data-render]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('[data-render]').forEach((b) => b.classList.remove('btn-active'));
-        btn.classList.add('btn-active');
-        state.renderMode = btn.getAttribute('data-render');
-        renderViewport();
-      });
-    });
-
-    // Camera preset buttons
-    document.querySelectorAll('[data-view]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const v = btn.getAttribute('data-view');
-        state.camera.panX = 0;
-        state.camera.panY = 0;
-        const free = state.camera.mode !== 'turntable';
-        if (v === 'iso') setCameraYawPitch(-0.68, 0.52);
-        else if (v === 'top') setCameraYawPitch(0, free ? Math.PI / 2 : 1.48);
-        else if (v === 'front') setCameraYawPitch(0, 0);
-        else if (v === 'right') setCameraYawPitch(-Math.PI / 2, 0);
-        else if (v === 'reset') { setCameraYawPitch(-0.68, 0.52); state.camera.zoom = 1.0; }
-        renderViewport();
-      });
-    });
-
-    // Orbit mode toggle (Free arcball / Turntable Z-up), persisted in localStorage
+    // Orbit mode (Free arcball / Turntable Z-up), remembered in localStorage by PDF3DCamera
     if (window.PDF3DCamera) {
       state.camera.mode = window.PDF3DCamera.loadMode();
       if (state.camera.mode === 'free') state.camera.q = window.PDF3DCamera.fromYawPitch(state.camera.yaw, state.camera.pitch);
     }
-    syncOrbitButtons();
-    document.querySelectorAll('[data-orbit]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (!window.PDF3DCamera) return;
-        const m = btn.getAttribute('data-orbit') === 'turntable' ? 'turntable' : 'free';
-        window.PDF3DCamera.setMode(state.camera, m);
-        window.PDF3DCamera.saveMode(m);
-        syncOrbitButtons();
-        renderViewport();
-      });
-    });
 
-    const btnFitView = document.getElementById('btnFitView');
-    if (btnFitView) {
-      btnFitView.addEventListener('click', () => {
-        state.camera.zoom = 1.0;
-        state.camera.panX = 0;
-        state.camera.panY = 0;
-        renderViewport();
-      });
-    }
-
-    const explodeSlider = document.getElementById('explodeSlider');
-    if (explodeSlider) {
-      explodeSlider.addEventListener('input', (ev) => {
-        state.explodeFactor = Number(ev.target.value) || 0;
-        renderViewport();
-      });
-    }
-
-    // Units & B-Rep mode selectors
-    const unitSelect = document.getElementById('unitSelect');
-    if (unitSelect) {
-      unitSelect.addEventListener('change', (ev) => {
-        state.units = ev.target.value;
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
-
-    const brepModeSelect = document.getElementById('brepModeSelect');
-    if (brepModeSelect) {
-      brepModeSelect.addEventListener('change', (ev) => {
-        state.brepMode = ev.target.value;
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
-
-    const detailSelect = document.getElementById('detailSelect');
-    if (detailSelect) {
-      detailSelect.addEventListener('change', (ev) => {
-        state.exportDetail = Number(ev.target.value) || 1;
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
-
-    if (XT_UI_ENABLED) injectXTControls();
-
-    // Drawer tabs
-    document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn[data-tab]').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.activeTab = btn.getAttribute('data-tab');
-        updateInspectorDrawer();
-      });
-    });
-
-    const btnCopyInspector = document.getElementById('btnCopyInspector');
-    if (btnCopyInspector) {
-      btnCopyInspector.addEventListener('click', () => {
-        // Full text for normal models; for chunked (huge) output only the visible preview is copied.
-        const full = state.activeTab === 'xt' ? state.cachedXT : state.activeTab === 'step' ? state.cachedSTEP : null;
-        const text = typeof full === 'string' && full.length < (1 << 24)
-          ? full
-          : (document.getElementById('drawerCode').textContent || '');
-        if (navigator.clipboard) navigator.clipboard.writeText(text);
-        btnCopyInspector.textContent = 'Copied!';
-        setTimeout(() => { btnCopyInspector.textContent = 'Copy Preview'; }, 1200);
-      });
-    }
-
-    // Show All / Invert Parts
+    // Show All / Invert Parts (buttons built by simple-mode.js)
     const btnShowAllParts = document.getElementById('btnShowAllParts');
-    if (btnShowAllParts) {
-      btnShowAllParts.addEventListener('click', () => {
-        state.parts.forEach((p) => { p.visible = true; });
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
+    if (btnShowAllParts) btnShowAllParts.addEventListener('click', showAllParts);
     const btnInvertParts = document.getElementById('btnInvertParts');
-    if (btnInvertParts) {
-      btnInvertParts.addEventListener('click', () => {
-        state.parts.forEach((p) => { p.visible = !p.visible; });
-        if (!state.parts.some((p) => p.visible) && state.parts.length > 0) {
-          state.parts[0].visible = true;
-        }
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
+    if (btnInvertParts) btnInvertParts.addEventListener('click', invertParts);
 
-    // File open & drag-and-drop
+    // File open (the hidden #fileInput; simple-mode.js clicks it and forwards dropped files to it)
     const fileInput = document.getElementById('fileInput');
-    const btnOpenFile = document.getElementById('btnOpenFile');
-    const dropZone = document.getElementById('dropZone');
-
-    const handleFileObj = async (file) => {
-      if (!file) return;
-      const ab = await file.arrayBuffer();
-      await loadPDFBuffer(new Uint8Array(ab), file.name);
-    };
-
-    if (btnOpenFile && fileInput) {
-      btnOpenFile.addEventListener('click', () => fileInput.click());
+    if (fileInput) {
       fileInput.addEventListener('change', (ev) => {
         if (ev.target.files && ev.target.files[0]) handleFileObj(ev.target.files[0]);
       });
     }
-    if (dropZone && fileInput) {
-      dropZone.addEventListener('click', () => fileInput.click());
-      dropZone.addEventListener('dragover', (ev) => {
-        ev.preventDefault();
-        dropZone.classList.add('dragover');
-      });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-      dropZone.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        dropZone.classList.remove('dragover');
-        if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]) {
-          handleFileObj(ev.dataTransfer.files[0]);
-        }
-      });
-    }
-
-    const btnLoadSample = document.getElementById('btnLoadSample');
-    if (btnLoadSample) {
-      btnLoadSample.addEventListener('click', () => {
-        if (window.SAMPLE_3D_PDF_B64) {
-          loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf');
-        }
-      });
-    }
-
-    // Export Buttons
-    const btnExportXT = XT_UI_ENABLED ? document.getElementById('btnExportXT') : null;
-    if (btnExportXT) {
-      btnExportXT.addEventListener('click', () => exportParasolidXT());
-    }
-
-    const btnExportSTEP = document.getElementById('btnExportSTEP');
-    if (btnExportSTEP) {
-      btnExportSTEP.addEventListener('click', () => {
-        const stp = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, blob: true });
-        triggerDownload(stp, `${stemName()}.stp`, 'application/step');
-      });
-    }
-
-    const btnExportSTL = document.getElementById('btnExportSTL');
-    if (btnExportSTL) {
-      btnExportSTL.addEventListener('click', () => {
-        const stl = buildBinarySTL(state.parts, state.units);
-        triggerDownload(stl, `${stemName()}.stl`, 'application/sla');
-      });
-    }
-
-    const btnExportSTLText = document.getElementById('btnExportSTLText');
-    if (btnExportSTLText) {
-      btnExportSTLText.addEventListener('click', () => {
-        const stlTxt = buildASCIISTL(state.parts, state.units, { blob: true });
-        triggerDownload(stlTxt, `${stemName()}-ascii.stl`, 'text/plain');
-      });
-    }
-
-    const btnExportOBJ = document.getElementById('btnExportOBJ');
-    if (btnExportOBJ) {
-      btnExportOBJ.addEventListener('click', () => {
-        const obj = buildWavefrontOBJ(state.parts, state.units, { blob: true });
-        triggerDownload(obj, `${stemName()}.obj`, 'text/plain');
-      });
-    }
-
-    const btnExportIGES = document.getElementById('btnExportIGES');
-    if (btnExportIGES) {
-      btnExportIGES.addEventListener('click', () => {
-        const igs = buildIGESWireframe(state.parts, state.units, { blob: true });
-        triggerDownload(igs, `${stemName()}.igs`, 'text/plain');
-      });
-    }
-
-    const btnExportRaw = document.getElementById('btnExportRaw');
-    if (btnExportRaw) {
-      btnExportRaw.addEventListener('click', () => {
-        const st = state.streams[state.activeStreamIdx];
-        if (!st) return;
-        const ext = st.subtype === 'PRC' ? 'prc' : 'u3d';
-        triggerDownload(st.rawBytes, `${stemName()}.${ext}`, 'application/octet-stream');
-      });
-    }
   }
+  async function handleFileObj(file) {
+    if (!file) return;
+    const ab = await file.arrayBuffer();
+    await loadPDFBuffer(new Uint8Array(ab), file.name);
+  }
+  function loadSample() {
+    if (!window.SAMPLE_3D_PDF_B64) return Promise.resolve(false);
+    return loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf').then(() => true);
+  }
+  function showAllParts() {
+    state.parts.forEach((p) => { p.visible = true; });
+    refreshAllUI();
+  }
+  function invertParts() {
+    state.parts.forEach((p) => { p.visible = !p.visible; });
+    if (!state.parts.some((p) => p.visible) && state.parts.length > 0) state.parts[0].visible = true;
+    refreshAllUI();
+  }
+
+  // 1.7.0 view controls for the UI (simple-mode.js), on window.PDF3DView next to the view preferences. Each change
+  // re-renders and fires 'pdf3d:viewchange' on document with { renderMode, orbitMode, explode }.
+  const RENDER_MODES = ['shaded-edges', 'brep-faces', 'shaded', 'wireframe', 'xray'];
+  const VIEW_PRESETS = ['iso', 'top', 'front', 'right', 'reset'];
+  function viewState() { return { renderMode: state.renderMode, orbitMode: state.camera.mode, explode: state.explodeFactor }; }
+  function viewChanged() {
+    renderViewport();
+    try { document.dispatchEvent(new CustomEvent('pdf3d:viewchange', { detail: viewState() })); } catch (e) { /* no DOM (tests) */ }
+  }
+  Object.assign(window.PDF3DView, {
+    renderModes: RENDER_MODES, presets: VIEW_PRESETS,
+    state: viewState,
+    setRenderMode(m) { if (!RENDER_MODES.includes(m)) return false; state.renderMode = m; viewChanged(); return true; },
+    // camera presets: iso / top / front / right keep the zoom; reset also returns to zoom 1. All clear the pan.
+    preset(v) {
+      if (!VIEW_PRESETS.includes(v)) return false;
+      state.camera.panX = 0;
+      state.camera.panY = 0;
+      const free = state.camera.mode !== 'turntable';
+      if (v === 'iso') setCameraYawPitch(-0.68, 0.52);
+      else if (v === 'top') setCameraYawPitch(0, free ? Math.PI / 2 : 1.48);
+      else if (v === 'front') setCameraYawPitch(0, 0);
+      else if (v === 'right') setCameraYawPitch(-Math.PI / 2, 0);
+      else { setCameraYawPitch(-0.68, 0.52); state.camera.zoom = 1.0; }
+      viewChanged(); return true;
+    },
+    fit() { state.camera.zoom = 1.0; state.camera.panX = 0; state.camera.panY = 0; viewChanged(); return true; },
+    setOrbitMode(m) {
+      if ((m !== 'free' && m !== 'turntable') || !window.PDF3DCamera) return false;
+      window.PDF3DCamera.setMode(state.camera, m);
+      window.PDF3DCamera.saveMode(m);
+      viewChanged(); return true;
+    },
+    // exploded view, 0..100 (percent)
+    setExplode(n) { n = Number(n); if (!isFinite(n)) return false; state.explodeFactor = Math.max(0, Math.min(100, n)); viewChanged(); return true; }
+  });
+
+  // 1.7.0 export settings for the UI (export-flow.js): units, B-Rep mode and reduce-detail, the values the export
+  // writers read from state. get() -> { units, brepMode, detail } (strings, as option values); set(key, value)
+  // validates against options, applies, refreshes and fires 'pdf3d:exportsettings'. Defaults: mm / merged / '1'.
+  const EXPORT_SETTING_OPTIONS = {
+    units: [['mm', 'mm (NX default)'], ['cm', 'cm (10 mm)'], ['in', 'inch (25.4 mm)'], ['ft', 'foot (304.8 mm)'], ['m', 'meter (1000 mm)']],
+    brepMode: [['merged', 'Merged Planar B-Rep (Auto Solid / Sheet)'], ['sheet-unsewn', 'Open Sheet Surfaces (NX House/Deck Recovery)'],
+      ['merged-assembly', 'Multi-Body Assembly (STEP only; Parasolid always writes merged)'], ['faceted', 'Triangulated Faceted Sheet B-Rep (1:1 Mesh)']],
+    detail: [['1', 'Off (full detail)'], ['0.5', '50% of triangles'], ['0.25', '25% of triangles'], ['0.1', '10% of triangles']]
+  };
+  const EXPORT_SETTING_TITLES = {
+    units: 'CAD unit scaling for STEP/STL/OBJ/IGES export',
+    brepMode: 'How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.',
+    detail: 'Optional decimation (vertex clustering) applied to exported files only. Off = full detail.'
+  };
+  const exportSettings = {
+    options: EXPORT_SETTING_OPTIONS, titles: EXPORT_SETTING_TITLES,
+    get() { return { units: state.units, brepMode: state.brepMode, detail: String(state.exportDetail || 1) }; },
+    set(key, value) {
+      const opts = EXPORT_SETTING_OPTIONS[key]; value = String(value);
+      if (!opts || !opts.some((o) => o[0] === value)) return false;
+      if (key === 'detail') state.exportDetail = Number(value) || 1; else state[key] = value;
+      refreshAllUI();
+      try { document.dispatchEvent(new CustomEvent('pdf3d:exportsettings', { detail: exportSettings.get() })); } catch (e) { /* no DOM (tests) */ }
+      return true;
+    }
+  };
 
   // Expose programmatic API for automated verification & CAD testing
   window.CAD3DExtractor = { U3DBitStreamReader, U3DHistogram, U3D_CTX, U3D_AC_STATIC_FULL, parseU3DStream,
     getState: () => state, computeAssemblyBounds,
     getLastLoad: () => (window.PDF3D || {}).lastLoad || null,
     loadPDFBuffer,
+    loadSample,
     activateStream,
+    showAllParts, invertParts,
+    // 1.7.0: load status { text, title, tone: 'ok' | 'warn' } (also sent as 'pdf3d:status')
+    getStatus: () => Object.assign({ text: '', title: '', tone: '' }, state.status),
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
     buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
     // summary of the last .x_t written: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, viewerFaces, splitFaces, splitTris, estimatedBytes, counts }
@@ -4561,12 +4219,13 @@
   // form (SCH_3800173_37102_13006) that Siemens NX imports.
   const PDF3D_NS = (window.PDF3D = window.PDF3D || {});
   PDF3D_NS.capabilities = Object.assign(PDF3D_NS.capabilities || {}, { parasolid: XT_WRITER_FORM === 'nx-37102', parasolidSchema: XT_NX_SCHEMA });
+  PDF3D_NS.exportSettings = exportSettings;
 
   // ---------------------------------------------------------------------------------------------
   // PDF3D.exportFormat(format, opts) -> Promise<{ blob, filename, status, reasonCode, reason, summary }>
-  // One entry point for every format, used by the Simple Export menu (export-flow.js). It calls the
-  // same writers as the Advanced buttons with the same arguments, so a mesh-format file is byte-identical
-  // to the button's file for the same settings; no button is clicked.
+  // One entry point for every format, used by the Export menu (export-flow.js). It calls the
+  // same writers with the same arguments as the 1.6.2 per-format export buttons (removed in 1.7.0), so a mesh-format
+  // file is byte-identical to theirs for the same settings.
   //   format: 'step' | 'stl' | 'obj' | 'iges' | 'raw' | 'xt'
   //   opts:   { body: 'mesh'|'fitted'|'both' (STEP), onNoFit: 'mesh'|'omit' (STEP fitted), units, detail,
   //             brepMode, partIds (null = all visible parts), encoding: 'binary'|'ascii' (STL), signal, onProgress }
@@ -4581,7 +4240,7 @@
     ? new Blob([content], { type: mimeType })
     : new Blob(textChunks(content), { type: `${mimeType};charset=utf-8` }));   // same Blob as triggerDownload
   function exportSelection(partIds) {
-    // parts = the array handed to the writers (null: state.parts itself, as the Advanced buttons pass it);
+    // parts = the array handed to the writers (null: state.parts itself, as the 1.6.2 export buttons passed it);
     // chosen[k] = the part for ids[k]
     if (partIds == null) { const ids = state.parts.map((p, i) => i).filter((i) => state.parts[i].visible); return { ids, parts: state.parts, chosen: ids.map((i) => state.parts[i]) }; }
     const ids = [...new Set([].concat(partIds))].filter((i) => Number.isInteger(i) && state.parts[i]);
@@ -4629,7 +4288,7 @@
     }
     if (fmt === 'xt') {
       if (!(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return exportSkipped('unavailable', 'Parasolid export is not available in this version');
-      // Same call as the Advanced button (exportParasolidXT); the writer fills `st` with its own summary.
+      // Same call as the 1.6.2 Parasolid button; the writer fills `st` with its own summary.
       const st = {}; let gen = null, first = null;
       const xo = { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, stats: st, ...wo, ...(o.maxBytes != null ? { maxBytes: o.maxBytes } : {}) };
       try {

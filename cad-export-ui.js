@@ -10,10 +10,9 @@
  *   PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal }) -> Promise<{ blob, filename, status, reason, summary }>
  * Feature-detected: if PDF3D.exportCadSurfaces is missing, the add-on renders nothing (page unchanged).
  *
- * Simple mode: an item in the Export ▾ menu (found by DOM: #smMenuExport, re-inserted every time
- * simple-mode.js rebuilds the format list) + a "Fitted solid only" checkbox item.
- * Advanced mode: a button + checkbox appended to the original .exportbar export group.
- * Progress / result: a non-modal toast (role=region) with aria-live announcements; the viewer stays usable.
+ * 1.7.0: no menu item or export-bar button of its own any more (the Advanced UI and the old Simple Export ▾ menu are
+ * gone); export-flow.js owns the Export UI and uses describe() / normResult() for its wording. start() / cancel()
+ * stay as API. Progress / result: a non-modal toast (role=region) with aria-live announcements; the viewer stays usable.
  * No edits to simple-mode.js or app.js.
  */
 (function () {
@@ -110,7 +109,7 @@
       return normPre({ ok: false, reason: 'error', message: 'Check failed: ' + (e && e.message || e) });
     }
     if (r && typeof r.then === 'function') {
-      r.then((v) => { asyncPre = normPre(v); refreshAll(true); }, () => { asyncPre = normPre({ ok: false, reason: 'error' }); refreshAll(true); });
+      r.then((v) => { asyncPre = normPre(v); }, () => { asyncPre = normPre({ ok: false, reason: 'error' }); });
       return asyncPre || normPre({ ok: false, reason: 'checking' });
     }
     return normPre(r);
@@ -160,129 +159,7 @@
   let last = null;       // last finished result (for "Save again")
   let hideTimer = null;
 
-  // ------------------------------------------------------------------ Simple mode: Export ▾ menu items
-  function buildSimple() {
-    const menu = $('smMenuExport');
-    if (!menu) return;
-    ui.simpleMenu = menu;
-    ui.simpleTrigger = document.querySelector('[aria-controls="smMenuExport"]');
-    ui.miSub = h('span', { class: 'cad-mi-sub', id: 'cadMiSub' });
-    ui.miSub2 = h('span', { class: 'cad-mi-sub2', id: 'cadMiSub2' });
-    ui.mi = h('button', { type: 'button', class: 'sm-mi cad-mi', role: 'menuitem', 'data-cad': 'simple', 'aria-describedby': 'cadMiSub cadMiSub2' },
-      h('span', { class: 'sm-mi-check cad-mi-ico', 'aria-hidden': 'true', text: '◆' }),
-      h('span', { class: 'cad-mi-text' }, h('span', { class: 'sm-mi-label', text: 'CAD surfaces (STEP)' }), ui.miSub, ui.miSub2),
-      h('span', { class: 'sm-mi-ext', text: '.stp' }));
-    ui.miOpt = h('button', { type: 'button', class: 'sm-mi sm-mi--box cad-mi-opt', role: 'menuitemcheckbox', 'aria-checked': 'false', 'data-cad': 'fitted-only' },
-      h('span', { class: 'sm-mi-check', 'aria-hidden': 'true' }), h('span', { class: 'sm-mi-label', text: 'Fitted solid only' }),
-      h('span', { class: 'sm-mi-ext', text: 'no mesh body' }));
-    ui.mi.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      if (ui.mi.getAttribute('aria-disabled') === 'true') return;          // stays open; reason is on screen
-      closeSimpleMenu();
-      if (run) focusToast(); else start(ui.simpleTrigger || ui.mi);
-    });
-    ui.miOpt.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      if (ui.miOpt.getAttribute('aria-disabled') === 'true') return;
-      setFittedOnly(!fittedOnly);
-    });
-    const place = () => {
-      const group = menu.querySelector('[role="group"]');
-      if (!group || !group.children.length || !api()) {
-        if (ui.mi.isConnected && !api()) { ui.mi.remove(); ui.miOpt.remove(); }
-        return;
-      }
-      if (group.contains(ui.mi) && ui.mi.nextSibling === ui.miOpt) return;
-      const anchor = group.querySelector('[data-sm-export="btnExportOBJ"]') ||
-        [...group.querySelectorAll('[data-sm-export^="btnExportSTL"]')].pop();
-      if (anchor) anchor.after(ui.mi, ui.miOpt); else group.append(ui.mi, ui.miOpt);
-      refreshSimple();
-      if (!menu.hidden) {               // grew after simple-mode positioned it: keep it on screen
-        const r = menu.getBoundingClientRect();
-        if (r.bottom > window.innerHeight - 8) menu.style.maxHeight = Math.max(160, window.innerHeight - r.top - 8) + 'px';
-      }
-    };
-    new MutationObserver(place).observe(menu, { childList: true, subtree: true });
-    place();
-  }
-  function closeSimpleMenu() {
-    const t = ui.simpleTrigger;
-    if (t && t.getAttribute('aria-expanded') === 'true') t.click();      // simple-mode toggles it closed
-    if (t) t.focus({ preventScroll: true });
-  }
-  function refreshSimple() {
-    if (!ui.mi || !ui.mi.isConnected) return;
-    const pre = preflight();
-    if (!pre) return;
-    const sel = selection();
-    const dis = !run && !pre.ok;
-    ui.mi.setAttribute('aria-disabled', dis ? 'true' : 'false');
-    ui.mi.classList.toggle('is-disabled', dis);
-    ui.mi.dataset.reason = pre.reason || '';
-    ui.miOpt.setAttribute('aria-disabled', dis ? 'true' : 'false');
-    ui.miOpt.setAttribute('aria-checked', fittedOnly ? 'true' : 'false');
-    ui.miOpt.querySelector('.sm-mi-check').textContent = fittedOnly ? '✓' : '';
-    let sub, sub2 = [];
-    if (run) sub = 'Exporting… ' + (run.pct != null ? Math.round(run.pct) + '%' : '') + ' (show progress)';
-    else if (!pre.ok) sub = pre.message;
-    else {
-      sub = fittedOnly ? 'Fitted solid only, no mesh body' : 'Fitted solid + mesh fallback';
-      if (sel.name) sub2.push('Selected part only: ' + sel.name);
-      if (!pre.estimate.kernelCached) sub2.push('First use downloads ' + MB(pre.estimate.kernelBytes) + ' MB');
-    }
-    ui.miSub.textContent = sub;
-    ui.miSub.classList.toggle('cad-why', dis);
-    ui.miSub2.textContent = sub2.join(' · ');
-    ui.miSub2.hidden = !sub2.length;
-    ui.mi.title = dis ? pre.message : 'Fit CAD surfaces (planes, cylinders, B-splines…) and export STEP' + (fittedOnly ? '' : ' with the mesh body as fallback');
-  }
-
-  // ------------------------------------------------------------------ Advanced mode: button in the export bar
-  function buildAdvanced() {
-    const stepBtn = $('btnExportSTEP');
-    const group = stepBtn && stepBtn.closest('.export-group');
-    if (!group) return;
-    ui.advBtn = h('button', { type: 'button', class: 'btn cad-adv-btn', id: 'cadExportBtn', 'data-cad': 'advanced', 'aria-describedby': 'cadAdvNote' },
-      'CAD Surfaces (.stp)');
-    ui.advChk = h('input', { type: 'checkbox', id: 'cadFittedOnly', 'data-cad': 'fitted-only' });
-    ui.advOpt = h('label', { class: 'cad-adv-opt', for: 'cadFittedOnly', title: 'Write only the fitted solid / surfaces, without the mesh body fallback' }, ui.advChk, 'Fitted only');
-    ui.advNote = h('span', { class: 'cad-adv-note', id: 'cadAdvNote' });
-    // own .export-group right after the original one: on a full bar it wraps as a unit next to the status badge
-    ui.adv = h('div', { class: 'export-group cad-adv', role: 'group', 'aria-label': 'CAD surfaces export' }, ui.advBtn, ui.advOpt, ui.advNote);
-    ui.advGroup = group;
-    ui.advBtn.addEventListener('click', () => {
-      if (ui.advBtn.getAttribute('aria-disabled') === 'true') return;
-      if (run) focusToast(); else start(ui.advBtn);
-    });
-    ui.advChk.addEventListener('change', () => setFittedOnly(ui.advChk.checked));
-  }
-  function refreshAdvanced() {
-    if (!ui.adv) return;
-    const pre = preflight();
-    if (!pre) { if (ui.adv.isConnected) ui.adv.remove(); return; }
-    if (!ui.adv.isConnected) ui.advGroup.after(ui.adv);
-    const dis = !run && !pre.ok;
-    ui.advBtn.setAttribute('aria-disabled', dis ? 'true' : 'false');
-    ui.advBtn.dataset.reason = pre.reason || '';
-    ui.advChk.disabled = dis;
-    ui.advChk.checked = fittedOnly;
-    const sel = selection();
-    ui.advNote.textContent = run ? 'Exporting… ' + (run.pct != null ? Math.round(run.pct) + '%' : '') : (dis ? pre.message : (sel.name ? 'Selected part only' : ''));
-    ui.advNote.hidden = !ui.advNote.textContent;
-    ui.advNote.classList.toggle('cad-why', dis);
-    ui.advBtn.title = dis ? pre.message
-      : 'Fit CAD surfaces and export STEP: fitted solid' + (fittedOnly ? ' only' : ' + mesh body fallback') +
-        (pre.estimate.kernelCached ? '' : ' · first use downloads the ' + MB(pre.estimate.kernelBytes) + ' MB CAD kernel');
-  }
-
-  function setFittedOnly(v) { fittedOnly = !!v; refreshAll(); }
-  let refreshQueued = false;
-  function refreshAll(now) {
-    if (now) { refreshQueued = false; refreshSimple(); refreshAdvanced(); return; }
-    if (refreshQueued) return;
-    refreshQueued = true;
-    Promise.resolve().then(() => { if (refreshQueued) refreshAll(true); });
-  }
+  function setFittedOnly(v) { fittedOnly = !!v; }
 
   // ------------------------------------------------------------------ toast (progress + result)
   function buildToast() {
@@ -318,7 +195,7 @@
   function focusToast() { if (ui.toast && !ui.toast.hidden) ui.toast.focus({ preventScroll: true }); }
   function returnFocus() {
     const t = (run && run.trigger) || (last && last.trigger);
-    const tgt = t && t.isConnected && t.getClientRects().length ? t : (ui.simpleTrigger && ui.simpleTrigger.getClientRects().length ? ui.simpleTrigger : ui.advBtn);
+    const tgt = t && t.isConnected && t.getClientRects().length ? t : document.querySelector('.sm-topbar [data-xf="export"]');
     if (tgt) tgt.focus({ preventScroll: true });
   }
   function fmtTime(ms) { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
@@ -372,7 +249,7 @@
     const ns = api();
     if (!ns || run) return;
     const pre = preflight();
-    if (pre && !pre.ok) { refreshAll(true); return; }
+    if (pre && !pre.ok) return;
     const sel = selection();
     last = null;
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -382,7 +259,6 @@
     ui.toast.focus({ preventScroll: true });
     announce('CAD export started. ' + (pre && !pre.estimate.kernelCached ? 'Downloading the CAD kernel first.' : ''));
     run.timer = setInterval(() => { ui.tTime.textContent = fmtTime(performance.now() - me.t0); }, 500);
-    refreshAll(true);
     document.dispatchEvent(new CustomEvent('pdf3d:cadexport', { detail: { phase: 'start' } }));
 
     const onProgress = (a, b, c) => {
@@ -395,8 +271,6 @@
         me.stage = p.stage; me.lastAnn = Math.max(me.lastAnn, q);
         announce(p.label + (p.pct != null ? ', ' + Math.round(p.pct) + '%' : ''));
       }
-      if (ui.mi && ui.simpleMenu && !ui.simpleMenu.hidden) refreshSimple();
-      if (ui.advNote && ui.adv.isConnected) ui.advNote.textContent = 'Exporting… ' + (p.pct != null ? Math.round(p.pct) + '%' : '');
     };
     let res, err = null;
     try {
@@ -443,7 +317,6 @@
     if (hadFocus) (ui.tOk.hidden ? ui.tClose : ui.tOk).focus({ preventScroll: true });
     if (out.download) download(res.blob, res.filename);
     if (out.status === 'cancelled') hideTimer = setTimeout(() => { if (!focusInToast()) dismiss(false); }, 4000);
-    refreshAll(true);
     document.dispatchEvent(new CustomEvent('pdf3d:cadexport', { detail: { phase: 'done', status: out.status } }));
   }
   function dismiss(giveFocusBack) {
@@ -533,20 +406,10 @@
   function init() {
     if (!$('viewportCanvas') || !document.body) return;
     buildToast();
-    buildSimple();
-    buildAdvanced();
-    refreshAll(true);
-    // part list changes (load / selection), status changes, mode switches, late-loaded API
-    const obs = (el, opts) => { if (el) new MutationObserver(() => refreshAll()).observe(el, opts); };
-    obs($('partList'), { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-    obs($('statusBadge'), { childList: true, characterData: true, subtree: true });
-    document.addEventListener('pdf3d:uimode', () => refreshAll());
-    window.addEventListener('load', () => refreshAll());
-    if (ui.advBtn) ui.advBtn.addEventListener('pointerenter', () => refreshAll(true));
   }
 
   window.PDF3DCadExportUI = {
-    refresh: () => refreshAll(true),
+    refresh: () => preflight(),
     start: () => start(null),
     cancel,
     get running() { return !!run; },

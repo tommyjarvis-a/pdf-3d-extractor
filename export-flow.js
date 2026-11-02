@@ -1,8 +1,8 @@
 /*
  * export-flow.js — single "Export" button → format list → per-format options → "Save as…" (pdf-3d-extractor add-on).
  *
- * SIMPLE MODE ONLY: replaces the Simple-mode split button (Export STEP + ▾ menu) with ONE flow. Advanced mode keeps its
- * original export bar and the .cad-adv group untouched. The original #btnExport* buttons are still the mesh writers.
+ * The only export UI since 1.7.0 (the Advanced export bar is gone). The button sits in the simple-mode.js top bar
+ * (.sm-topbar .sm-actions). Units / body type / reduce detail are read and written through PDF3D.exportSettings.
  *
  * Engine hooks (all optional, feature-detected, never faked):
  *   PDF3D.capabilities.parasolid === true   → show "Parasolid (.x_t)" (needs PDF3D.exportFormat or #btnExportXT).
@@ -150,16 +150,15 @@
     inp.addEventListener('change', () => { if (inp.checked && !off) onchange(value); });
     return h('label', { class: 'xf-radio' + (off ? ' xf-radio--off' : '') }, inp, h('span', { class: 'xf-radio-l', text: label }), hint ? h('small', { text: hint }) : null);
   }
-  function proxySelect(origId, label) {
-    const o = $(origId);
-    if (!o) return null;
-    const sel = h('select', { class: 'select-ctrl', 'data-xf-proxy': origId });
-    for (const op of o.options) sel.append(h('option', { value: op.value, text: op.text }));
-    sel.value = o.value;
-    sel.addEventListener('change', () => {
-      const t = $(origId); if (!t || t.value === sel.value) return;
-      t.value = sel.value; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+  // export settings (units / brepMode / detail) live in app.js state: PDF3D.exportSettings { options, titles, get(), set() }
+  const xs = () => NS().exportSettings || null;
+  function settingSelect(key, label) {
+    const X = xs();
+    if (!X || !X.options || !X.options[key]) return null;
+    const sel = h('select', { class: 'select-ctrl', 'data-xf-setting': key, title: (X.titles && X.titles[key]) || null });
+    for (const [value, text] of X.options[key]) sel.append(h('option', { value, text }));
+    sel.value = X.get()[key];
+    sel.addEventListener('change', () => { const Y = xs(); if (Y && Y.get()[key] !== sel.value) Y.set(key, sel.value); });
     return h('label', { class: 'xf-field' }, h('span', { text: label }), sel);
   }
 
@@ -223,18 +222,16 @@
     place();
   }
 
-  // place the button in the Simple top bar, next to (and instead of) the split button. Advanced is left alone.
+  // place the button at the end of the top bar actions (simple-mode.js)
   function place() {
-    const split = document.querySelector('.sm-topbar .sm-split');
-    if (split && !ui.btnSimple.isConnected) split.after(ui.btnSimple);
+    const bar = document.querySelector('.sm-topbar .sm-actions');
+    if (bar && !ui.btnSimple.isConnected) bar.append(ui.btnSimple);
     document.body.classList.add('xf-on');
   }
   const trigger = () => ui.btnSimple;
-  const simpleMode = () => document.body.classList.contains('sm-simple');
 
   // ------------------------------------------------------------------ popover
   function openPop(btn) {
-    if (!simpleMode()) return;
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
     renderList(); renderOpts(); syncDamagedNote();
@@ -252,7 +249,7 @@
     ui.pop.hidden = true;
     ui.btnSimple.setAttribute('aria-expanded', 'false');
     if (stashed) { stashed = false; ui.result.hidden = false; }   // closed without a new export: the last card comes back
-    if (returnFocus && lastTrigger && simpleMode()) lastTrigger.focus({ preventScroll: true });
+    if (returnFocus && lastTrigger && lastTrigger.isConnected) lastTrigger.focus({ preventScroll: true });
   }
   function position() {
     const t = lastTrigger, pop = ui.pop;
@@ -344,11 +341,11 @@
               radio('xfNoFit', 'omit', 'Leave unfitted parts out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
         }
       }
-      if (body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
+      if (body !== 'fitted') add(settingSelect('brepMode', 'Mesh B-Rep'));
       // Fitted / Both STEP is always written in mm (STEP records its unit, NX imports at true size): no Units choice,
-      // the saved #unitSelect value is left alone. capabilities.fittedUnits === true (writer honours units) shows it again.
-      if (body === 'mesh' || caps().fittedUnits === true) add(proxySelect('unitSelect', 'Units'));
-      if (body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
+      // the saved units setting is left alone. capabilities.fittedUnits === true (writer honours units) shows it again.
+      if (body === 'mesh' || caps().fittedUnits === true) add(settingSelect('units', 'Units'));
+      if (body !== 'fitted') add(settingSelect('detail', 'Reduce detail'));
       const pre = cad && body !== 'mesh' ? preflight() : null;
       if (pre && pre.estimate && pre.estimate.kernelCached === false) add(h('p', { class: 'xf-note', text: 'First fitted export downloads the CAD kernel (' + mb(pre.estimate.kernelBytes || 13719175) + ' MB).' }));
       if (pre && pre.ok === false && pre.message) add(h('p', { class: 'xf-note xf-note--warn', text: pre.message }));
@@ -357,11 +354,11 @@
         h('div', { class: 'xf-seg-row' },
           radio('xfEnc', 'binary', 'Binary', null, prefs.stl.enc !== 'ascii', (v) => { prefs.stl.enc = v; save(); syncName(); }),
           radio('xfEnc', 'ascii', 'ASCII', null, prefs.stl.enc === 'ascii', (v) => { prefs.stl.enc = v; save(); syncName(); }))));
-      add(proxySelect('unitSelect', 'Units'), proxySelect('detailSelect', 'Reduce detail'));
+      add(settingSelect('units', 'Units'), settingSelect('detail', 'Reduce detail'));
     } else if (f.id === 'obj') {
-      add(proxySelect('unitSelect', 'Units'), proxySelect('detailSelect', 'Reduce detail'));
+      add(settingSelect('units', 'Units'), settingSelect('detail', 'Reduce detail'));
     } else if (f.id === 'iges') {
-      add(proxySelect('unitSelect', 'Units'));
+      add(settingSelect('units', 'Units'));
     } else if (f.id === 'xt') {
       add(h('p', { class: 'xf-note', 'data-xf': 'xt-note', text: XT_NOTE }));   // 1.5.2: merged mode only, no body/mode choice
     } else if (f.id === 'raw') {
@@ -629,7 +626,8 @@
     setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 30000);
   }
   function optsFor(f) {
-    const o = { units: ($('unitSelect') || {}).value, detail: ($('detailSelect') || {}).value, brepMode: ($('brepModeSelect') || {}).value, partIds: sel() };
+    const x = xs() ? xs().get() : {};
+    const o = { units: x.units, detail: x.detail, brepMode: x.brepMode, partIds: sel() };
     if (f.id === 'step') {
       const body = (hasCad() || hasHook()) && !cadOff() ? prefs.step.body : 'mesh';
       Object.assign(o, { body, onNoFit: prefs.step.onNoFit === 'omit' ? 'omit' : 'mesh', fittedOnly: body === 'fitted' });
@@ -1059,8 +1057,6 @@
     build();
     // simple-mode builds its top bar on init; re-place if it appears later
     new MutationObserver(() => { if (!ui.btnSimple.isConnected) place(); }).observe(document.body, { childList: true });
-    // switching to Advanced closes the popover (the flow is Simple-only); the result card stays until dismissed
-    new MutationObserver(() => { if (!simpleMode()) close(false); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     ui.name.addEventListener('input', () => { ui.name.dataset.touched = '1'; });
   }
   window.PDF3DExportFlow = {

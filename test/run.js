@@ -322,12 +322,29 @@ function syntheticAttachmentPDF(names) {
   { const sm = window.PDF3DSimpleMode || {}; const L = sm.labels || {};
     check(L.render && L.render.xray === 'Transparent', `render label xray = ${L.render && L.render.xray}, expected Transparent`);
     check(L.bodies === 'Solid Bodies', `bodies tab label ${L.bodies}`);
-    check(sm.hintText && /Solid Bodies/.test(sm.hintText.simple) && !/\bParts?\b/.test(sm.hintText.simple), `hint text ${sm.hintText && sm.hintText.simple}`);
     check(JSON.stringify((L.background || []).map((b) => b[1])) === JSON.stringify(['Default', 'Black', 'White', 'Black to white gradient']), 'background labels');
     check(JSON.stringify((L.projection || []).map((b) => b[1])) === JSON.stringify(['Perspective', 'Orthographic']), 'projection labels');
     check((L.help || []).length >= 6 && L.help.some((r) => /Pan/.test(r[1])) && L.help.some((r) => /Zoom/.test(r[1])) && L.help.some((r) => /Orbit/.test(r[1])), 'Help controls list');
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-    check(!/\?v=1\.6\.2/.test(html) && /recon\/cad-export\.js\?v=1\.7\.0"/.test(html), 'index.html ?v= not 1.7.0 (worker key 1.7.0-w1)');
+    // item 12: Simple is the only UI. No Advanced markup, no mode switch, no ?ui= / remembered mode, no STEP / .x_t preview
+    const body = html.slice(html.indexOf('<body'));
+    const gone = ['class="topbar', 'exportbar', 'inspector-pane', 'drawer', 'statusBadge', 'id="btnExport', 'data-render', 'data-view', 'viewerControls', 'dropZone', 'btnCopyPreview', 'stepPreview', 'unitSelect', 'btnLoadSample', 'btnOpenFile']
+      .filter((k) => body.includes(k));
+    check(!gone.length, `index.html still has Advanced markup: ${gone.join(', ')}`);
+    const smSrc = fs.readFileSync(path.join(ROOT, 'simple-mode.js'), 'utf8'), appSrc = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+    check(!/[?&]ui=|setMode|modeswitch|viewerAll|statusBadge|smMenuExport/.test(smSrc) && sm.setMode === undefined && sm.toggle === undefined, 'simple-mode.js still has the mode switch / Advanced proxies');
+    check(!/XT_UI_ENABLED|cachedSTEP|cachedXT|previewLines|statusBadge|activeTab|exportParasolidXT|[?&]xt=/.test(appSrc), 'app.js still has the Advanced preview / inspector code');
+    check(!/data-xf-proxy|unitSelect|detailSelect|brepModeSelect/.test(fs.readFileSync(path.join(ROOT, 'export-flow.js'), 'utf8')), 'export-flow.js still proxies the Advanced selects');
+    check(!/buildAdvanced|smMenuExport|statusBadge|pdf3d:uimode/.test(fs.readFileSync(path.join(ROOT, 'cad-export-ui.js'), 'utf8')), 'cad-export-ui.js still has the Advanced / menu UI');
+    const V0 = window.PDF3DView, X = window.PDF3D.exportSettings, A = window.CAD3DExtractor;
+    check(V0 && ['setRenderMode', 'preset', 'fit', 'setExplode', 'setOrbitMode', 'state'].every((k) => typeof V0[k] === 'function') && Array.isArray(V0.renderModes), 'PDF3DView view controls API missing');
+    check(A && ['getStatus', 'loadSample', 'showAllParts', 'invertParts'].every((k) => typeof A[k] === 'function') && typeof A.getStatus().text === 'string', 'CAD3DExtractor UI API missing');
+    { const g = X && X.get(); const units = X ? X.options.units.map((o) => o[0]).join(',') : '';
+      check(g && g.units === 'mm' && g.brepMode && g.detail === '1' && units === 'mm,cm,in,ft,m', `exportSettings defaults ${JSON.stringify(g)} units ${units}`);
+      const ok = X.set('units', 'in') && X.get().units === 'in' && !X.set('units', 'yd') && X.get().units === 'in' && !X.set('nope', 1);
+      X.set('units', 'mm');
+      check(ok && X.get().units === 'mm', 'exportSettings.set accept / reject'); }
+    check(!/[?&]v=1\.6\.2/.test(html) && /recon\/cad-export\.js\?v=1\.7\.0"/.test(html), 'index.html ?v= not 1.7.0 (worker key 1.7.0-w1)');
     check(/WORKER_REV = '1'/.test(fs.readFileSync(path.join(ROOT, 'recon/cad-export.js'), 'utf8')), 'WORKER_REV is not 1');
     const V = window.PDF3DView; const d = V && V.get();
     check(d && d.background === 'default' && d.grid === true && d.projection === 'perspective', `PDF3DView defaults ${JSON.stringify(d)}`);

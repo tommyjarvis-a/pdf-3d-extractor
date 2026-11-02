@@ -103,15 +103,16 @@ and finished (never after a cancel or a failure).
 10. **Script loading:** a separate script, `recon/cad-export.js`, loaded right after `app.js`. It replaces
     `window.PDF3D.canExportCadSurfaces` / `exportCadSurfaces` unless a non-stub implementation is already there.
     Please drop the stub from production `index.html`. **UI decision (1.5.0):** Designer's `cad-export-ui.js` /
-    `cad-export-ui.css` is the only export UI, in both Simple and Advanced. The earlier Advanced-only `#btnExportCAD`
-    button and progress panel were removed. index.html loads `cad-export-ui.css` after `simple-mode.css` and
+    `cad-export-ui.css` is the only export UI. The earlier `#btnExportCAD` button and progress panel were removed.
+    **1.7.0:** the Advanced UI is gone and `export-flow.js` owns the Export dialog; `cad-export-ui.js` keeps only the
+    toast and its `start` / `describe` / `normResult` API (no menu item or export-bar button of its own). index.html loads `cad-export-ui.css` after `simple-mode.css` and
     `cad-export-ui.js` after `simple-mode.js` (which comes after `recon/cad-export.js`). The add-on files are copied
     unmodified from `/workspace/pdf3d-simple-mode/`.
 
     Contract notes for the UI (no change needed on either side):
     - When `canExportCadSurfaces` returns `ok: true` with a non-empty `message` (`estimate.mode: 'mesh_only'`: U3D,
       bundled sample, above 200k triangles), the UI doesn't show that message before the run. The result toast shows it
-      as the `mesh_only` reason afterwards. The old Advanced button asked for confirmation first.
+      as the `mesh_only` reason afterwards. The old export-bar button asked for confirmation first.
     - `summary.unfitFaces` is an array of `{ part, face }`, and the UI counts it. `cancelled` has `summary: null`, which the UI tolerates.
 
 ## Testing

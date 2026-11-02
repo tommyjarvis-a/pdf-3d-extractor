@@ -40,23 +40,7 @@
     overflow: hidden;
   }
 
-  /* Top Bar */
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px;
-    background: linear-gradient(180deg, #131c2e 0%, #0d1422 100%);
-    border-bottom: 1px solid var(--border);
-    gap: 12px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  /* Brand badge (simple-mode.js top bar) */
   .brand-badge {
     width: 34px;
     height: 34px;
@@ -70,52 +54,6 @@
     font-size: 13px;
     letter-spacing: -0.5px;
     box-shadow: 0 0 16px rgba(34, 211, 238, 0.35);
-  }
-  .brand-title {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: -0.2px;
-    color: var(--text-0);
-  }
-  .brand-sub {
-    font-size: 11px;
-    color: var(--text-2);
-    font-family: var(--mono);
-  }
-  .top-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    min-width: 0;      /* 1.6.0: a long select option (B-Rep Mode) no longer widens the page on phones */
-    max-width: 100%;
-  }
-
-  /* Export Bar */
-  .exportbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 7px 16px;
-    background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
-    gap: 10px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .export-group {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
-  }
-  .export-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--text-2);
-    margin-right: 4px;
   }
 
   /* Buttons & Inputs */
@@ -154,24 +92,9 @@
     filter: brightness(1.08);
     border-color: #7dd3fc;
   }
-  .btn-emerald {
-    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-    color: #03150e;
-    border-color: #34d399;
-    font-weight: 700;
-    box-shadow: 0 2px 10px rgba(16, 185, 129, 0.24);
-  }
-  .btn-emerald:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
   .btn-sm {
     padding: 4px 8px;
     font-size: 11px;
-  }
-  .btn-active {
-    background: var(--cyan-dim);
-    border-color: var(--cyan);
-    color: var(--cyan);
   }
   .select-ctrl {
     background: var(--bg-2);
@@ -218,69 +141,9 @@
   .workbench {
     flex: 1;
     display: grid;
-    grid-template-columns: 390px 1fr;
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
-  }
-
-  /* Left Inspector Pane */
-  .inspector-pane {
-    background: var(--bg-1);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    padding: 12px;
-    gap: 12px;
-  }
-  .panel-card {
-    background: var(--bg-0);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 11px;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--border);
-    font-size: 11.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-1);
-  }
-  .panel-body {
-    padding: 10px 11px;
-  }
-
-  /* Dropzone */
-  .dropzone {
-    border: 1.5px dashed var(--border-hi);
-    border-radius: 8px;
-    padding: 12px;
-    text-align: center;
-    background: rgba(22, 32, 50, 0.45);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .dropzone:hover, .dropzone.dragover {
-    border-color: var(--cyan);
-    background: var(--cyan-dim);
-  }
-  .dropzone-title {
-    font-weight: 700;
-    color: var(--text-0);
-    font-size: 12.5px;
-    margin-bottom: 3px;
-  }
-  .dropzone-sub {
-    font-size: 11px;
-    color: var(--text-2);
-    font-family: var(--mono);
   }
 
   /* Stream list */
@@ -435,137 +298,13 @@
     font-size: 10.5px;
   }
 
-  /* Right Pane: Viewport + Bottom Drawer */
+  /* Viewport */
   .stage-pane {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     background: var(--bg-0);
-  }
-  .viewport-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 12px;
-    background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
-    gap: 8px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-  }
-  .toolbar-group {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-  }
-  /* Viewer controls (#viewerControls). Base button look, hover, focus ring and segmented tracks for
-     [data-render]/[data-view] come from affordance.css (loaded after this block). The rules here only add
-     what affordance.css does not cover: group captions, the Orbit segmented pair, Lines toggle buttons and
-     the Explode slider control. Selectors are scoped to #viewerControls so they win over affordance.css
-     without !important. */
-  #viewerControls {
-    column-gap: 16px;   /* room for the 4px segmented-track halo affordance.css draws around groups */
-  }
-  .toolbar-label {
-    font-size: 10px;
-    font-family: var(--mono);
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    cursor: default;
-    user-select: none;
-    margin-right: 2px;
-  }
-  /* Orbit: Free / Turntable is a radio pair -> same segmented look as Display */
-  #viewerControls .toolbar-group:has(> [data-orbit]) {
-    border-radius: 9px;
-    box-shadow: 0 0 0 3px rgba(9, 13, 20, 0.85), 0 0 0 4px var(--border);
-    background: rgba(9, 13, 20, 0.85);
-  }
-  #viewerControls [data-orbit].btn {
-    background: transparent;
-    border-color: rgba(59, 85, 128, 0.55);
-    color: var(--text-1);
-  }
-  #viewerControls [data-orbit].btn:hover:not(.btn-active) {
-    background: var(--bg-3);
-    border-color: #5b7db0;
-    color: var(--text-0);
-  }
-  #viewerControls [data-orbit].btn.btn-active {
-    background: var(--cyan);
-    border-color: var(--cyan);
-    color: #03101d;
-    box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
-  }
-  /* Lines: independent on/off toggles -> buttons with a check indicator (the checkbox stays in the DOM,
-     visually hidden, so app/viewer-gl/simple-mode bindings keep working) */
-  #viewerControls .btn-toggle {
-    position: relative;
-  }
-  #viewerControls .btn-toggle input {
-    position: absolute;
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    margin: 0;
-    pointer-events: none;
-  }
-  #viewerControls .btn-toggle::before {
-    content: '';
-    width: 9px;
-    height: 9px;
-    border-radius: 2px;
-    border: 1px solid var(--text-2);
-    background: transparent;
-    flex-shrink: 0;
-  }
-  #viewerControls .btn-toggle.is-on,
-  #viewerControls .btn-toggle:has(input:checked) {
-    background: var(--cyan-dim);
-    border-color: var(--cyan);
-    color: var(--cyan);
-  }
-  #viewerControls .btn-toggle.is-on::before,
-  #viewerControls .btn-toggle:has(input:checked)::before {
-    background: var(--cyan);
-    border-color: var(--cyan);
-  }
-  #viewerControls .btn-toggle:has(input:focus-visible) {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
-  }
-  /* Explode: one bordered control; focus ring on the wrapper, not twice */
-  #viewerControls .slider-ctrl {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 8px;
-    border: 1px solid var(--border-hi);
-    border-radius: 6px;
-    background: rgba(15, 22, 35, 0.35);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-0);
-    cursor: pointer;
-  }
-  #viewerControls .slider-ctrl:hover {
-    border-color: #5b7db0;
-    background: var(--bg-3);
-  }
-  #viewerControls .slider-ctrl input[type="range"] {
-    width: 75px;
-    accent-color: var(--cyan);
-    cursor: pointer;
-  }
-  #viewerControls .slider-ctrl input[type="range"]:focus-visible {
-    outline: none;
-  }
-  #viewerControls .slider-ctrl:has(input:focus-visible) {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
   }
   .viewport-wrap {
     position: relative;
@@ -587,143 +326,24 @@
   #viewportCanvas:active {
     cursor: grabbing;
   }
-  .viewport-hud-tl {
-    position: absolute;
-    top: 10px;
-    left: 12px;
-    pointer-events: none;
-    user-select: none;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 400;
-    color: var(--text-2);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
-  }
-  .viewport-hud-tl .hud-title {
-    color: var(--text-1);
-    font-weight: 600;
-  }
-  .viewport-hud-tl .hud-render {
-    opacity: 0.8;
-  }
-  .viewport-hud-bl {
-    position: absolute;
-    bottom: 10px;
-    left: 12px;
-    pointer-events: none;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--text-2);
-    opacity: 0.85;
-    user-select: none;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  }
-
-  /* Bottom Schema / Entity Drawer */
-  .drawer {
-    height: 235px;
-    background: var(--bg-1);
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-  .drawer-tabs {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12px;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--border);
-    height: 34px;
-    flex-shrink: 0;
-  }
-  .tab-list {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 100%;
-  }
-  .tab-btn {
-    height: 100%;
-    padding: 0 12px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-2);
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .tab-btn:hover {
-    color: var(--text-0);
-  }
-  .tab-btn.active {
-    color: var(--cyan);
-    border-bottom-color: var(--cyan);
-    background: rgba(34, 211, 238, 0.06);
-  }
-  .drawer-body {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 310px 1fr;
-    overflow: hidden;
-  }
-  .drawer-summary {
-    border-right: 1px solid var(--border);
-    padding: 8px 10px;
-    overflow-y: auto;
-    font-family: var(--mono);
-    font-size: 11px;
-    background: var(--bg-0);
-  }
-  .drawer-code {
-    padding: 8px 12px;
-    overflow: auto;
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.45;
-    color: #d1e0f6;
-    background: #070b11;
-    white-space: pre;
-  }
-  .entity-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 3px 4px;
-    border-bottom: 1px solid rgba(39, 55, 84, 0.45);
-  }
-  .entity-row span:first-child {
-    color: var(--cyan);
-  }
 </style>
-<!-- affordance first (both modes), then Simple-mode layout -->
+<!-- affordance first, then the UI layout (simple-mode) -->
 <style data-href="affordance.css">
 /*
- * affordance.css — "what can I click?" pass for pdf-3d-extractor. Applies in BOTH Simple and Advanced mode.
+ * affordance.css — "what can I click?" pass for pdf-3d-extractor (the simple-mode.js UI; the only UI since 1.7.0).
  *
  * Goal: interactive things look like controls, information looks like information.
- * Layout-neutral by construction: no width/height/padding/margin/border-width/gap changes on existing
- * elements (only colours, border colours, backgrounds, cursors, outlines, inset box-shadows), so every
- * Advanced control stays exactly where it is. The single deliberate exception is the status badge,
- * which gains a leading dot (it is right-aligned on its own, so only it moves).
+ * Layout-neutral by construction: no width/height/padding/margin/border-width/gap changes (only colours,
+ * border colours, backgrounds, cursors, outlines, inset box-shadows).
  *
  * Integration: <link rel="stylesheet" href="affordance.css" /> in <head>, BEFORE simple-mode.css.
  *
  * Which list rows are really clickable (checked in app.js):
  *   .part-item   -> click selects/highlights the part; .part-chk toggles visibility      => INTERACTIVE
  *   .stream-item -> click calls activateStream(idx)                                    => INTERACTIVE
- *   #dropZone    -> click opens the file picker, accepts drops                         => INTERACTIVE
  *   #attachList button[data-att] ("Save")                                              => INTERACTIVE (button only)
  *   .tree-row (#treeList), .feature-item (#featureList / #attachList rows), .kv-box,
- *   .entity-row, HUD, badges                                                           => INFORMATION ONLY
+ *   Info readout rows, badges                                                          => INFORMATION ONLY
  */
 
 /* ===================================================================== INTERACTIVE */
@@ -740,56 +360,16 @@
 }
 .btn:active:not(:disabled) { transform: translateY(1px); filter: brightness(0.92); }
 .btn:focus-visible,
-.tab-btn:focus-visible,
 .select-ctrl:focus-visible,
-.dropzone:focus-visible,
 input[type="checkbox"]:focus-visible,
 input[type="range"]:focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
-.btn-primary, .btn-emerald { cursor: pointer; }
+.btn-primary { cursor: pointer; }
 .btn-primary { background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%); border-color: #38bdf8; }
 .btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 55%, #22d3ee 100%); border-color: #7dd3fc; }
-.btn-emerald { background: linear-gradient(135deg, #059669 0%, #10b981 100%); border-color: #34d399; }
 .btn:disabled { cursor: not-allowed; }
-
-/* "Load Sample" carried a static .btn-active in the markup, which made a plain action button look
-   like a selected toggle. It is an action: render it as a normal outlined button. */
-#btnLoadSample.btn-active { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); color: var(--text-0); }
-#btnLoadSample.btn-active:hover { background: var(--bg-3); border-color: #5b7db0; }
-
-/* ---- toggle groups -> segmented controls with an obvious active segment */
-.toolbar-group:has(> [data-render]),
-.toolbar-group:has(> [data-view]) {
-  border-radius: 9px;
-  box-shadow: 0 0 0 3px rgba(9, 13, 20, 0.85), 0 0 0 4px var(--border);   /* track, no layout impact */
-  background: rgba(9, 13, 20, 0.85);
-}
-[data-render].btn, [data-view].btn, #btnFitView {
-  background: transparent;
-  border-color: rgba(59, 85, 128, 0.55);
-  color: var(--text-1);
-}
-[data-render].btn:hover:not(.btn-active), [data-view].btn:hover, #btnFitView:hover {
-  background: var(--bg-3);
-  border-color: #5b7db0;
-  color: var(--text-0);
-}
-[data-render].btn.btn-active {
-  background: var(--cyan);
-  border-color: var(--cyan);
-  color: #03101d;
-  box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
-}
-/* drawer tabs */
-.tab-btn { cursor: pointer; }
-.tab-btn:hover:not(.active) { background: rgba(255, 255, 255, 0.04); color: var(--text-0); }
-.tab-btn.active {
-  color: var(--cyan);
-  border-bottom-color: var(--cyan);
-  background: rgba(34, 211, 238, 0.12);
-}
 
 /* ---- inputs: selects keep their native chevron; all get input chrome + hover + pointer */
 .select-ctrl {
@@ -800,11 +380,7 @@ input[type="range"]:focus-visible {
 .select-ctrl:hover:not(:disabled) { border-color: #5b7db0; background-color: var(--bg-2); }
 .select-ctrl:focus { border-color: var(--cyan); }
 input[type="checkbox"], input[type="range"] { accent-color: var(--cyan); cursor: pointer; }
-#viewerOptions label, label:has(> input[type="checkbox"]) { cursor: pointer; }
-#viewerOptions label:hover { color: var(--text-0); }
-
-/* ---- file drop zone (click = open) */
-.dropzone { cursor: pointer; }
+label:has(> input[type="checkbox"]) { cursor: pointer; }
 
 /* ---- selectable rows: hover background, pointer, selected = left accent bar + tint
         (simple-mode.js also gives them tabindex=0 / role=option / aria-selected + Enter/Space) */
@@ -836,32 +412,6 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--cyan); cursor:
 .badge-emerald { background: rgba(16, 185, 129, 0.07); color: rgba(52, 211, 153, 0.9); border-color: transparent; }
 .badge-amber { background: rgba(245, 158, 11, 0.07); color: rgba(251, 191, 36, 0.9); border-color: transparent; }
 
-/* ---- status: a dot + text, not a pill */
-#statusBadge {
-  background: transparent;
-  border-color: transparent;
-  gap: 6px;
-  letter-spacing: 0.2px;
-}
-#statusBadge::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
-  flex-shrink: 0;
-}
-
-/* ---- panel headers: labels, not toolbars */
-.panel-header {
-  background: transparent;
-  color: var(--text-2);
-  border-bottom-color: rgba(39, 55, 84, 0.6);
-  cursor: default;
-}
-.panel-card { background: rgba(9, 13, 20, 0.6); }
-
 /* ---- key/value telemetry: plain readouts */
 .kv-box {
   background: transparent;
@@ -884,85 +434,24 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--cyan); cursor:
 .tree-row { cursor: default; color: var(--text-1); }
 .tree-row code { color: var(--text-2); }
 
-/* ---- HUD / hints: read-only overlays */
-.viewport-hud-tl, .viewport-hud-bl { border-color: rgba(39, 55, 84, 0.5); cursor: default; }
-.viewport-hud-bl { color: rgba(124, 145, 177, 0.85); }
-
-/* ---- drawer summary rows */
-.entity-row { cursor: default; }
-
 </style>
 <style data-href="simple-mode.css">
 /*
- * simple-mode.css — "Simple mode" add-on for pdf-3d-extractor.
- *
- * Every rule that affects existing markup is scoped under body.sm-simple, so when the
- * body lacks that class (Advanced mode) nothing in the original UI changes. The only
- * unscoped rules target elements this add-on creates (class prefix "sm-"), which are
- * either display:none or position:fixed in Advanced mode and therefore never move layout.
- * Integration: <link rel="stylesheet" href="simple-mode.css" /> in <head>.
+ * simple-mode.css — the pdf-3d-extractor UI chrome built by simple-mode.js (top bar, viewer pill, menus,
+ * Solid Bodies / Info sheets, dialogs). Since 1.7.0 this is the only UI; simple-mode.js adds body.sm-simple
+ * at start-up. Integration: <link rel="stylesheet" href="simple-mode.css" /> in <head>.
  */
 
 /* ---------------------------------------------------------------- shared add-on tokens */
-.sm-root, .sm-topbar, .sm-pill, .sm-pop, .sm-sheet, .sm-modeswitch, .sm-dialog, .sm-dropveil {
+.sm-root, .sm-topbar, .sm-pill, .sm-pop, .sm-sheet, .sm-dialog, .sm-dropveil {
   --sm-radius: 10px;
   --sm-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
   --sm-glass: rgba(15, 22, 35, 0.92);
 }
 [hidden].sm-pop, [hidden].sm-sheet, [hidden].sm-dialog, [hidden].sm-dropveil, [hidden].sm-empty { display: none !important; }
 
-/* ---------------------------------------------------------------- Simple | Advanced switch */
-.sm-modeswitch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  gap: 2px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-0);
-  font-family: var(--sans);
-  flex-shrink: 0;
-}
-.sm-modeswitch button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-2);
-  font: 600 11px/1 var(--sans);
-  padding: 5px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.sm-modeswitch button:hover { color: var(--text-0); }
-.sm-modeswitch button[aria-pressed="true"] {
-  background: var(--cyan-dim);
-  color: var(--cyan);
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45);
-}
-.sm-modeswitch button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
-/* Advanced mode: the switch floats over empty top-bar space (fixed => zero layout impact). */
-.sm-modeswitch.sm-modeswitch--float {
-  position: fixed;
-  top: 12px;
-  right: 16px;
-  z-index: 60;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-}
-/* ...or bottom-right when the top bar has no free space (single-row bar / narrow screens). */
-.sm-modeswitch.sm-modeswitch--float.sm-modeswitch--corner { top: auto; bottom: 12px; right: 12px; }
-
-/* ---------------------------------------------------------------- add-on chrome hidden in Advanced */
+/* ---------------------------------------------------------------- chrome hidden until simple-mode.js starts */
 .sm-topbar, .sm-pill, .sm-empty { display: none; }
-
-/* ================================================================ SIMPLE MODE ================ */
-body.sm-simple .topbar,
-body.sm-simple .exportbar,
-body.sm-simple .inspector-pane,
-body.sm-simple #viewerControls,
-body.sm-simple .viewport-toolbar,            /* 1.3.0 has no #viewerControls id */
-body.sm-simple .drawer { display: none !important; }
-body.sm-simple .workbench { grid-template-columns: minmax(0, 1fr); }
 
 /* ---------------------------------------------------------------- top bar */
 body.sm-simple .sm-topbar {
@@ -1023,15 +512,6 @@ body.sm-simple .sm-doc { justify-content: flex-end; }
   outline: 2px solid var(--cyan); outline-offset: 1px;
 }
 
-/* split button */
-.sm-split { display: inline-flex; align-items: stretch; }
-.sm-split > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.sm-split > .btn + .btn {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 1px solid rgba(3, 16, 29, 0.35);
-  padding: 6px 8px;
-}
 .sm-caret { font-size: 9px; opacity: 0.85; }
 
 /* ---------------------------------------------------------------- popovers / menus */
@@ -1132,11 +612,11 @@ body.sm-simple .sm-pill {
 .sm-pill-k { color: var(--text-2); font-weight: 500; }
 .sm-count { font: 600 10px var(--mono); color: var(--text-2); background: var(--bg-0); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
 
-/* 1.7.0: the viewport readout moved to Info > File & geometry and the controls help to More > Help;
+/* 1.7.0: the viewport readout lives in Info > File & geometry and the controls help in More > Help;
    the bottom-left of the viewport holds only the axis triad (drawn on the canvas) */
-body.sm-simple .viewport-hud-tl, body.sm-simple .viewport-hud-bl { display: none !important; }
 .sm-readout { display: grid; gap: 4px; font: 11px var(--mono); color: var(--text-1); }
 .sm-readout-r { overflow-wrap: anywhere; }
+.sm-readout-r:empty { display: none; }
 .sm-readout-r[data-hud="hudRenderStats"] { color: var(--text-2); }
 
 /* ---------------------------------------------------------------- side sheets */
@@ -1171,17 +651,10 @@ body.sm-simple .viewport-hud-tl, body.sm-simple .viewport-hud-bl { display: none
 .sm-sheet-b { flex: 1; min-height: 0; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .sm-close { padding: 3px 8px; font-size: 14px; line-height: 1; }
 
-/* moved original panel cards inside sheets */
-.sm-sheet .panel-card { border-radius: 8px; }
-.sm-sheet--parts .panel-card { border: 0; background: transparent; }
-.sm-sheet--parts .panel-header { background: transparent; padding: 0 0 8px; border-bottom: 0; }
-.sm-sheet--parts .panel-header > span { display: none; }   /* sheet title already says "Parts" */
-.sm-sheet--parts .panel-header > div { width: 100%; }
-.sm-sheet--parts .panel-header .btn { flex: 1; justify-content: center; }
-.sm-sheet--parts .panel-body { padding: 0; }
-.sm-sheet--info .panel-card { border: 0; background: transparent; }
-.sm-sheet--info .panel-header { display: none; }           /* title + badge mirrored into <summary> */
-.sm-sheet--info .panel-body { padding: 4px 2px 6px; }
+/* Solid Bodies: Show All / Invert above the list; Info: section bodies */
+.sm-parts-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.sm-parts-actions .btn { flex: 1; justify-content: center; }
+.sm-panel { padding: 4px 2px 6px; }
 
 .sm-sec { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-0); flex-shrink: 0; }
 .sm-sec > summary {
@@ -1301,25 +774,17 @@ body.sm-simple .sm-empty {
   body.sm-simple .sm-doc { flex-basis: 0; }
   body.sm-simple .sm-brand-ver { display: none; }
 }
-/* The pinned switch sits at the same fixed point in both modes; Simple reserves its width at the end of the top bar. */
-.sm-switch-slot { display: none; }
-body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
-@media (max-width: 720px) {
-  body.sm-simple .sm-switch-slot { width: auto !important; height: auto; }
-  body:not(.sm-simple) .sm-modeswitch.sm-modeswitch--float { top: auto; bottom: 12px; right: 12px; }
-}
 @media (max-width: 720px) {
   body.sm-simple .sm-topbar { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
   body.sm-simple .sm-brand-title { font-size: 13px; }
   body.sm-simple .sm-doc { order: 3; flex: 1 1 100%; border-left: 0; padding-left: 0; }
   body.sm-simple .sm-actions { gap: 6px; }
-  /* phone: row 1 = brand + mode switch, row 2 = Open / overflow / Export, row 3 = file + status */
+  /* phone: row 1 = brand, row 2 = Open / overflow / Export, row 3 = file + status */
   body.sm-simple .sm-topbar { row-gap: 0; }
   body.sm-simple .sm-actions { display: contents; }
   body.sm-simple .sm-brand { order: 0; }
-  body.sm-simple .sm-actions > .sm-switch-slot { order: 1; margin-left: auto; }
   body.sm-simple .sm-topbar::after { content: ""; order: 2; flex-basis: 100%; height: 8px; }
-  body.sm-simple .sm-actions > :not(.sm-switch-slot) { order: 3; }
+  body.sm-simple .sm-actions > * { order: 3; }
   body.sm-simple .sm-actions .sm-btn-open { flex: 1 1 auto; }
   body.sm-simple .sm-doc { order: 4; margin-top: 8px; }
   body.sm-simple .sm-topbar .sm-btn-open .sm-long { display: none; }
@@ -1354,8 +819,6 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
   body.sm-simple .sm-pill .btn,
   .sm-close,
   .sm-sheet .btn { min-height: 40px; min-width: 40px; justify-content: center; }
-  body.sm-simple .sm-modeswitch button { min-height: 40px; min-width: 40px; padding: 0 14px; }
-  body.sm-simple .sm-split > .btn + .btn { min-width: 40px; }
   .sm-close { font-size: 18px; }
   body.sm-simple .sm-pill { gap: 2px; padding: 3px; }
   body.sm-simple .sm-pill .btn { padding: 0 11px; }
@@ -1405,43 +868,14 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
 /*
  * cad-export-ui.css — styles for cad-export-ui.js (CAD surfaces STEP export).
  * Only targets elements the add-on creates (class prefix "cad-"); uses the app's tokens
- * (--bg-*, --border*, --text-*, --cyan, --emerald, --amber, --rose) and the Simple-mode look
+ * (--bg-*, --border*, --text-*, --cyan, --emerald, --amber, --rose) and the simple-mode.css look
  * (glass panel, 10px radius, cyan focus ring). Integration: <link rel="stylesheet" href="cad-export-ui.css" />
  */
-.cad-toast, .cad-mi, .cad-adv {
+.cad-toast {
   --cad-glass: rgba(15, 22, 35, 0.94);
   --cad-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
 }
-[hidden].cad-toast, .cad-toast [hidden], .cad-mi [hidden], .cad-adv [hidden] { display: none !important; }
-
-/* ---------------------------------------------------------------- Simple: Export ▾ menu item */
-.sm-mi.cad-mi { align-items: flex-start; white-space: normal; }
-.cad-mi .cad-mi-ico { color: var(--cyan); font-size: 10px; line-height: 17px; }
-.cad-mi .sm-mi-ext { line-height: 17px; }
-.cad-mi-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.cad-mi-sub, .cad-mi-sub2 { font: 400 11px var(--sans); color: var(--text-2); max-width: 230px; }
-.cad-mi-sub2 { font-size: 10.5px; }
-/* disabled but still focusable (aria-disabled) so the reason can be read; reason stays legible */
-.sm-mi.cad-mi[aria-disabled="true"], .sm-mi.cad-mi-opt[aria-disabled="true"] { cursor: not-allowed; }
-.sm-mi.cad-mi[aria-disabled="true"]:hover, .sm-mi.cad-mi-opt[aria-disabled="true"]:hover { background: transparent; }
-.cad-mi[aria-disabled="true"] .sm-mi-label, .cad-mi[aria-disabled="true"] .cad-mi-ico, .cad-mi[aria-disabled="true"] .sm-mi-ext,
-.cad-mi-opt[aria-disabled="true"] > * { opacity: 0.45; }
-.cad-mi-sub.cad-why { color: var(--text-1); }
-.cad-mi-sub.cad-why::before { content: "⊘ "; color: var(--amber); }
-.sm-mi.cad-mi-opt { padding-left: 33px; }        /* sub-option of the CAD item */
-
-/* ---------------------------------------------------------------- Advanced: export bar */
-.cad-adv { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.cad-adv-btn::before { content: "◆"; color: var(--cyan); font-size: 9px; }
-.btn.cad-adv-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
-.btn.cad-adv-btn[aria-disabled="true"]:hover { background: rgba(15, 22, 35, 0.35); border-color: var(--border-hi); }
-.btn.cad-adv-btn[aria-disabled="true"]:active { transform: none; filter: none; }
-.cad-adv-opt { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--sans); color: var(--text-1); cursor: pointer; user-select: none; }
-.cad-adv-opt:hover { color: var(--text-0); }
-.cad-adv-opt input { accent-color: var(--cyan); margin: 0; cursor: pointer; }
-.cad-adv-opt:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
-.cad-adv-note { font: 400 11px var(--sans); color: var(--text-2); cursor: default; }
-.cad-adv-note.cad-why::before { content: "⊘ "; color: var(--amber); }
+[hidden].cad-toast, .cad-toast [hidden] { display: none !important; }
 
 /* ---------------------------------------------------------------- progress / result toast (non-modal) */
 .cad-toast {
@@ -1461,8 +895,6 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
   color: var(--text-0);
   font: 400 12.5px var(--sans);
 }
-body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: switch moved to bottom-right corner */
-@media (max-width: 900px) { body:has(.sm-modeswitch--float) .cad-toast { bottom: 52px; } }
 .cad-toast:focus { outline: none; }
 .cad-toast:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .cad-toast[data-tone="ok"] { border-left-color: var(--emerald); }
@@ -1496,9 +928,7 @@ body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: swi
 
 @media (max-width: 720px) {
   .cad-toast { left: 8px; right: 8px; bottom: 8px; width: auto; max-width: none; }
-  body:has(.sm-modeswitch--float) .cad-toast { bottom: 48px; }   /* Advanced: floating switch sits bottom-right below 900px */
   .cad-toast .btn { min-height: 40px; min-width: 40px; justify-content: center; }
-  .cad-mi-sub, .cad-mi-sub2 { max-width: none; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .cad-toast:not([hidden]) { animation: cad-in 0.16s ease-out; }
@@ -1515,10 +945,7 @@ body:has(.sm-modeswitch--corner) .cad-toast { bottom: 52px; }   /* Advanced: swi
 /* export-flow.css — single "Export" button + format popover + persistent result card (pairs with export-flow.js).
  * Uses the app tokens and the Simple-mode popover look (.sm-pop / .sm-pop-h / .sm-sep / .sm-check from simple-mode.css). */
 
-/* SIMPLE MODE ONLY: the new button replaces the Simple split button + menu. Advanced mode is not touched
- * (its export bar, .cad-adv group and CAD toast stay exactly as they are). */
-body.xf-on.sm-simple .sm-topbar .sm-split, body.xf-on.sm-simple #smMenuExport { display: none !important; }
-body:not(.sm-simple) .xf-btn, body:not(.sm-simple) .xf-pop { display: none !important; }
+/* 1.7.0: the only export UI (the button sits in the simple-mode.js top bar). */
 .xf-btn { gap: 7px; }
 .xf-btn .xf-caret { font-size: 9px; opacity: .85; }
 .xf-btn[aria-expanded="true"] .xf-caret { transform: rotate(180deg); }
@@ -1602,7 +1029,6 @@ body.xf-on.sm-simple .xf-retry[aria-disabled="true"] { color: var(--text-2); cur
 }
 .xf-result:focus { outline: none; }
 .xf-result:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple stays readable after switching */
 .xf-r-ico { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; font: 700 11px var(--sans); color: #03101d; background: var(--cyan); }
 .xf-result[data-tone="ok"] { border-left-color: var(--emerald); }
 .xf-result[data-tone="ok"] .xf-r-ico { background: var(--emerald); }
@@ -1658,212 +1084,14 @@ body:not(.sm-simple) .xf-result { bottom: 56px; }      /* a result from Simple s
 </head>
 <body>
 
-  <!-- Top Header -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="brand-badge">3D</div>
-      <div>
-        <div class="brand-title">3D PDF → CAD Geometry Extractor &amp; B-Rep Workbench <span style="opacity:.6;font-size:.75em">v1.7.0</span></div>
-        <div class="brand-sub">ECMA-363 (U3D) &amp; ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES</div>
-      </div>
-    </div>
-    <div class="top-controls">
-      <button class="btn btn-sm btn-active" id="btnLoadSample" title="Load built-in multi-part mechanical assembly 3D PDF">
-        Load Sample 3D PDF (NX-ASM-402)
-      </button>
-      <button class="btn btn-sm" id="btnOpenFile">Open 3D PDF / U3D / PRC…</button>
-      <input type="file" id="fileInput" accept=".pdf,.u3d,.prc" style="display:none" />
-      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Source Units:</label>
-      <select class="select-ctrl" id="unitSelect" title="CAD unit scaling for STEP/STL/OBJ/IGES export">
-        <option value="mm" selected>mm (NX default)</option>
-        <option value="cm">cm (10 mm)</option>
-        <option value="in">inch (25.4 mm)</option>
-        <option value="ft">foot (304.8 mm)</option>
-        <option value="m">meter (1000 mm)</option>
-      </select>
-      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">B-Rep Mode:</label>
-      <select class="select-ctrl" id="brepModeSelect" style="max-width:100%" title="How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.">
-        <option value="merged" selected>Merged Planar B-Rep (Auto Solid / Sheet)</option>
-        <option value="sheet-unsewn">Open Sheet Surfaces (NX House/Deck Recovery)</option>
-        <option value="merged-assembly">Multi-Body Assembly (STEP only; Parasolid always writes merged)</option>
-        <option value="faceted">Triangulated Faceted Sheet B-Rep (1:1 Mesh)</option>
-      </select>
-      <label style="font-size:11px;color:var(--text-2);font-family:var(--mono);">Reduce detail:</label>
-      <select class="select-ctrl" id="detailSelect" title="Optional decimation (vertex clustering) applied to exported files only. Off = full detail.">
-        <option value="1" selected>Off (full detail)</option>
-        <option value="0.5">50% of triangles</option>
-        <option value="0.25">25% of triangles</option>
-        <option value="0.1">10% of triangles</option>
-      </select>
-    </div>
-  </header>
-
-  <!-- Primary CAD Export Bar -->
-  <section class="exportbar">
-    <div class="export-group">
-      <span class="export-label">CAD Export (Siemens NX Ready):</span>
-      <button class="btn btn-primary" id="btnExportSTEP" title="Export ISO 10303-21 STEP AP214 (.stp) MANIFOLD_SOLID_BREP assembly">
-        Export STEP AP214 (.stp)
-      </button>
-      <button class="btn" id="btnExportSTL" title="Export Binary STL mesh of visible parts">
-        Export Binary STL (.stl)
-      </button>
-      <button class="btn btn-sm" id="btnExportSTLText" title="Export ASCII STL mesh">
-        ASCII STL
-      </button>
-      <button class="btn" id="btnExportOBJ" title="Export Wavefront OBJ with part groups and vertex normals">
-        Export OBJ (.obj)
-      </button>
-      <button class="btn btn-sm" id="btnExportIGES" title="Export IGES 5.3 feature-edge wireframe curves (.igs)">
-        IGES Wireframe (.igs)
-      </button>
-      <button class="btn btn-sm" id="btnExportRaw" title="Download extracted raw U3D or PRC stream bytes">
-        Raw Stream (.u3d/.prc)
-      </button>
-    </div>
-    <div class="export-group">
-      <span class="badge badge-emerald" id="statusBadge">READY • WATER-TIGHT 2-MANIFOLD</span>
-    </div>
-  </section>
-
-  <!-- Two-Pane Workbench -->
+  <!-- 1.7.0: simple-mode.js builds the whole UI (top bar, view menus, Parts / Info sheets) around this viewport -->
+  <input type="file" id="fileInput" accept=".pdf,.u3d,.prc" hidden />
   <main class="workbench">
-    <!-- Left Pane: Assembly & Stream Inspector -->
-    <aside class="inspector-pane">
-      <!-- File Dropzone -->
-      <div class="dropzone" id="dropZone">
-        <div class="dropzone-title" id="docFileName">sample-cad-assembly-3d.pdf</div>
-        <div class="dropzone-sub">Drop any 3D PDF (`.pdf`), `.u3d`, or `.prc` stream here</div>
-      </div>
-
-      <!-- Embedded /3D Streams -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Embedded PDF `/3D` &amp; `/RichMedia` Streams</span>
-          <span class="badge badge-cyan" id="streamCountBadge">2 Streams</span>
-        </div>
-        <div class="panel-body">
-          <div class="stream-list" id="streamList"></div>
-        </div>
-      </div>
-
-      <!-- Assembly Part Hierarchy -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Assembly Part Hierarchy</span>
-          <div style="display:flex;gap:4px;">
-            <button class="btn btn-sm" id="btnShowAllParts">Show All</button>
-            <button class="btn btn-sm" id="btnInvertParts">Invert</button>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="part-list" id="partList"></div>
-        </div>
-      </div>
-
-      <!-- Bounding Box & Topology Summary -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Bounding Box &amp; B-Rep Topology</span>
-          <span class="badge" id="unitBadge">mm</span>
-        </div>
-        <div class="panel-body">
-          <div class="kv-grid" id="bboxGrid"></div>
-        </div>
-      </div>
-
-      <!-- Detected Analytic CAD Features -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Detected Analytic CAD Features</span>
-          <span class="badge badge-amber" id="featureCountBadge">0</span>
-        </div>
-        <div class="panel-body">
-          <div class="feature-list" id="featureList"></div>
-        </div>
-      </div>
-
-      <!-- Product Tree, Wires & Embedded Attachments -->
-      <div class="panel-card">
-        <div class="panel-header">
-          <span>Product Tree &amp; Attachments</span>
-          <span class="badge badge-cyan" id="treeCountBadge">0 Attachments</span>
-        </div>
-        <div class="panel-body">
-          <div class="feature-list" id="treeList" style="max-height:220px;overflow:auto;font-size:11px;"></div>
-          <div class="feature-list" id="attachList"></div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Right Pane: 3D Orbit Viewport + Bottom Inspector Drawer -->
     <section class="stage-pane">
-      <!-- Viewport Toolbar -->
-      <!-- all viewer controls live in this one container (#viewerControls) so they can be moved as a unit -->
-      <div class="viewport-toolbar" id="viewerControls">
-        <div class="toolbar-group">
-          <span class="toolbar-label">Display</span>
-          <button class="btn btn-sm btn-active" data-render="shaded-edges">Shaded + CAD Edges</button>
-          <button class="btn btn-sm" data-render="brep-faces">B-Rep Face Groups</button>
-          <button class="btn btn-sm" data-render="shaded">Shaded Smooth</button>
-          <button class="btn btn-sm" data-render="wireframe">Wireframe</button>
-          <button class="btn btn-sm" data-render="xray">X-Ray Bore View</button>
-        </div>
-        <div class="toolbar-group">
-          <span class="toolbar-label">View</span>
-          <button class="btn btn-sm" data-view="iso">Iso</button>
-          <button class="btn btn-sm" data-view="top">Top (XY)</button>
-          <button class="btn btn-sm" data-view="front">Front (XZ)</button>
-          <button class="btn btn-sm" data-view="right">Right (YZ)</button>
-          <button class="btn btn-sm" id="btnFitView">Fit</button>
-          <button class="btn btn-sm" data-view="reset" title="Reset orientation, zoom and pan">Reset view</button>
-          <label class="slider-ctrl" title="Explode the assembly">Explode <input type="range" id="explodeSlider" min="0" max="100" value="0" /></label>
-        </div>
-        <div class="toolbar-group" id="orbitMode" role="group" aria-label="Orbit mode">
-          <span class="toolbar-label">Orbit</span>
-          <button class="btn btn-sm btn-active" data-orbit="free" aria-pressed="true" title="Free arcball: tumble past 180&deg; about any axis, no gimbal lock. Ctrl/Alt+drag (or middle-drag) twists about the view axis.">Free</button>
-          <button class="btn btn-sm" data-orbit="turntable" aria-pressed="false" title="Turntable: Z stays up, tilt limited to &plusmn;85&deg;">Turntable (Z-up)</button>
-        </div>
-        <div class="toolbar-group viewer-options" id="viewerOptions">
-          <span class="toolbar-label">Lines</span>
-          <label class="btn btn-sm btn-toggle" title="PRC wires / curves"><input type="checkbox" data-viewopt="wires" />Wires</label>
-          <label class="btn btn-sm btn-toggle" title="Show edges and wires hidden behind geometry, dimmed (WebGL)"><input type="checkbox" data-viewopt="hiddenLines" />Hidden</label>
-          <label class="btn btn-sm btn-toggle" title="Overlay the triangle mesh (WebGL)"><input type="checkbox" data-viewopt="meshWire" />Mesh</label>
-          <label class="btn btn-sm btn-toggle" title="Flat (faceted) shading instead of smooth normals with a 30&deg; crease angle (WebGL)"><input type="checkbox" data-viewopt="flat" />Flat</label>
-        </div>
-      </div>
-
       <!-- 3D Viewport Canvas -->
       <div id="bigModelBanner" style="display:none;padding:6px 12px;background:rgba(251,191,36,0.14);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;font-family:var(--mono);"></div>
       <div class="viewport-wrap">
         <canvas id="viewportCanvas"></canvas>
-        <div class="viewport-hud-tl" id="viewportHud">
-          <div class="hud-title" id="hudStreamTitle">Stream: /Subtype /U3D (ECMA-363)</div>
-          <div id="hudAssemblyStats">Parts: 4 | Merged B-Rep Faces: -- | Tris: 480</div>
-          <div id="hudBounds"></div>
-          <div id="hudScaleInfo">Units: mm • STEP AP214 export</div>
-          <div class="hud-render" id="hudRenderStats"></div>
-        </div>
-        <div class="viewport-hud-bl">
-          Drag: Orbit • Ctrl/Alt-drag: Twist • Shift/Right-drag: Pan • Scroll: Zoom • Click part in tree to highlight
-        </div>
-      </div>
-
-      <!-- Bottom Schema / Entity Inspector Drawer -->
-      <div class="drawer">
-        <div class="drawer-tabs">
-          <div class="tab-list">
-            <button class="tab-btn active" data-tab="step">STEP AP214 (`.stp`) B-Rep Inspector</button>
-            <button class="tab-btn" data-tab="pdf">PDF `/3D` Stream &amp; U3D/PRC Block Telemetry</button>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <button class="btn btn-sm" id="btnCopyInspector">Copy Preview</button>
-          </div>
-        </div>
-        <div class="drawer-body">
-          <div class="drawer-summary" id="drawerSummary"></div>
-          <pre class="drawer-code" id="drawerCode"></pre>
-        </div>
       </div>
     </section>
   </main>
@@ -5084,19 +4312,6 @@ void main() { gl_FragColor = uRGBA; }`;
   };
   window.PDF3DViewerGL = api;
   window.PDF3DCamera = Camera;
-  if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('DOMContentLoaded', () => {
-      const els = document.querySelectorAll ? document.querySelectorAll('input[data-viewopt]') : [];
-      for (const el of els) {
-        const k = el.getAttribute('data-viewopt');
-        // the checkbox is visually hidden inside a toggle-button label; mirror its state onto the label
-        const sync = () => { const lab = el.closest ? el.closest('.btn-toggle') : null; if (lab) lab.classList.toggle('is-on', !!el.checked); };
-        if (k in OPTIONS) el.checked = !!OPTIONS[k];
-        sync();
-        el.addEventListener('change', () => { sync(); api.setOption(k, !!el.checked); });
-      }
-    });
-  }
 })();
 
 </script>
@@ -5122,18 +4337,12 @@ void main() { gl_FragColor = uRGBA; }`;
   const APP_VERSION = '1.7.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
-  // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
+  // Parasolid XT (.x_t) export: offered while buildParasolidXT writes the NX 2512 form
   // (SCH_3800173_37102), which Siemens NX imports (verified on screw.pdf). The UI always exports the
-  // merged B-Rep body, the mode tested in NX. ?xt=1 still forces the controls on for development.
+  // merged B-Rep body, the mode tested in NX.
   const XT_WRITER_FORM = 'nx-37102';
   const ENABLE_XT_EXPORT = XT_WRITER_FORM === 'nx-37102';
   const XT_UI_BREP_MODE = 'merged';
-  const XT_UI_ENABLED = ENABLE_XT_EXPORT || (() => {
-    try {
-      const loc = typeof window !== 'undefined' && window.location;
-      return !!(loc && typeof URLSearchParams !== 'undefined' && new URLSearchParams(loc.search || '').get('xt') === '1');
-    } catch (e) { return false; }
-  })();
 
   const PALETTE = [
     [0.22, 0.58, 0.88],
@@ -5156,7 +4365,6 @@ void main() { gl_FragColor = uRGBA; }`;
     brepMode: 'merged',   // 'merged' | 'faceted'
     renderMode: 'shaded-edges',
     explodeFactor: 0,
-    activeTab: 'step',   // 'xt' tab exists only while XT_UI_ENABLED
     camera: {
       mode: 'free',        // 'free' (quaternion arcball, unclamped) | 'turntable' (Z-up, pitch clamped); persisted
       q: null,             // world->view quaternion [w,x,y,z] for 'free' mode
@@ -5169,9 +4377,7 @@ void main() { gl_FragColor = uRGBA; }`;
       dragMode: 'orbit',
       lastX: 0,
       lastY: 0
-    },
-    cachedXT: null,
-    cachedSTEP: null
+    }
   };
 
   // 1.7.0 viewport preferences (UI only, never touch exports): background, floor grid, projection.
@@ -7884,21 +7090,6 @@ void main() { gl_FragColor = uRGBA; }`;
   }
   function textChunks(t) { return t == null ? [] : Array.isArray(t) ? t : [t]; }
   function textLength(t) { return textChunks(t).reduce((n, c) => n + c.length, 0); }
-  // First `max` lines + total line count, without splitting / copying the whole text.
-  function previewLines(t, max) {
-    const lines = []; let count = 1, cur = '';
-    for (const c of textChunks(t)) {
-      let p = 0;
-      for (;;) {
-        const q = c.indexOf('\n', p);
-        if (q < 0) { if (lines.length < max) cur += c.slice(p); break; }
-        if (lines.length < max) lines.push(cur + c.slice(p, q));
-        cur = ''; count++; p = q + 1;
-      }
-    }
-    if (lines.length < max) lines.push(cur);
-    return { lines, count };
-  }
   function forEachLine(t, fn) {
     for (const c of textChunks(t)) { const ls = c.split('\n'); for (let i = 0; i < ls.length; i++) fn(ls[i]); }
   }
@@ -8431,7 +7622,6 @@ void main() { gl_FragColor = uRGBA; }`;
 
   const PREVIEW_MAX_TRIS = 200000;   // viewer draws a vertex-clustered preview above this
   const PREVIEW_MAX_EDGES = 150000;
-  const INSPECTOR_MAX_TRIS = 200000; // XT/STEP inspector preview is skipped above this (use Export)
   const BIG_MODEL_TRIS = 1000000;    // warning banner threshold
   // Preview geometry of one compact part (vertex-clustered decimation cached per ratio when ratio < 1).
   function previewGeometry(b, ratio) {
@@ -8476,15 +7666,13 @@ void main() { gl_FragColor = uRGBA; }`;
       renderMode: state.renderMode || 'shaded-edges', selectedPartIdx: state.selectedPartIdx,
       items, wires: state.wires || [], palette: PALETTE,
       grid: state.viewPrefs.grid ? { z: bounds.min[2], step: 20, extent: 80 } : null,
-      projection: state.viewPrefs.projection, triad: triadCorner(), lightBg: isLightBackground(),
+      projection: state.viewPrefs.projection, triad: TRIAD_CORNER, lightBg: isLightBackground(),
       note: ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : ''
     });
   }
 
-  // 1.7.0: the axis triad sits lower-left in Simple mode (its bottom-left holds nothing else); Advanced keeps lower-right
-  function triadCorner() {
-    return document.body && document.body.classList && document.body.classList.contains('sm-simple') ? 'bl' : 'br';
-  }
+  // 1.7.0: the axis triad sits lower-left (the viewport's bottom-left holds nothing else)
+  const TRIAD_CORNER = 'bl';
   function isLightBackground() { return state.viewPrefs.background === 'white' || state.viewPrefs.background === 'gradient'; }
   function applyViewBackground() {
     const wrap = document.querySelector && document.querySelector('.viewport-wrap');
@@ -8515,13 +7703,6 @@ void main() { gl_FragColor = uRGBA; }`;
   function setCameraYawPitch(yaw, pitch) {
     if (window.PDF3DCamera) window.PDF3DCamera.setYawPitch(state.camera, yaw, pitch);
     else { state.camera.yaw = yaw; state.camera.pitch = pitch; }
-  }
-  function syncOrbitButtons() {
-    document.querySelectorAll('[data-orbit]').forEach((b) => {
-      const on = b.getAttribute('data-orbit') === state.camera.mode;
-      b.classList.toggle('btn-active', on);
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
   }
 
   // Coalesce pointer-driven redraws into one per animation frame (the Canvas 2D fallback renders synchronously).
@@ -8775,9 +7956,9 @@ void main() { gl_FragColor = uRGBA; }`;
         ctx.stroke();
       }
     }
-    // 3. decimation note + CAD XYZ orientation triad (shared drawing with viewer-gl.js; corner per triadCorner())
+    // 3. decimation note + CAD XYZ orientation triad (shared drawing with viewer-gl.js; corner per TRIAD_CORNER)
     const note = ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : '';
-    if (window.PDF3DViewerGL && window.PDF3DViewerGL.drawTriadAndNote) window.PDF3DViewerGL.drawTriadAndNote(ctx, w, h, vR, vU, note, triadCorner());
+    if (window.PDF3DViewerGL && window.PDF3DViewerGL.drawTriadAndNote) window.PDF3DViewerGL.drawTriadAndNote(ctx, w, h, vR, vU, note, TRIAD_CORNER);
 
     ctx.restore();
   }
@@ -8853,22 +8034,23 @@ void main() { gl_FragColor = uRGBA; }`;
       streamCountBadge.textContent = `${state.streams.length} Stream${state.streams.length === 1 ? '' : 's'}`;
     }
 
-    const statusBadge = document.getElementById('statusBadge');
-    if (statusBadge) {
+    // 1.7.0: load status (replaces the old status badge element) -> state.status { text, title, tone: 'ok' | 'warn' },
+    // read through CAD3DExtractor.getStatus() and announced with 'pdf3d:status' on document
+    {
       const ap = (state.streams[state.activeStreamIdx] || {}).parsed || {};
       const path = ap.decodePath ? `${ap.decodePath.toUpperCase()} • ` : '';
       const warns = ap.warnings || [];
       const cadAtt = (state.attachments || []).filter((a) => a.isCAD);
       const att0 = cadAtt[0] || (state.attachments || [])[0];   // shown by its sanitized save name (attachmentDetails[i].fileName)
-      statusBadge.textContent = !state.streams.length && att0
+      const text = !state.streams.length && att0
         ? `NO 3D STREAM • ${cadAtt.length ? 'EMBEDDED CAD ATTACHMENT' : 'EMBEDDED ATTACHMENT'}: ${attachmentFileName(att0, state.attachments.indexOf(att0))}`
         : !state.parts.length
         ? `${path}NO MESH${warns.length ? ' • ' + warns[0].slice(0, 120) : ''}`
         : bounds.allWatertight
           ? `${path}WATER-TIGHT 2-MANIFOLD (${state.parts.length} SOLIDS)`
           : `${path}${state.parts.length} BODIES EXTRACTED`;
-      statusBadge.title = warns.join('\n');
-      statusBadge.className = 'badge ' + (state.parts.length ? (warns.length ? 'badge-amber' : 'badge-emerald') : 'badge-amber');
+      state.status = { text, title: warns.join('\n'), tone: state.parts.length && !warns.length ? 'ok' : 'warn' };
+      try { document.dispatchEvent(new CustomEvent('pdf3d:status', { detail: Object.assign({}, state.status) })); } catch (e) { /* no DOM (tests) */ }
     }
 
     // Stream list
@@ -8923,8 +8105,6 @@ void main() { gl_FragColor = uRGBA; }`;
         if (chk) {
           chk.addEventListener('change', (ev) => {
             p.visible = ev.target.checked;
-            state.cachedXT = null;
-            state.cachedSTEP = null;
             refreshAllUI();
           });
         }
@@ -8997,7 +8177,7 @@ void main() { gl_FragColor = uRGBA; }`;
     }
     const hudAssemblyStats = document.getElementById('hudAssemblyStats');
     if (hudAssemblyStats) {
-      hudAssemblyStats.textContent = `Solids: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
+      hudAssemblyStats.textContent = `Solid Bodies: ${state.parts.filter((p) => p.visible).length}/${state.parts.length} | Merged B-Rep Faces: ${bounds.totalMergedFaces} | Hole Loops: ${bounds.totalHoles} | Tris: ${bounds.totalTris}`;
     }
     const hudBounds = document.getElementById('hudBounds');
     if (hudBounds) {
@@ -9005,90 +8185,24 @@ void main() { gl_FragColor = uRGBA; }`;
     }
     const hudScaleInfo = document.getElementById('hudScaleInfo');
     if (hudScaleInfo) {
-      hudScaleInfo.textContent = XT_UI_ENABLED
+      hudScaleInfo.textContent = ENABLE_XT_EXPORT
         ? `Parasolid XT: 1e-3 m/mm (res_size=1000, res_linear=1e-8) • Units: ${state.units}`
         : `Units: ${state.units} • STEP AP214 export`;
     }
+    // 1.7.0: compressed / uncompressed size of the active 3D stream (was in the Advanced stream telemetry drawer)
+    const hudStreamSizes = document.getElementById('hudStreamSizes');
+    if (hudStreamSizes) {
+      hudStreamSizes.textContent = activeStream
+        ? `3D stream size: ${streamSizeLabel(activeStream.compressedLength)} compressed • ${streamSizeLabel(activeStream.rawBytes && activeStream.rawBytes.length)} uncompressed`
+        : '';
+    }
 
-    updateInspectorDrawer();
     renderViewport();
   }
-
-  function updateInspectorDrawer() {
-    const summaryEl = document.getElementById('drawerSummary');
-    const codeEl = document.getElementById('drawerCode');
-    if (!summaryEl || !codeEl) return;
-    if (state.activeTab === 'xt' && !XT_UI_ENABLED) state.activeTab = 'step';
-
-    // Built lazily, only for the tab that is showing (huge models take seconds per exporter).
-    if (state.activeTab === 'xt' || state.activeTab === 'step') {
-      let nt = 0;
-      for (const p of state.parts) if (p.visible && p.brep) nt += p.brep.nt;
-      if (nt > INSPECTOR_MAX_TRIS) {
-        summaryEl.innerHTML = `<div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">${state.activeTab === 'xt' ? 'Parasolid XT' : 'STEP AP214'} preview skipped</div>` +
-          `<div class="entity-row"><span>Visible triangles</span><strong>${nt.toLocaleString()}</strong></div>`;
-        codeEl.textContent = `Model too large for an in-page text preview (> ${INSPECTOR_MAX_TRIS.toLocaleString()} tris). Use the Export buttons: the file is streamed part-by-part straight to disk.`;
-        return;
-      }
-    }
-    if (state.activeTab === 'xt' && !state.cachedXT) {
-      state.cachedXT = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName });
-      state.cachedXTStats = lastXTStats;
-    }
-    if (state.activeTab === 'step' && !state.cachedSTEP) {
-      state.cachedSTEP = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units });
-    }
-
-    if (state.activeTab === 'xt') {
-      const xtPrev = previewLines(state.cachedXT, 140);
-      const counts = { ASSEMBLY: 0, INSTANCE: 0, BODY: 0, REGION: 0, SHELL: 0, FACE: 0, LOOP: 0, FIN: 0, EDGE: 0, VERTEX: 0, PLANE: 0, LINE: 0, POINT: 0 };
-      let bodyKindLabel = 'Solid / Sheet B-Rep';
-      // The NX-form stream is wrapped at 80 columns, so node counts come from the writer, not from lines.
-      const xtSt = state.cachedXTStats || { counts: {}, bodyKinds: [] };
-      const XT_NAMES = { 10: 'ASSEMBLY', 11: 'INSTANCE', 12: 'BODY', 19: 'REGION', 13: 'SHELL', 14: 'FACE', 15: 'LOOP', 17: 'FIN', 16: 'EDGE', 18: 'VERTEX', 50: 'PLANE', 30: 'LINE', 29: 'POINT' };
-      for (const [code, n] of Object.entries(xtSt.counts)) if (XT_NAMES[code]) counts[XT_NAMES[code]] += n;
-      if (xtSt.bodyKinds.includes(3)) bodyKindLabel = 'Sheet Body (body_type=3)';
-      else if (xtSt.bodyKinds.includes(1)) bodyKindLabel = 'Solid Body (body_type=1)';
-
-      summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">Parasolid XT Entity Table (${(state.cachedXTStats && state.cachedXTStats.schema) || XT_NX_SCHEMA})</div>
-        <div class="entity-row"><span>12 BODY (${bodyKindLabel})</span><strong>${counts.BODY}${counts.ASSEMBLY ? ' (' + counts.INSTANCE + ' Inst)' : ''}</strong></div>
-        <div class="entity-row"><span>19 REGION (Void / Solid)</span><strong>${counts.REGION}</strong></div>
-        <div class="entity-row"><span>13 SHELL (Connected Shells)</span><strong>${counts.SHELL}</strong></div>
-        <div class="entity-row"><span>14 FACE (Planar B-Rep)</span><strong>${counts.FACE}</strong></div>
-        <div class="entity-row"><span>15 LOOP (Outer + Hole Loops)</span><strong>${counts.LOOP}</strong></div>
-        <div class="entity-row"><span>17 FIN (Real + Dummy Half-Edges)</span><strong>${counts.FIN}</strong></div>
-        <div class="entity-row"><span>16 EDGE / 30 LINE</span><strong>${counts.EDGE}</strong></div>
-        <div class="entity-row"><span>18 VERTEX / 29 POINT</span><strong>${counts.VERTEX}</strong></div>
-        <div class="entity-row"><span>50 PLANE Surfaces</span><strong>${counts.PLANE}</strong></div>
-      `;
-      codeEl.textContent = xtPrev.lines.join('\n') +
-        (xtPrev.count > 140 ? `\n... (${xtPrev.count - 140} more Parasolid XT records — click "Export Parasolid XT (.x_t)" for full file)` : '');
-    } else if (state.activeTab === 'step') {
-      const stepPrev = previewLines(state.cachedSTEP, 140);
-      summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">STEP AP214 (ISO 10303-21) Summary</div>
-        <div class="entity-row"><span>Schema</span><strong>AUTOMOTIVE_DESIGN</strong></div>
-        <div class="entity-row"><span>Total STEP Entities</span><strong>${stepPrev.count - 10}</strong></div>
-        <div class="entity-row"><span>MANIFOLD_SOLID_BREP</span><strong>${state.parts.filter((p) => p.visible).length}</strong></div>
-        <div class="entity-row"><span>Units</span><strong>${state.units.toUpperCase()}</strong></div>
-      `;
-      codeEl.textContent = stepPrev.lines.join('\n') +
-        (stepPrev.count > 140 ? `\n... (${stepPrev.count - 140} more STEP entities)` : '');
-    } else {
-      const st = state.streams[state.activeStreamIdx];
-      const blocks = (st && st.parsed && st.parsed.blocks) || [];
-      summaryEl.innerHTML = `
-        <div style="font-weight:700;color:var(--text-0);margin-bottom:6px;">PDF /3D Stream &amp; Block Directory</div>
-        <div class="entity-row"><span>Active Stream</span><strong>${st ? st.subtype : 'None'}</strong></div>
-        <div class="entity-row"><span>Compressed Size</span><strong>${st ? st.compressedLength : 0} B</strong></div>
-        <div class="entity-row"><span>Decompressed Size</span><strong>${st ? st.rawBytes.length : 0} B</strong></div>
-        <div class="entity-row"><span>Parsed Blocks</span><strong>${blocks.length}</strong></div>
-      `;
-      codeEl.textContent = blocks.map((b, i) =>
-        `Block[${String(i).padStart(2, '0')}] @ 0x${b.offset.toString(16).padStart(6, '0')} | Type: 0x${(b.blockType >>> 0).toString(16).toUpperCase().padStart(8, '0')} | Data: ${b.dataSize} B | Meta: ${b.metaSize} B`
-      ).join('\n');
-    }
+  // "812 B", "37.4 KB", "2.31 MB"; '?' when the size is unknown
+  function streamSizeLabel(n) {
+    if (!(n >= 0)) return '?';
+    return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
   }
 
   async function activateStream(idx) {
@@ -9121,8 +8235,6 @@ void main() { gl_FragColor = uRGBA; }`;
       visible: true
     }));
     state.selectedPartIdx = -1;
-    state.cachedXT = null;
-    state.cachedSTEP = null;
     setLastLoad(loadResultFor(st, idx));
     refreshAllUI();
   }
@@ -9179,17 +8291,11 @@ void main() { gl_FragColor = uRGBA; }`;
     if (streams.length === 0) {
       setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0,
         message: state.attachments.length ? 'No 3D model in this PDF; it has embedded file attachments.' : 'No 3D model (U3D / PRC) in this PDF.' });
-      // Simple mode shows the NO_3D load card in the empty viewport instead of an alert (Advanced keeps the alert)
-      const simpleUI = typeof document !== 'undefined' && document.body && document.body.classList.contains('sm-simple');
+      // the UI shows the NO_3D load card in the empty viewport (no alert)
       // clear the previous model in every NO_3D case (the file name already changed; the HUD stream name must not linger)
       state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null;
-      state.selectedPartIdx = -1; state.cachedXT = null; state.cachedSTEP = null;
+      state.selectedPartIdx = -1;
       refreshAllUI();
-      if (state.attachments.length || simpleUI) {
-        // no 3D annotation, but the PDF carries embedded files (e.g. the native STEP/CAD model): offer them
-        return;
-      }
-      alert('No embedded /3D (U3D / PRC) streams or file attachments found in this file.');
       return;
     }
     state.streams = streams;
@@ -9253,106 +8359,6 @@ void main() { gl_FragColor = uRGBA; }`;
   // -------------------------------------------------------------------------
   // 11. Event Listeners & Interactive Camera Controls
   // -------------------------------------------------------------------------
-  // Result message for Parasolid export: a small non-modal toast styled like the CAD export toast (cad-export-ui.css).
-  let xtToast = null, xtToastTimer = null;
-  function showExportResult(tone, title, lines) {
-    if (typeof document === 'undefined' || !document.body) return;
-    if (!xtToast) {
-      xtToast = document.createElement('section');
-      xtToast.className = 'cad-toast xt-toast';
-      xtToast.setAttribute('role', 'status');
-      xtToast.setAttribute('aria-live', 'polite');
-      xtToast.setAttribute('aria-labelledby', 'xtToastTitle');
-      xtToast.innerHTML = '<div class="cad-t-h"><span class="cad-t-ico" aria-hidden="true"></span><h2 class="cad-t-title" id="xtToastTitle"></h2>' +
-        '<button type="button" class="btn btn-sm cad-t-x" aria-label="Dismiss">\u00d7</button></div><div class="cad-t-msg"></div>';
-      xtToast.querySelector('.cad-t-x').addEventListener('click', () => { xtToast.hidden = true; });
-      xtToast.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); xtToast.hidden = true; } });
-      document.body.appendChild(xtToast);
-      document.addEventListener('pdf3d:cadexport', () => { xtToast.hidden = true; });   // the CAD toast uses the same corner
-    }
-    if (xtToastTimer) { clearTimeout(xtToastTimer); xtToastTimer = null; }
-    xtToast.dataset.state = 'done';
-    xtToast.dataset.tone = tone;
-    xtToast.querySelector('.cad-t-title').textContent = title;
-    const msg = xtToast.querySelector('.cad-t-msg');
-    msg.textContent = '';
-    for (const l of lines) { const p = document.createElement('p'); p.textContent = l; msg.appendChild(p); }
-    msg.hidden = !lines.length;
-    xtToast.hidden = false;
-    if (tone === 'ok') xtToastTimer = setTimeout(() => { if (xtToast && !xtToast.contains(document.activeElement)) xtToast.hidden = true; }, 10000);
-  }
-
-  // Parasolid (.x_t) export (Advanced button and Simple menu item): always the merged B-Rep body.
-  function exportParasolidXT() {
-    const filename = `${stemName()}.x_t`;
-    try {
-      const st = {};
-      const xt = buildParasolidXT(state.parts, { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, blob: true, stats: st });
-      const faces = st.faces || 0;   // FACE nodes written (counts[14]); an empty BODY node is written even with no faces
-      if (!faces) {
-        showExportResult('warn', 'Parasolid export: nothing to save', ['No visible part has B-Rep faces. Show a part with geometry and try again.']);
-        return false;
-      }
-      triggerDownload(xt, filename, 'text/plain');   // anchor download: the page cannot confirm the file was saved
-      const n = (v) => v.toLocaleString('en-US');
-      const big = (st.estimatedBytes || 0) > BIG_DOWNLOAD_BYTES;
-      const bigLine = `This file is about ${fmtBytes(st.estimatedBytes || 0)}. Chrome can cancel downloads this large without a message; if it isn't in your Downloads, hide some parts or use Reduce detail and export again.`;
-      const faceLine = `${n(faces)} flat face${faces === 1 ? '' : 's'}`;
-      if (st.bodyType === 'sheet') {
-        showExportResult('warn', 'Parasolid sheet body exported (open model)', [
-          'This part isn\'t closed, so it was saved as surfaces, not a solid. This form hasn\'t been tested in NX.',
-          `Download started: ${filename}, 1 sheet body, ${faceLine}, ${n(st.openEdges || 0)} open edges.`
-        ].concat(big ? [bigLine] : []));
-        return true;
-      }
-      const lines = [`1 solid body, ${faceLine}.`];
-      if (st.splitFaces) {
-        // the viewer counts merged faces; curved ones cannot be one flat Parasolid face, so they are written as their triangles
-        lines.push(`The viewer shows ${n(st.viewerFaces)} faces: ${n(st.splitFaces)} of them ${st.splitFaces === 1 ? 'is' : 'are'} not exactly flat, so ${st.splitFaces === 1 ? 'it was' : 'they were'} saved as ${n(st.splitTris)} flat triangles.`);
-      }
-      lines.push(`Siemens NX format (${XT_NX_SCHEMA}), merged B-Rep. Stored in meters (Parasolid standard), opens at true size in NX.`);
-      if (big) lines.push(bigLine);
-      showExportResult(big ? 'warn' : 'ok', `Parasolid download started: ${filename}`, lines);
-      return true;
-    } catch (e) {
-      console.error('Parasolid export failed', e);
-      const tooLarge = e && e.code === 'XT_TOO_LARGE';
-      const oom = !tooLarge && e && (e instanceof RangeError || /memory|allocation/i.test(String(e.message || e)));
-      showExportResult('err', tooLarge ? 'Parasolid export: model too large' : 'Parasolid export failed', [
-        tooLarge ? `The file would be about ${fmtBytes(e.estimatedBytes)}, more than the browser can save. Hide some parts or use Reduce detail, then try again.`
-          : oom ? 'The browser ran out of memory while writing the file. Hide some parts or use Reduce detail, then try again.'
-          : `Error: ${(e && e.message) || e}`,
-        'Nothing was saved.'
-      ]);
-      return false;
-    }
-  }
-
-  // Parasolid XT export button and inspector tab (created here, not in index.html, so they exist only while XT_UI_ENABLED).
-  function injectXTControls() {
-    if (!document.getElementById('btnExportXT')) {
-      const stepBtn = document.getElementById('btnExportSTEP');
-      if (stepBtn && stepBtn.parentNode) {
-        const b = document.createElement('button');
-        b.className = 'btn';
-        b.id = 'btnExportXT';
-        b.title = 'Faceted body, flat faces. Parasolid text transmit (.x_t) for Siemens NX (schema SCH_3800173_37102). Always one merged B-Rep body: Body type does not apply.';
-        b.textContent = 'Export Parasolid (.x_t)';
-        stepBtn.parentNode.insertBefore(b, stepBtn.nextSibling);
-      }
-    }
-    if (!document.querySelector('.tab-btn[data-tab="xt"]')) {
-      const stepTab = document.querySelector('.tab-btn[data-tab="step"]');
-      if (stepTab && stepTab.parentNode) {
-        const t = document.createElement('button');
-        t.className = 'tab-btn';
-        t.setAttribute('data-tab', 'xt');
-        t.textContent = 'Parasolid .x_t Inspector';
-        stepTab.parentNode.insertBefore(t, stepTab.nextSibling);
-      }
-    }
-  }
-
   function initEvents() {
     const canvas = document.getElementById('viewportCanvas');
     if (canvas) {
@@ -9403,252 +8409,119 @@ void main() { gl_FragColor = uRGBA; }`;
       }
     }
 
-    // Render mode buttons
-    document.querySelectorAll('[data-render]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('[data-render]').forEach((b) => b.classList.remove('btn-active'));
-        btn.classList.add('btn-active');
-        state.renderMode = btn.getAttribute('data-render');
-        renderViewport();
-      });
-    });
-
-    // Camera preset buttons
-    document.querySelectorAll('[data-view]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const v = btn.getAttribute('data-view');
-        state.camera.panX = 0;
-        state.camera.panY = 0;
-        const free = state.camera.mode !== 'turntable';
-        if (v === 'iso') setCameraYawPitch(-0.68, 0.52);
-        else if (v === 'top') setCameraYawPitch(0, free ? Math.PI / 2 : 1.48);
-        else if (v === 'front') setCameraYawPitch(0, 0);
-        else if (v === 'right') setCameraYawPitch(-Math.PI / 2, 0);
-        else if (v === 'reset') { setCameraYawPitch(-0.68, 0.52); state.camera.zoom = 1.0; }
-        renderViewport();
-      });
-    });
-
-    // Orbit mode toggle (Free arcball / Turntable Z-up), persisted in localStorage
+    // Orbit mode (Free arcball / Turntable Z-up), remembered in localStorage by PDF3DCamera
     if (window.PDF3DCamera) {
       state.camera.mode = window.PDF3DCamera.loadMode();
       if (state.camera.mode === 'free') state.camera.q = window.PDF3DCamera.fromYawPitch(state.camera.yaw, state.camera.pitch);
     }
-    syncOrbitButtons();
-    document.querySelectorAll('[data-orbit]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (!window.PDF3DCamera) return;
-        const m = btn.getAttribute('data-orbit') === 'turntable' ? 'turntable' : 'free';
-        window.PDF3DCamera.setMode(state.camera, m);
-        window.PDF3DCamera.saveMode(m);
-        syncOrbitButtons();
-        renderViewport();
-      });
-    });
 
-    const btnFitView = document.getElementById('btnFitView');
-    if (btnFitView) {
-      btnFitView.addEventListener('click', () => {
-        state.camera.zoom = 1.0;
-        state.camera.panX = 0;
-        state.camera.panY = 0;
-        renderViewport();
-      });
-    }
-
-    const explodeSlider = document.getElementById('explodeSlider');
-    if (explodeSlider) {
-      explodeSlider.addEventListener('input', (ev) => {
-        state.explodeFactor = Number(ev.target.value) || 0;
-        renderViewport();
-      });
-    }
-
-    // Units & B-Rep mode selectors
-    const unitSelect = document.getElementById('unitSelect');
-    if (unitSelect) {
-      unitSelect.addEventListener('change', (ev) => {
-        state.units = ev.target.value;
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
-
-    const brepModeSelect = document.getElementById('brepModeSelect');
-    if (brepModeSelect) {
-      brepModeSelect.addEventListener('change', (ev) => {
-        state.brepMode = ev.target.value;
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
-
-    const detailSelect = document.getElementById('detailSelect');
-    if (detailSelect) {
-      detailSelect.addEventListener('change', (ev) => {
-        state.exportDetail = Number(ev.target.value) || 1;
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
-
-    if (XT_UI_ENABLED) injectXTControls();
-
-    // Drawer tabs
-    document.querySelectorAll('.tab-btn[data-tab]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn[data-tab]').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.activeTab = btn.getAttribute('data-tab');
-        updateInspectorDrawer();
-      });
-    });
-
-    const btnCopyInspector = document.getElementById('btnCopyInspector');
-    if (btnCopyInspector) {
-      btnCopyInspector.addEventListener('click', () => {
-        // Full text for normal models; for chunked (huge) output only the visible preview is copied.
-        const full = state.activeTab === 'xt' ? state.cachedXT : state.activeTab === 'step' ? state.cachedSTEP : null;
-        const text = typeof full === 'string' && full.length < (1 << 24)
-          ? full
-          : (document.getElementById('drawerCode').textContent || '');
-        if (navigator.clipboard) navigator.clipboard.writeText(text);
-        btnCopyInspector.textContent = 'Copied!';
-        setTimeout(() => { btnCopyInspector.textContent = 'Copy Preview'; }, 1200);
-      });
-    }
-
-    // Show All / Invert Parts
+    // Show All / Invert Parts (buttons built by simple-mode.js)
     const btnShowAllParts = document.getElementById('btnShowAllParts');
-    if (btnShowAllParts) {
-      btnShowAllParts.addEventListener('click', () => {
-        state.parts.forEach((p) => { p.visible = true; });
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
+    if (btnShowAllParts) btnShowAllParts.addEventListener('click', showAllParts);
     const btnInvertParts = document.getElementById('btnInvertParts');
-    if (btnInvertParts) {
-      btnInvertParts.addEventListener('click', () => {
-        state.parts.forEach((p) => { p.visible = !p.visible; });
-        if (!state.parts.some((p) => p.visible) && state.parts.length > 0) {
-          state.parts[0].visible = true;
-        }
-        state.cachedXT = null;
-        state.cachedSTEP = null;
-        refreshAllUI();
-      });
-    }
+    if (btnInvertParts) btnInvertParts.addEventListener('click', invertParts);
 
-    // File open & drag-and-drop
+    // File open (the hidden #fileInput; simple-mode.js clicks it and forwards dropped files to it)
     const fileInput = document.getElementById('fileInput');
-    const btnOpenFile = document.getElementById('btnOpenFile');
-    const dropZone = document.getElementById('dropZone');
-
-    const handleFileObj = async (file) => {
-      if (!file) return;
-      const ab = await file.arrayBuffer();
-      await loadPDFBuffer(new Uint8Array(ab), file.name);
-    };
-
-    if (btnOpenFile && fileInput) {
-      btnOpenFile.addEventListener('click', () => fileInput.click());
+    if (fileInput) {
       fileInput.addEventListener('change', (ev) => {
         if (ev.target.files && ev.target.files[0]) handleFileObj(ev.target.files[0]);
       });
     }
-    if (dropZone && fileInput) {
-      dropZone.addEventListener('click', () => fileInput.click());
-      dropZone.addEventListener('dragover', (ev) => {
-        ev.preventDefault();
-        dropZone.classList.add('dragover');
-      });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-      dropZone.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        dropZone.classList.remove('dragover');
-        if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]) {
-          handleFileObj(ev.dataTransfer.files[0]);
-        }
-      });
-    }
-
-    const btnLoadSample = document.getElementById('btnLoadSample');
-    if (btnLoadSample) {
-      btnLoadSample.addEventListener('click', () => {
-        if (window.SAMPLE_3D_PDF_B64) {
-          loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf');
-        }
-      });
-    }
-
-    // Export Buttons
-    const btnExportXT = XT_UI_ENABLED ? document.getElementById('btnExportXT') : null;
-    if (btnExportXT) {
-      btnExportXT.addEventListener('click', () => exportParasolidXT());
-    }
-
-    const btnExportSTEP = document.getElementById('btnExportSTEP');
-    if (btnExportSTEP) {
-      btnExportSTEP.addEventListener('click', () => {
-        const stp = buildSTEPAP214(state.parts, { brepMode: state.brepMode, units: state.units, blob: true });
-        triggerDownload(stp, `${stemName()}.stp`, 'application/step');
-      });
-    }
-
-    const btnExportSTL = document.getElementById('btnExportSTL');
-    if (btnExportSTL) {
-      btnExportSTL.addEventListener('click', () => {
-        const stl = buildBinarySTL(state.parts, state.units);
-        triggerDownload(stl, `${stemName()}.stl`, 'application/sla');
-      });
-    }
-
-    const btnExportSTLText = document.getElementById('btnExportSTLText');
-    if (btnExportSTLText) {
-      btnExportSTLText.addEventListener('click', () => {
-        const stlTxt = buildASCIISTL(state.parts, state.units, { blob: true });
-        triggerDownload(stlTxt, `${stemName()}-ascii.stl`, 'text/plain');
-      });
-    }
-
-    const btnExportOBJ = document.getElementById('btnExportOBJ');
-    if (btnExportOBJ) {
-      btnExportOBJ.addEventListener('click', () => {
-        const obj = buildWavefrontOBJ(state.parts, state.units, { blob: true });
-        triggerDownload(obj, `${stemName()}.obj`, 'text/plain');
-      });
-    }
-
-    const btnExportIGES = document.getElementById('btnExportIGES');
-    if (btnExportIGES) {
-      btnExportIGES.addEventListener('click', () => {
-        const igs = buildIGESWireframe(state.parts, state.units, { blob: true });
-        triggerDownload(igs, `${stemName()}.igs`, 'text/plain');
-      });
-    }
-
-    const btnExportRaw = document.getElementById('btnExportRaw');
-    if (btnExportRaw) {
-      btnExportRaw.addEventListener('click', () => {
-        const st = state.streams[state.activeStreamIdx];
-        if (!st) return;
-        const ext = st.subtype === 'PRC' ? 'prc' : 'u3d';
-        triggerDownload(st.rawBytes, `${stemName()}.${ext}`, 'application/octet-stream');
-      });
-    }
   }
+  async function handleFileObj(file) {
+    if (!file) return;
+    const ab = await file.arrayBuffer();
+    await loadPDFBuffer(new Uint8Array(ab), file.name);
+  }
+  function loadSample() {
+    if (!window.SAMPLE_3D_PDF_B64) return Promise.resolve(false);
+    return loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf').then(() => true);
+  }
+  function showAllParts() {
+    state.parts.forEach((p) => { p.visible = true; });
+    refreshAllUI();
+  }
+  function invertParts() {
+    state.parts.forEach((p) => { p.visible = !p.visible; });
+    if (!state.parts.some((p) => p.visible) && state.parts.length > 0) state.parts[0].visible = true;
+    refreshAllUI();
+  }
+
+  // 1.7.0 view controls for the UI (simple-mode.js), on window.PDF3DView next to the view preferences. Each change
+  // re-renders and fires 'pdf3d:viewchange' on document with { renderMode, orbitMode, explode }.
+  const RENDER_MODES = ['shaded-edges', 'brep-faces', 'shaded', 'wireframe', 'xray'];
+  const VIEW_PRESETS = ['iso', 'top', 'front', 'right', 'reset'];
+  function viewState() { return { renderMode: state.renderMode, orbitMode: state.camera.mode, explode: state.explodeFactor }; }
+  function viewChanged() {
+    renderViewport();
+    try { document.dispatchEvent(new CustomEvent('pdf3d:viewchange', { detail: viewState() })); } catch (e) { /* no DOM (tests) */ }
+  }
+  Object.assign(window.PDF3DView, {
+    renderModes: RENDER_MODES, presets: VIEW_PRESETS,
+    state: viewState,
+    setRenderMode(m) { if (!RENDER_MODES.includes(m)) return false; state.renderMode = m; viewChanged(); return true; },
+    // camera presets: iso / top / front / right keep the zoom; reset also returns to zoom 1. All clear the pan.
+    preset(v) {
+      if (!VIEW_PRESETS.includes(v)) return false;
+      state.camera.panX = 0;
+      state.camera.panY = 0;
+      const free = state.camera.mode !== 'turntable';
+      if (v === 'iso') setCameraYawPitch(-0.68, 0.52);
+      else if (v === 'top') setCameraYawPitch(0, free ? Math.PI / 2 : 1.48);
+      else if (v === 'front') setCameraYawPitch(0, 0);
+      else if (v === 'right') setCameraYawPitch(-Math.PI / 2, 0);
+      else { setCameraYawPitch(-0.68, 0.52); state.camera.zoom = 1.0; }
+      viewChanged(); return true;
+    },
+    fit() { state.camera.zoom = 1.0; state.camera.panX = 0; state.camera.panY = 0; viewChanged(); return true; },
+    setOrbitMode(m) {
+      if ((m !== 'free' && m !== 'turntable') || !window.PDF3DCamera) return false;
+      window.PDF3DCamera.setMode(state.camera, m);
+      window.PDF3DCamera.saveMode(m);
+      viewChanged(); return true;
+    },
+    // exploded view, 0..100 (percent)
+    setExplode(n) { n = Number(n); if (!isFinite(n)) return false; state.explodeFactor = Math.max(0, Math.min(100, n)); viewChanged(); return true; }
+  });
+
+  // 1.7.0 export settings for the UI (export-flow.js): units, B-Rep mode and reduce-detail, the values the export
+  // writers read from state. get() -> { units, brepMode, detail } (strings, as option values); set(key, value)
+  // validates against options, applies, refreshes and fires 'pdf3d:exportsettings'. Defaults: mm / merged / '1'.
+  const EXPORT_SETTING_OPTIONS = {
+    units: [['mm', 'mm (NX default)'], ['cm', 'cm (10 mm)'], ['in', 'inch (25.4 mm)'], ['ft', 'foot (304.8 mm)'], ['m', 'meter (1000 mm)']],
+    brepMode: [['merged', 'Merged Planar B-Rep (Auto Solid / Sheet)'], ['sheet-unsewn', 'Open Sheet Surfaces (NX House/Deck Recovery)'],
+      ['merged-assembly', 'Multi-Body Assembly (STEP only; Parasolid always writes merged)'], ['faceted', 'Triangulated Faceted Sheet B-Rep (1:1 Mesh)']],
+    detail: [['1', 'Off (full detail)'], ['0.5', '50% of triangles'], ['0.25', '25% of triangles'], ['0.1', '10% of triangles']]
+  };
+  const EXPORT_SETTING_TITLES = {
+    units: 'CAD unit scaling for STEP/STL/OBJ/IGES export',
+    brepMode: 'How bodies are written to STEP. Parasolid (.x_t) always writes one merged body.',
+    detail: 'Optional decimation (vertex clustering) applied to exported files only. Off = full detail.'
+  };
+  const exportSettings = {
+    options: EXPORT_SETTING_OPTIONS, titles: EXPORT_SETTING_TITLES,
+    get() { return { units: state.units, brepMode: state.brepMode, detail: String(state.exportDetail || 1) }; },
+    set(key, value) {
+      const opts = EXPORT_SETTING_OPTIONS[key]; value = String(value);
+      if (!opts || !opts.some((o) => o[0] === value)) return false;
+      if (key === 'detail') state.exportDetail = Number(value) || 1; else state[key] = value;
+      refreshAllUI();
+      try { document.dispatchEvent(new CustomEvent('pdf3d:exportsettings', { detail: exportSettings.get() })); } catch (e) { /* no DOM (tests) */ }
+      return true;
+    }
+  };
 
   // Expose programmatic API for automated verification & CAD testing
   window.CAD3DExtractor = { U3DBitStreamReader, U3DHistogram, U3D_CTX, U3D_AC_STATIC_FULL, parseU3DStream,
     getState: () => state, computeAssemblyBounds,
     getLastLoad: () => (window.PDF3D || {}).lastLoad || null,
     loadPDFBuffer,
+    loadSample,
     activateStream,
+    showAllParts, invertParts,
+    // 1.7.0: load status { text, title, tone: 'ok' | 'warn' } (also sent as 'pdf3d:status')
+    getStatus: () => Object.assign({ text: '', title: '', tone: '' }, state.status),
     // opts: { blob: true } -> array of Blob parts; { detail: 0.25 } -> reduced-detail export
     buildParasolidXT: (o = {}) => buildParasolidXT(state.parts, { brepMode: state.brepMode, fileName: state.fileName, ...o }),
     // summary of the last .x_t written: { faces, bodies, bodyType: 'solid'|'sheet', sewn, openEdges, viewerFaces, splitFaces, splitTris, estimatedBytes, counts }
@@ -9664,12 +8537,13 @@ void main() { gl_FragColor = uRGBA; }`;
   // form (SCH_3800173_37102_13006) that Siemens NX imports.
   const PDF3D_NS = (window.PDF3D = window.PDF3D || {});
   PDF3D_NS.capabilities = Object.assign(PDF3D_NS.capabilities || {}, { parasolid: XT_WRITER_FORM === 'nx-37102', parasolidSchema: XT_NX_SCHEMA });
+  PDF3D_NS.exportSettings = exportSettings;
 
   // ---------------------------------------------------------------------------------------------
   // PDF3D.exportFormat(format, opts) -> Promise<{ blob, filename, status, reasonCode, reason, summary }>
-  // One entry point for every format, used by the Simple Export menu (export-flow.js). It calls the
-  // same writers as the Advanced buttons with the same arguments, so a mesh-format file is byte-identical
-  // to the button's file for the same settings; no button is clicked.
+  // One entry point for every format, used by the Export menu (export-flow.js). It calls the
+  // same writers with the same arguments as the 1.6.2 per-format export buttons (removed in 1.7.0), so a mesh-format
+  // file is byte-identical to theirs for the same settings.
   //   format: 'step' | 'stl' | 'obj' | 'iges' | 'raw' | 'xt'
   //   opts:   { body: 'mesh'|'fitted'|'both' (STEP), onNoFit: 'mesh'|'omit' (STEP fitted), units, detail,
   //             brepMode, partIds (null = all visible parts), encoding: 'binary'|'ascii' (STL), signal, onProgress }
@@ -9684,7 +8558,7 @@ void main() { gl_FragColor = uRGBA; }`;
     ? new Blob([content], { type: mimeType })
     : new Blob(textChunks(content), { type: `${mimeType};charset=utf-8` }));   // same Blob as triggerDownload
   function exportSelection(partIds) {
-    // parts = the array handed to the writers (null: state.parts itself, as the Advanced buttons pass it);
+    // parts = the array handed to the writers (null: state.parts itself, as the 1.6.2 export buttons passed it);
     // chosen[k] = the part for ids[k]
     if (partIds == null) { const ids = state.parts.map((p, i) => i).filter((i) => state.parts[i].visible); return { ids, parts: state.parts, chosen: ids.map((i) => state.parts[i]) }; }
     const ids = [...new Set([].concat(partIds))].filter((i) => Number.isInteger(i) && state.parts[i]);
@@ -9732,7 +8606,7 @@ void main() { gl_FragColor = uRGBA; }`;
     }
     if (fmt === 'xt') {
       if (!(PDF3D_NS.capabilities && PDF3D_NS.capabilities.parasolid)) return exportSkipped('unavailable', 'Parasolid export is not available in this version');
-      // Same call as the Advanced button (exportParasolidXT); the writer fills `st` with its own summary.
+      // Same call as the 1.6.2 Parasolid button; the writer fills `st` with its own summary.
       const st = {}; let gen = null, first = null;
       const xo = { brepMode: XT_UI_BREP_MODE, fileName: state.fileName, stats: st, ...wo, ...(o.maxBytes != null ? { maxBytes: o.maxBytes } : {}) };
       try {
@@ -10439,7 +9313,7 @@ void main() { gl_FragColor = uRGBA; }`;
     return retrying;
   }
 
-  // UI: Designer's cad-export-ui.js (Simple menu item + Advanced button, progress/cancel toast) drives this API.
+  // UI: Designer's cad-export-ui.js (Export menu item, progress/cancel toast) drives this API.
 
   if (!NS.exportCadSurfaces || NS.exportCadSurfaces.__cadStub) {
     NS.canExportCadSurfaces = canExportCadSurfaces;
@@ -10454,32 +9328,25 @@ void main() { gl_FragColor = uRGBA; }`;
 </script>
   <script data-src="simple-mode.js">
 /*
- * simple-mode.js — "Simple mode" add-on for pdf-3d-extractor (3D PDF -> CAD).
+ * simple-mode.js — the pdf-3d-extractor UI (3D PDF -> CAD). Since 1.7.0 this is the only UI: the Advanced
+ * workbench, the Simple / Advanced switch, the ui URL parameter and the remembered mode are gone.
  *
- * Integration (index.html only, no other edits):
- *   <link rel="stylesheet" href="affordance.css" />       (in <head>, optional, both modes)
+ * Integration (index.html):
+ *   <link rel="stylesheet" href="affordance.css" />       (in <head>)
  *   <link rel="stylesheet" href="simple-mode.css" />      (in <head>)
  *   <\script src="simple-mode.js"><\/script>                (after app.js)
  *
- * Works against 1.3.0 (toolbar is a plain .viewport-toolbar) and 1.4.0 (#viewerControls with Reset view,
- * Orbit mode and line toggles): every original control is looked up at build time and only the ones that
- * exist get a Simple equivalent.
- *
- * Design rules:
- *  - Advanced mode == the original UI, untouched. Simple mode is just body.sm-simple + add-on chrome.
- *  - Every Simple control PROXIES to the original control (button.click(), select.value + 'change',
- *    checkbox.checked + 'change', range.value + 'input'/'change'). app.js stays the single source of truth.
- *  - Original panel nodes shown in Simple sheets are MOVED (listeners intact) and restored to their exact
- *    original positions via placeholder comments when switching back to Advanced.
- *  - Add-on elements never carry data-render / data-view / data-viewopt / data-tab, so app.js and
- *    viewer-gl.js selector bindings never pick them up.
+ * index.html only holds the viewport (.viewport-wrap > #viewportCanvas) and the hidden #fileInput. This file builds
+ * the top bar, the viewer pill and menus, the Solid Bodies / Info sheets and the dialogs, and gives app.js the
+ * containers it writes into by id (partList, streamList, bboxGrid, featureList, treeList, attachList, the badges,
+ * docFileName and the readout rows hudStreamTitle ... hudStreamSizes). Controls call the app.js APIs directly:
+ * window.PDF3DView (view), CAD3DExtractor (sample, status), PDF3DViewerGL (line options).
  */
 (function () {
   'use strict';
   if (window.PDF3DSimpleMode) return;
 
-  const STORE_KEY = 'pdf3d-extractor.uiMode';
-  const MODES = ['simple', 'advanced'];
+  const OLD_MODE_KEY = 'pdf3d-extractor.uiMode';   // the remembered Simple / Advanced mode (<= 1.6.2); removed at start
   const $ = (id) => document.getElementById(id);
 
   const RENDER_LABELS = {
@@ -10503,24 +9370,20 @@ void main() { gl_FragColor = uRGBA; }`;
   ];
   const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
   const ORBIT_LABELS = { free: ['Free', 'tumble any axis'], turntable: ['Turntable', 'Z stays up'] };
-  const HINT_RE = /Click (?:a )?part in (?:the )?tree to highlight/;
-  const HINT_TEXT = { simple: 'Click a body in Solid Bodies to highlight', advanced: 'Click a part in the part list to highlight' };
-  const VIEWOPT_LABELS = {
-    wires: ['Wires', 'PRC curves'], hiddenLines: ['Hidden', 'dimmed hidden edges'],
-    meshWire: ['Mesh', 'triangle overlay'], flat: ['Flat', 'faceted shading']
+  // Explode is a 0-100 % range; Reset view keeps the old toolbar wording
+  const RESET_TITLE = 'Reset orientation, zoom and pan';
+  const ORBIT_TITLES = {
+    free: 'Free arcball: tumble past 180° about any axis, no gimbal lock. Ctrl/Alt+drag (or middle-drag) twists about the view axis.',
+    turntable: 'Turntable: Z stays up, tilt limited to ±85°'
   };
-  const EXPORTS = [
-    ['btnExportSTL', 'STL (binary)', '.stl'],
-    ['btnExportSTLText', 'STL (ASCII)', '.stl'],
-    ['btnExportOBJ', 'OBJ', '.obj'],
-    ['btnExportIGES', 'IGES wireframe', '.igs'],
-    ['btnExportRaw', 'Raw stream', '.u3d / .prc']
-  ];
-  const SETTINGS = [
-    ['unitSelect', 'Units', 'Unit scale of the source model'],
-    ['brepModeSelect', 'Body type', 'How bodies are written to STEP'],
-    ['detailSelect', 'Reduce detail', 'Applies to exported files only']
-  ];
+  // line options = PDF3DViewerGL.options keys: [name, hint, title]
+  const VIEWOPT_LABELS = {
+    wires: ['Wires', 'PRC curves', 'PRC wires / curves'],
+    hiddenLines: ['Hidden', 'dimmed hidden edges', 'Show edges and wires hidden behind geometry, dimmed (WebGL)'],
+    meshWire: ['Mesh', 'triangle overlay', 'Overlay the triangle mesh (WebGL)'],
+    flat: ['Flat', 'faceted shading', 'Flat (faceted) shading instead of smooth normals with a 30° crease angle (WebGL)']
+  };
+  const SPECS = 'ECMA-363 (U3D) & ISO 14739-1 (PRC) Decoder • STEP AP214 (.stp) • STL • OBJ • IGES';
 
   // ------------------------------------------------------------------ tiny DOM helper
   function h(tag, props, ...kids) {
@@ -10540,54 +9403,20 @@ void main() { gl_FragColor = uRGBA; }`;
     return n;
   }
   const fire = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
-  const isOwnShown = (el) => {
-    if (!el || el.hidden) return false;
-    const cs = getComputedStyle(el);
-    return cs.display !== 'none' && cs.visibility !== 'hidden';
-  };
-  // Original viewer toolbar: #viewerControls (1.4.0+) or the plain .viewport-toolbar (1.3.0).
-  const viewerRoot = () => $('viewerControls') || document.querySelector('.viewport-toolbar');
-  const ADDON = '.sm-pop, .sm-pill, .sm-sheet, .sm-topbar, .sm-dialog';
-  const viewerAll = (sel) => [...(viewerRoot() || document).querySelectorAll(sel)].filter((el) => !el.closest(ADDON));
+  const PV = () => window.PDF3DView;
+  const viewState = () => (PV() && PV().state ? PV().state() : { renderMode: 'shaded-edges', orbitMode: 'free', explode: 0 });
+  const status = () => (window.CAD3DExtractor && window.CAD3DExtractor.getStatus ? window.CAD3DExtractor.getStatus() : { text: '', title: '', tone: '' });
   const visible = (el) => !el.disabled && el.getClientRects().length > 0;
   const observe = (el, fn, opts) => {
     if (!el) return;
     new MutationObserver(fn).observe(el, opts || { attributes: true, childList: true, characterData: true, subtree: true });
   };
 
-  // ------------------------------------------------------------------ mode resolution
-  function readStored() { try { return localStorage.getItem(STORE_KEY); } catch (e) { return null; } }
-  function store(m) { try { localStorage.setItem(STORE_KEY, m); } catch (e) { /* private mode */ } }
-  function initialMode() {
-    let q = null;
-    try { q = new URLSearchParams(location.search).get('ui'); } catch (e) { /* ignore */ }
-    if (MODES.includes(q)) return q;
-    const s = readStored();
-    return MODES.includes(s) ? s : 'simple';   // first-time visitors get Simple
-  }
-
   // ------------------------------------------------------------------ state
-  let mode = null;
   let built = false;
   const ui = {};
-  const moved = [];          // [{ node, ph }]
   let openPop = null;        // { trigger, pop, onOpen, align }
   let openDialog = null;
-
-  // ------------------------------------------------------------------ node relocation (exact restore)
-  function moveInto(node, target) {
-    if (!node || !target || node.parentNode === target) return;
-    const ph = document.createComment('sm-placeholder');
-    node.parentNode.insertBefore(ph, node);
-    target.appendChild(node);
-    moved.push({ node, ph });
-  }
-  function restoreAll() {
-    while (moved.length) {
-      const { node, ph } = moved.pop();
-      if (ph.parentNode) { ph.parentNode.insertBefore(node, ph); ph.remove(); }
-    }
-  }
 
   // ------------------------------------------------------------------ popovers (menus / small dialogs)
   // Tab order inside a popover / sheet (focus trap)
@@ -10698,7 +9527,7 @@ void main() { gl_FragColor = uRGBA; }`;
     else next = items.slice().reverse().find((it) => t.compareDocumentPosition(it) & Node.DOCUMENT_POSITION_PRECEDING) || items[items.length - 1];
     next.focus();
   }
-  // menu item that proxies to an original control and closes the menu
+  // menu item: runs its action and closes the menu (unless keepOpen)
   function menuItem(label, opts) {
     const o = opts || {};
     const lab = h('span', { class: 'sm-mi-label', text: label });
@@ -10756,26 +9585,11 @@ void main() { gl_FragColor = uRGBA; }`;
     if (built) return;
     built = true;
 
-    // ---------- mode switch (lives in Simple top bar, or floats in Advanced)
-    ui.btnSimple = h('button', { type: 'button', 'aria-pressed': 'false', text: 'Simple', title: 'Simple mode: essentials only' });
-    ui.btnAdvanced = h('button', { type: 'button', 'aria-pressed': 'false', text: 'Advanced', title: 'Advanced mode: full workbench' });
-    ui.btnSimple.addEventListener('click', () => setMode('simple', true));
-    ui.btnAdvanced.addEventListener('click', () => setMode('advanced', true));
-    ui.modeSwitch = h('div', { class: 'sm-modeswitch', role: 'group', 'aria-label': 'Interface mode' }, ui.btnSimple, ui.btnAdvanced);
-    ui.modeSwitch.addEventListener('keydown', (ev) => {
-      if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-        ev.preventDefault();
-        (document.activeElement === ui.btnSimple ? ui.btnAdvanced : ui.btnSimple).focus();
-      }
-    });
-
     // ---------- top bar
-    const titleEl = document.querySelector('.brand-title');
-    const verMatch = titleEl && (titleEl.textContent.match(/v\d+(?:\.\d+)+/) || [])[0];
-    const version = verMatch || (window.CAD3DExtractorVersion ? 'v' + window.CAD3DExtractorVersion : '');
+    const version = window.CAD3DExtractorVersion ? 'v' + window.CAD3DExtractorVersion : '';
     // 1.7.0 status (upper right): exactly "File loaded: name.pdf | Bodies Detected: N"; the name truncates with an
     // ellipsis and shows in full on hover; the dot keeps the load tone and the bodies part keeps the old status tooltip
-    ui.docName = h('span', { class: 'sm-doc-name', text: ($('docFileName') || {}).textContent || '' });
+    ui.docName = h('span', { class: 'sm-doc-name', id: 'docFileName' });   // app.js writes the file name here
     ui.bodies = h('span', { class: 'sm-status-n', text: '0' });
     ui.statusT = h('span', { class: 'sm-status-t' }, ' | Bodies Detected: ', ui.bodies);
     ui.status = h('span', { class: 'sm-status', role: 'status', 'aria-live': 'polite' }, h('span', { class: 'sm-dot', 'aria-hidden': 'true' }),
@@ -10783,52 +9597,26 @@ void main() { gl_FragColor = uRGBA; }`;
 
     ui.btnOpen = h('button', { type: 'button', class: 'btn sm-btn-open', title: 'Open a 3D PDF, .u3d or .prc file' },
       h('span', null, 'Open', h('span', { class: 'sm-long', text: ' 3D PDF' }), '…'));
-    ui.btnOpen.addEventListener('click', () => { const o = $('btnOpenFile'); if (o) o.click(); });
+    ui.btnOpen.addEventListener('click', () => { const o = $('fileInput'); if (o) o.click(); });
 
     ui.btnMore = h('button', { type: 'button', class: 'btn sm-iconbtn', 'aria-label': 'More actions', title: 'More actions', text: '⋯' });
     ui.menuMore = h('div', { id: 'smMenuMore', class: 'sm-pop', role: 'menu', 'aria-label': 'More actions', hidden: true },
-      menuItem('Load sample', { ext: 'NX-ASM-402', action: () => { const o = $('btnLoadSample'); if (o) o.click(); } }),
+      menuItem('Load sample', { ext: 'NX-ASM-402', action: () => { if (window.CAD3DExtractor) window.CAD3DExtractor.loadSample(); } }),
       menuItem('Help', { action: () => showAbout(ui.help) }),
       menuItem('About formats', { action: () => showAbout() }));
 
-    ui.btnExportMain = h('button', { type: 'button', class: 'btn btn-primary', title: 'Export STEP AP214 (.stp) — Siemens NX ready' }, 'Export STEP');
-    ui.btnExportMain.addEventListener('click', () => { const o = $('btnExportSTEP'); if (o) o.click(); });
-    ui.btnExportCaret = h('button', { type: 'button', class: 'btn btn-primary', 'aria-label': 'More export formats and export settings', title: 'Other formats & export settings' },
-      h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
-    ui.menuExport = h('div', { id: 'smMenuExport', class: 'sm-pop', role: 'dialog', 'aria-label': 'Export', hidden: true });
-    ui.exportItems = h('div', { role: 'group', 'aria-label': 'Export formats' });
-    ui.settingsBox = h('div', { role: 'group', 'aria-label': 'Export settings' });
-    ui.settingSelects = SETTINGS.map(([origId, label, hint]) => {
-      const sel = h('select', { class: 'select-ctrl', id: 'sm_' + origId, 'aria-describedby': 'sm_' + origId + '_hint' });
-      sel.addEventListener('change', () => {
-        const o = $(origId);
-        if (!o || o.value === sel.value) return;
-        o.value = sel.value;
-        fire(o, 'input');
-        fire(o, 'change');
-      });
-      ui.settingsBox.append(h('label', { class: 'sm-field' }, h('span', { text: label }), sel,
-        h('span', { class: 'sm-hint', id: 'sm_' + origId + '_hint', text: hint })));
-      return [origId, sel];
-    });
-    ui.menuExport.append(h('div', { class: 'sm-pop-h', text: 'Export as' }), ui.exportItems, h('hr', { class: 'sm-sep' }),
-      h('div', { class: 'sm-pop-h', text: 'Export settings' }), ui.settingsBox);
-
+    // the Export button (export-flow.js) is appended to .sm-actions
     // partial load (lastLoad.damaged): quiet amber note beside the status chip, tied to the current lastLoad
     ui.dmgText = h('span', { class: 'sm-damaged-t' });
     ui.dmgX = h('button', { type: 'button', class: 'sm-damaged-x', 'aria-label': 'Dismiss note', title: 'Dismiss', text: '\u00d7',
       onclick: () => { ui.dmgDismissed = (window.PDF3D || {}).lastLoad; syncDamaged(); if (ui.btnOpen) ui.btnOpen.focus({ preventScroll: true }); } });
     ui.dmg = h('span', { class: 'sm-damaged', role: 'note', 'data-sm': 'damaged-note', hidden: true }, h('span', { class: 'sm-damaged-ico', 'aria-hidden': 'true', text: '!' }), ui.dmgText, ui.dmgX);
-    ui.topbar = h('header', { class: 'sm-topbar', 'aria-label': 'Simple mode toolbar' },
+    ui.topbar = h('header', { class: 'sm-topbar', 'aria-label': 'Toolbar' },
       h('div', { class: 'sm-brand' },
         h('div', { class: 'brand-badge', 'aria-hidden': 'true', text: '3D' }),
         h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
       h('div', { class: 'sm-doc' }, ui.dmg, ui.status),
-      h('div', { class: 'sm-actions' },
-        ui.btnOpen, ui.btnMore,
-        h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret),
-        h('span', { class: 'sm-switch-slot', 'aria-hidden': 'true' })));
-    ui.switchSlot = ui.topbar.querySelector('.sm-switch-slot');
+      h('div', { class: 'sm-actions' }, ui.btnOpen, ui.btnMore));
     document.body.insertBefore(ui.topbar, document.body.firstChild);
 
     // ---------- floating viewport pill
@@ -10839,10 +9627,9 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.btnDisplay = h('button', { type: 'button', class: 'btn btn-sm' }, h('span', { class: 'sm-pill-k', text: 'Display' }), ui.displayLabel = h('span', { class: 'sm-pill-v' }), h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
     ui.btnView = h('button', { type: 'button', class: 'btn btn-sm' }, 'View', h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
     ui.btnFit = h('button', { type: 'button', class: 'btn btn-sm', text: 'Fit', title: 'Reset zoom & pan' });
-    ui.btnFit.addEventListener('click', () => { const o = $('btnFitView'); if (o) o.click(); });
-    const resetOrig = viewerAll('[data-view="reset"]')[0];          // 1.4.0+
-    ui.btnReset = resetOrig ? h('button', { type: 'button', class: 'btn btn-sm', text: 'Reset', title: resetOrig.title || 'Reset view' }) : null;
-    if (ui.btnReset) ui.btnReset.addEventListener('click', () => { const o = viewerAll('[data-view="reset"]')[0]; if (o) o.click(); });
+    ui.btnFit.addEventListener('click', () => { if (PV()) PV().fit(); });
+    ui.btnReset = h('button', { type: 'button', class: 'btn btn-sm', text: 'Reset', title: RESET_TITLE });
+    ui.btnReset.addEventListener('click', () => { if (PV()) PV().preset('reset'); });
     ui.btnViewMore = h('button', { type: 'button', class: 'btn btn-sm' }, 'More', h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
     ui.pill = h('div', { class: 'sm-pill', role: 'toolbar', 'aria-label': 'Viewer' },
       ui.btnParts, h('span', { class: 'sm-pill-sep', 'aria-hidden': 'true' }),
@@ -10852,16 +9639,13 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.btnInfo.addEventListener('click', () => toggleSheet(ui.infoSheet));
 
     ui.menuDisplay = h('div', { id: 'smMenuDisplay', class: 'sm-pop', role: 'menu', 'aria-label': 'Display mode', hidden: true });
-    ui.displayItems = viewerAll('[data-render]').map((orig) => {
-      const key = orig.getAttribute('data-render');
-      const it = menuItem(RENDER_LABELS[key] || orig.textContent.trim(), { role: 'menuitemradio', check: true, title: orig.textContent.trim(), action: () => orig.click() });
+    ui.displayItems = Object.keys(RENDER_LABELS).map((key) => {
+      const it = menuItem(RENDER_LABELS[key], { role: 'menuitemradio', check: true, action: () => { if (PV()) PV().setRenderMode(key); } });
       it.dataset.smRender = key;
       ui.menuDisplay.append(it);
-      observe(orig, syncDisplay, { attributes: true, attributeFilter: ['class'] });
-      return { it, orig, key };
+      return { it, key };
     });
     // 1.7.0: background choice + floor grid (window.PDF3DView)
-    const PV = () => window.PDF3DView;
     ui.bgItems = BG_LABELS.map(([key, label]) => {
       const it = menuItem(label, { role: 'menuitemradio', check: true, keepOpen: true, action: () => { if (PV()) PV().set('background', key); syncDisplay(); } });
       it.dataset.smBg = key;
@@ -10874,10 +9658,7 @@ void main() { gl_FragColor = uRGBA; }`;
       h('div', { role: 'group', 'aria-label': 'Background' }, ui.bgItems.map((b) => b.it)),
       h('hr', { class: 'sm-sep' }), ui.gridItem);
     ui.menuView = h('div', { id: 'smMenuView', class: 'sm-pop', role: 'menu', 'aria-label': 'Camera view', hidden: true },
-      viewerAll('[data-view]').filter((o) => o.getAttribute('data-view') !== 'reset').map((orig) => {
-        const key = orig.getAttribute('data-view');
-        return menuItem(VIEW_LABELS[key] || orig.textContent.trim(), { title: orig.textContent.trim(), action: () => orig.click() });
-      }));
+      Object.keys(VIEW_LABELS).map((key) => menuItem(VIEW_LABELS[key], { action: () => { if (PV()) PV().preset(key); } })));
     // 1.7.0: Perspective / Orthographic (window.PDF3DView projection)
     ui.projItems = PROJ_LABELS.map(([key, label]) => {
       const it = menuItem(label, { role: 'menuitemradio', check: true, keepOpen: true,
@@ -10888,43 +9669,28 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.menuView.append(h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', text: 'Projection' }),
       h('div', { role: 'group', 'aria-label': 'Projection' }, ui.projItems.map((p) => p.it)));
 
-    // "More": explode + line options
-    const explode = $('explodeSlider');
-    ui.explode = h('input', { type: 'range', min: explode ? explode.min : '0', max: explode ? explode.max : '100', value: explode ? explode.value : '0', 'aria-label': 'Explode parts' });
-    ui.explodeOut = h('output', { text: '0%' });
+    // "More": explode, orbit mode, line options
+    ui.explode = h('input', { type: 'range', min: '0', max: '100', value: String(viewState().explode || 0), 'aria-label': 'Explode parts' });
+    ui.explodeOut = h('output', { text: ui.explode.value + '%' });
     ui.explode.addEventListener('input', () => {
-      const o = $('explodeSlider');
       ui.explodeOut.textContent = ui.explode.value + '%';
-      if (!o) return;
-      o.value = ui.explode.value;
-      fire(o, 'input');
-      fire(o, 'change');
+      if (PV()) PV().setExplode(Number(ui.explode.value) || 0);
     });
-    // Orbit mode (1.4.0+): radio items proxied to the original [data-orbit] buttons
-    ui.orbitItems = viewerAll('[data-orbit]').map((orig) => {
-      const key = orig.getAttribute('data-orbit');
-      const [name, hint] = ORBIT_LABELS[key] || [orig.textContent.trim(), ''];
-      const it = menuItem(name, { role: 'menuitemradio', check: true, ext: hint, keepOpen: true, title: orig.title || null,
-        action: () => { orig.click(); syncViewMore(); } });
-      observe(orig, syncViewMore, { attributes: true, attributeFilter: ['class', 'aria-pressed'] });
-      return { it, orig };
+    ui.orbitItems = Object.keys(ORBIT_LABELS).map((key) => {
+      const [name, hint] = ORBIT_LABELS[key];
+      const it = menuItem(name, { role: 'menuitemradio', check: true, ext: hint, keepOpen: true, title: ORBIT_TITLES[key],
+        action: () => { if (PV()) PV().setOrbitMode(key); syncViewMore(); } });
+      return { it, key };
     });
-    // Line toggles (1.4.0+): checkbox items proxied to the original input[data-viewopt] (toggle + 'change')
-    ui.viewOpts = viewerAll('input[data-viewopt]').map((orig) => {
-      const key = orig.getAttribute('data-viewopt');
-      const lab = orig.closest('label');
-      const [name, hint] = VIEWOPT_LABELS[key] || [(lab ? lab.textContent : key).trim(), ''];
-      const it = menuItem(name, { role: 'menuitemcheckbox', check: true, ext: hint, keepOpen: true, title: lab ? lab.title : null,
-        action: () => {
-          const o = viewerAll('input[data-viewopt="' + key + '"]')[0] || orig;
-          o.checked = !o.checked;
-          fire(o, 'change');
-          syncViewMore();
-        } });
+    // line toggles: PDF3DViewerGL.options / setOption (WebGL viewer only)
+    const GL = window.PDF3DViewerGL;
+    ui.viewOpts = GL ? Object.keys(VIEWOPT_LABELS).filter((k) => k in GL.options).map((key) => {
+      const [name, hint, title] = VIEWOPT_LABELS[key];
+      const it = menuItem(name, { role: 'menuitemcheckbox', check: true, ext: hint, keepOpen: true, title,
+        action: () => { GL.setOption(key, !GL.options[key]); syncViewMore(); } });
       it.classList.add('sm-mi--box');
-      if (lab) observe(lab, syncViewMore, { attributes: true, attributeFilter: ['class'] });
-      return { it, orig, key };
-    });
+      return { it, key };
+    }) : [];
     ui.menuViewMore = h('div', { id: 'smMenuViewMore', class: 'sm-pop', role: 'dialog', 'aria-label': 'More view options', hidden: true },
       h('div', { class: 'sm-pop-h', text: 'Explode' }), h('div', { class: 'sm-range' }, ui.explode, ui.explodeOut),
       ui.orbitItems.length ? [h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', text: 'Orbit' }),
@@ -10948,44 +9714,34 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.partsSheet = parts.sheet; ui.partsBody = parts.body;
     const info = makeSheet('smSheetInfo', 'Info', 'right', 'sm-sheet--info');
     ui.infoSheet = info.sheet; ui.infoBody = info.body;
-    // 1.7.0: the viewport readout (stream, bodies / faces / tris, bounds, units, renderer) lives here now, all of it,
-    // mirrored live from the HUD nodes app.js keeps writing (hidden in Simple). "Solids:" reads "Solid Bodies:".
-    ui.readout = h('div', { class: 'sm-readout', 'data-sm': 'readout' });
-    ui.readoutRows = ['hudStreamTitle', 'hudAssemblyStats', 'hudBounds', 'hudScaleInfo', 'hudRenderStats'].map((id) => {
-      const row = h('div', { class: 'sm-readout-r', 'data-hud': id });
-      const src = $(id);
-      const sync = () => {
-        const t = src ? (src.textContent || '').trim().replace(/^(?:Parts|Solids):/, BODIES + ':') : '';
-        if (row.textContent !== t) row.textContent = t;
-        row.hidden = !t;
-      };
-      sync();
-      observe(src, sync);
-      ui.readout.append(row);
-      return row;
-    });
+    // 1.7.0: the viewport readout (stream, stream sizes, bodies / faces / tris, bounds, units, renderer); app.js writes
+    // each row by id. Empty rows hide (CSS :empty).
+    ui.readout = h('div', { class: 'sm-readout', 'data-sm': 'readout' },
+      ['hudStreamTitle', 'hudStreamSizes', 'hudAssemblyStats', 'hudBounds', 'hudScaleInfo', 'hudRenderStats'].map((id) =>
+        h('div', { class: 'sm-readout-r', id, 'data-hud': id })));
     ui.infoBody.append(h('details', { class: 'sm-sec', open: true }, h('summary', null, h('span', { text: 'File & geometry' })),
       h('div', { class: 'sm-sec-b' }, ui.readout)));
-    ui.infoSections = [
-      ['streamList', 'Streams', 'streamCountBadge', false],
-      ['bboxGrid', 'Bounding box & topology', 'unitBadge', true],
-      ['featureList', 'Detected features', 'featureCountBadge', false],
-      ['treeList', 'Product tree & attachments', 'treeCountBadge', false]
-    ].map(([anchorId, title, badgeId, open]) => {
-      const badge = $(badgeId);
-      const mirror = h('span', { class: badge ? badge.className : 'badge' });
-      const syncBadge = () => { if (badge) { mirror.className = badge.className; mirror.textContent = badge.textContent; } };
-      syncBadge();
-      observe(badge, syncBadge);
-      const body = h('div', { class: 'sm-sec-b' });
-      const det = h('details', { class: 'sm-sec', open: !!open }, h('summary', null, h('span', { text: title }), mirror), body);
-      ui.infoBody.append(det);
-      const anchor = $(anchorId);
-      return { card: anchor ? anchor.closest('.panel-card') : null, body };
-    });
+    // sections: [title, badge id, open, content]; app.js fills the lists and badges by id
+    const badge = (id, cls) => h('span', { class: 'badge ' + cls, id });
+    for (const [title, badgeEl, open, content] of [
+      ['Streams', badge('streamCountBadge', 'badge-cyan'), false, h('div', { class: 'stream-list', id: 'streamList' })],
+      ['Bounding box & topology', badge('unitBadge', 'badge-cyan'), true, h('div', { class: 'kv-grid', id: 'bboxGrid' })],
+      ['Detected features', badge('featureCountBadge', 'badge-emerald'), false, h('div', { class: 'feature-list', id: 'featureList' })],
+      ['Product tree & attachments', badge('treeCountBadge', 'badge-cyan'), false, [
+        h('div', { class: 'feature-list', id: 'treeList', style: 'max-height:220px;overflow:auto;font-size:11px;' }),
+        h('div', { class: 'feature-list', id: 'attachList' })]]
+    ]) {
+      ui.infoBody.append(h('details', { class: 'sm-sec', open: !!open }, h('summary', null, h('span', { text: title }), badgeEl),
+        h('div', { class: 'sm-sec-b' }, h('div', { class: 'sm-panel' }, content))));
+    }
+    // Solid Bodies sheet: Show all / Invert (app.js binds them by id) above the body list
+    ui.partsBody.append(
+      h('div', { class: 'sm-parts-actions' },
+        h('button', { type: 'button', class: 'btn btn-sm', id: 'btnShowAllParts', text: 'Show All' }),
+        h('button', { type: 'button', class: 'btn btn-sm', id: 'btnInvertParts', text: 'Invert' })),
+      h('div', { class: 'part-list', id: 'partList' }));
 
     // ---------- About dialog
-    const sub = document.querySelector('.brand-sub');
     ui.about = h('div', { id: 'smAbout', class: 'sm-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'smAboutTitle', tabindex: '-1', hidden: true },
       h('div', { class: 'sm-sheet-h' }, h('h2', { id: 'smAboutTitle', text: 'Supported formats' }),
         h('button', { type: 'button', class: 'btn btn-sm sm-close', 'aria-label': 'Close', text: '×', onclick: () => hideAbout() })),
@@ -10996,8 +9752,8 @@ void main() { gl_FragColor = uRGBA; }`;
         h('dt', { text: 'OBJ' }), h('dd', null, h('code', { text: '.obj' }), ' mesh with part groups and normals.'),
         h('dt', { text: 'IGES' }), h('dd', null, h('code', { text: '.igs' }), ' 5.3 feature-edge wireframe curves.'),
         h('dt', { text: 'Raw' }), h('dd', null, 'The extracted ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' stream bytes.'),
-        h('dt', { text: 'Settings' }), h('dd', { text: 'Units, body type and reduce detail live under Export ▼ → Export settings. The STEP / stream inspector is in Advanced mode.' }),
-        sub ? h('dt', { text: 'Specs' }) : null, sub ? h('dd', { text: sub.textContent.trim() }) : null));
+        h('dt', { text: 'Settings' }), h('dd', { text: 'Units, body type and reduce detail are in the Export dialog. Stream sizes, bounds and the product tree are under Info.' }),
+        h('dt', { text: 'Specs' }), h('dd', { text: SPECS })));
 
     // ---------- Help dialog (More > Help, 1.7.0)
     ui.help = h('div', { id: 'smHelp', class: 'sm-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'smHelpTitle', tabindex: '-1', hidden: true },
@@ -11005,24 +9761,23 @@ void main() { gl_FragColor = uRGBA; }`;
         h('button', { type: 'button', class: 'btn btn-sm sm-close', 'aria-label': 'Close', text: '×', onclick: () => hideAbout() })),
       h('dl', null, HELP_ROWS.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })])));
 
-    document.body.append(ui.menuMore, ui.menuExport, ui.menuDisplay, ui.menuView, ui.menuViewMore, ui.partsSheet, ui.infoSheet, ui.about, ui.help);
+    document.body.append(ui.menuMore, ui.menuDisplay, ui.menuView, ui.menuViewMore, ui.partsSheet, ui.infoSheet, ui.about, ui.help);
 
     // ---------- popover wiring
     bindPopover(ui.btnMore, ui.menuMore, { align: 'right' });
-    bindPopover(ui.btnExportCaret, ui.menuExport, { align: 'right', onOpen: syncExportMenu });
     bindPopover(ui.btnDisplay, ui.menuDisplay, { onOpen: syncDisplay });
     bindPopover(ui.btnView, ui.menuView, { onOpen: syncProjection });
     document.addEventListener('pdf3d:viewprefs', () => { syncDisplay(); syncProjection(); });
+    document.addEventListener('pdf3d:viewchange', () => { syncDisplay(); syncViewMore(); });
     bindPopover(ui.btnViewMore, ui.menuViewMore, { align: 'right', onOpen: syncViewMore });
 
-    // ---------- live mirrors of original state
-    observe($('docFileName'), () => { ui.docName.textContent = $('docFileName').textContent; ui.docName.title = ui.docName.textContent; syncEmpty(); });
-    observe($('statusBadge'), syncStatus);
-    // a new PDF3D.lastLoad without a badge change (stream switch, test stubs): re-read it
+    // ---------- live state
+    observe(ui.docName, () => { ui.docName.title = ui.docName.textContent; syncEmpty(); }, { childList: true, characterData: true, subtree: true });
+    document.addEventListener('pdf3d:status', syncStatus);
+    // a new PDF3D.lastLoad without a status change (stream switch, test stubs): re-read it
     document.addEventListener('pdf3d:lastload', () => syncStatus());
     observe($('partList'), syncPartCount, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
-    ($('partList') || document).addEventListener('change', () => setTimeout(syncPartCount, 0));
-    observe($('btnExportSTEP'), () => { ui.btnExportMain.disabled = !!$('btnExportSTEP').disabled; }, { attributes: true, attributeFilter: ['disabled'] });
+    $('partList').addEventListener('change', () => setTimeout(syncPartCount, 0));
 
     // ---------- global keyboard / pointer handling
     document.addEventListener('pointerdown', (ev) => {
@@ -11033,46 +9788,41 @@ void main() { gl_FragColor = uRGBA; }`;
       if (ev.key !== 'Escape') return;
       if (openDialog) { ev.preventDefault(); hideAbout(); return; }
       if (openPop) { ev.preventDefault(); closePop(true); return; }
-      if (mode === 'simple') {
-        const s = [ui.infoSheet, ui.partsSheet].find((x) => !x.hidden && x.contains(document.activeElement)) ||
-                  [ui.infoSheet, ui.partsSheet].find((x) => !x.hidden);
-        if (s) { ev.preventDefault(); toggleSheet(s, false, true); }
-      }
+      const s = [ui.infoSheet, ui.partsSheet].find((x) => !x.hidden && x.contains(document.activeElement)) ||
+                [ui.infoSheet, ui.partsSheet].find((x) => !x.hidden);
+      if (s) { ev.preventDefault(); toggleSheet(s, false, true); }
     });
     window.addEventListener('resize', () => {
       if (openPop) positionPop(openPop);
       syncSheetTop();
-      placeSwitch();
     });
 
-    // ---------- whole-viewport drag & drop (Simple mode only)
+    // ---------- whole-page drag & drop
     let depth = 0;
     const hasFiles = (ev) => ev.dataTransfer && [...(ev.dataTransfer.types || [])].includes('Files');
     const veil = (on) => { ui.dropVeil.hidden = !on; };
     window.addEventListener('dragenter', (ev) => {
-      if (mode !== 'simple' || !hasFiles(ev)) return;
+      if (!hasFiles(ev)) return;
       depth++; veil(true);
     });
     window.addEventListener('dragover', (ev) => {
-      if (mode !== 'simple' || !hasFiles(ev)) return;
+      if (!hasFiles(ev)) return;
       ev.preventDefault();
       ev.dataTransfer.dropEffect = 'copy';
       veil(true);
     });
     window.addEventListener('dragleave', () => {
-      if (mode !== 'simple') return;
       depth = Math.max(0, depth - 1);
       if (!depth) veil(false);
     });
     window.addEventListener('drop', (ev) => {
-      if (mode !== 'simple') return;
       depth = 0; veil(false);
       if (!hasFiles(ev)) return;
       ev.preventDefault();
       forwardFiles(ev.dataTransfer.files);
     });
 
-    // ---------- keyboard-reachable selectable rows (both modes; app.js untouched)
+    // ---------- keyboard-reachable selectable rows
     enhanceRows($('partList'), '.part-item', 'selected', BODIES);
     enhanceRows($('streamList'), '.stream-item', 'active', 'Embedded 3D streams');
 
@@ -11121,22 +9871,7 @@ void main() { gl_FragColor = uRGBA; }`;
     });
   }
 
-  // HUD hint wording ("tree" there means the part list). No-op once the original text no longer says "tree".
-  function syncHint() {
-    const el = document.querySelector('.viewport-hud-bl');
-    if (!el) return;
-    if (!ui.hint) {
-      const tn = [...el.childNodes].find((n) => n.nodeType === 3 && HINT_RE.test(n.nodeValue));
-      ui.hint = tn ? { tn, orig: tn.nodeValue, last: tn.nodeValue } : { tn: null };
-    }
-    const hnt = ui.hint;
-    if (!hnt.tn || !hnt.tn.isConnected) return;
-    if (hnt.tn.nodeValue !== hnt.last) return;        // someone else (app.js) rewrote it: leave it alone
-    hnt.tn.nodeValue = hnt.last = hnt.orig.replace(HINT_RE, HINT_TEXT[mode] || '$&');
-  }
-
   // Hand dropped files to app.js through its own #fileInput 'change' handler (reads ev.target.files[0]).
-  // Fallback: re-dispatch a synthetic drop on #dropZone (its handler reads ev.dataTransfer.files[0]).
   function forwardFiles(files) {
     if (!files || !files.length) return;
     const input = $('fileInput');
@@ -11145,21 +9880,14 @@ void main() { gl_FragColor = uRGBA; }`;
       dt.items.add(files[0]);
       input.files = dt.files;
       fire(input, 'change');
-    } catch (e) {
-      const dz = $('dropZone');
-      if (!dz) return;
-      const dt = new DataTransfer();
-      dt.items.add(files[0]);
-      dz.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-    }
+    } catch (e) { console.warn('[PDF3D] could not open the dropped file:', e); }
   }
 
-  // ------------------------------------------------------------------ sync helpers (read originals)
+  // ------------------------------------------------------------------ sync helpers (read app.js state)
   function syncStatus() {
-    const b = $('statusBadge');
-    if (!b) return;
-    const t = (b.textContent || '').trim();
-    const tone = /badge-emerald/.test(b.className) ? 'ok' : /badge-amber/.test(b.className) ? 'warn' : '';
+    const b = status();
+    const t = (b.text || '').trim();
+    const tone = b.tone || '';
     let m, short;
     if (/NO 3D STREAM/.test(t)) short = 'Attachment only';
     else if (/NO MESH/.test(t)) short = 'No mesh found';
@@ -11178,7 +9906,7 @@ void main() { gl_FragColor = uRGBA; }`;
     // the damaged-load warning text stays in the console (syncDamaged); the note beside the chip says it in plain words
     const dmg = ll && typeof ll.damaged === 'string' ? ll.damaged.trim() : '';
     if (dmg) tip = tip.split('\n').filter((l) => l.trim() !== dmg).join('\n');
-    // NO 3D STREAM: the badge carries the raw attachment name; Simple shows the sanitized fileName (attachment card line)
+    // NO 3D STREAM: the status text carries the raw attachment name; the UI shows the sanitized fileName (attachment card line)
     const ac = /NO 3D STREAM/.test(t) ? attCard(ll) : null;
     ui.statusT.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : ac ? ac.lines[0] : tip;
     syncDamaged();
@@ -11188,7 +9916,7 @@ void main() { gl_FragColor = uRGBA; }`;
   function syncBodies() {
     if (!ui.bodies) return;
     let n = 0;
-    try { n = window.CAD3DExtractor ? window.CAD3DExtractor.getState().parts.length : ($('partList') || { querySelectorAll: () => [] }).querySelectorAll('.part-chk').length; } catch (e) { /* ignore */ }
+    try { n = window.CAD3DExtractor.getState().parts.length; } catch (e) { /* ignore */ }
     const t = String(n);
     if (ui.bodies.textContent !== t) ui.bodies.textContent = t;
   }
@@ -11201,55 +9929,17 @@ void main() { gl_FragColor = uRGBA; }`;
     const vp = window.PDF3DView ? window.PDF3DView.get() : null;
     for (const b of ui.bgItems || []) setChecked(b.it, !!vp && vp.background === b.key);
     if (ui.gridItem) setChecked(ui.gridItem, !!vp && !!vp.grid);
-    let cur = null;
-    for (const d of ui.displayItems) {
-      const on = d.orig.classList.contains('btn-active');
-      setChecked(d.it, on);
-      if (on) cur = d;
-    }
-    ui.displayLabel.textContent = cur ? (RENDER_LABELS[cur.key] || cur.orig.textContent.trim()) : '';
+    const mode = viewState().renderMode;
+    for (const d of ui.displayItems) setChecked(d.it, d.key === mode);
+    ui.displayLabel.textContent = RENDER_LABELS[mode] || '';
   }
   function syncViewMore() {
-    const o = $('explodeSlider');
-    if (o) { ui.explode.min = o.min; ui.explode.max = o.max; ui.explode.value = o.value; }
+    const v = viewState();
+    ui.explode.value = String(v.explode || 0);
     ui.explodeOut.textContent = ui.explode.value + '%';
-    for (const v of ui.viewOpts || []) {
-      const orig = viewerAll('input[data-viewopt="' + v.key + '"]')[0] || v.orig;
-      setChecked(v.it, !!orig.checked);
-      v.it.disabled = !!orig.disabled;
-    }
-    for (const o of ui.orbitItems || []) {
-      setChecked(o.it, o.orig.classList.contains('btn-active') || o.orig.getAttribute('aria-pressed') === 'true');
-    }
-  }
-  function syncExportMenu() {
-    ui.exportItems.textContent = '';
-    const list = EXPORTS.slice();
-    // Parasolid: only when the app writes the NX form (PDF3D.capabilities.parasolid) and its Advanced button exists.
-    const caps = (window.PDF3D && window.PDF3D.capabilities) || {};
-    const xt = $('btnExportXT');
-    if (xt && caps.parasolid) list.unshift(['btnExportXT', 'Parasolid (.x_t)', '.x_t', '', 'Faceted body, flat faces']);
-    for (const [id, label, ext, cls, sub] of list) {
-      const orig = $(id);
-      if (!orig || !isOwnShown(orig)) continue;
-      const it = menuItem(label, { ext, cls, sub, title: orig.title || null, action: () => { const o = $(id); if (o) o.click(); } });
-      it.disabled = !!orig.disabled;
-      it.dataset.smExport = id;
-      ui.exportItems.append(it);
-    }
-    for (const [origId, sel] of ui.settingSelects) {
-      const o = $(origId);
-      if (!o) continue;
-      const sig = [...o.options].map((op) => op.value + '\u0001' + op.text).join('\u0002');
-      if (sel.dataset.sig !== sig) {
-        sel.textContent = '';
-        for (const op of o.options) sel.append(h('option', { value: op.value, text: op.text }));
-        sel.dataset.sig = sig;
-      }
-      sel.value = o.value;
-      sel.disabled = !!o.disabled;
-      sel.title = o.title || '';
-    }
+    const GL = window.PDF3DViewerGL;
+    for (const o of ui.viewOpts || []) setChecked(o.it, !!(GL && GL.options[o.key]));
+    for (const o of ui.orbitItems || []) setChecked(o.it, v.orbitMode === o.key);
   }
   function syncPartCount() {
     const list = $('partList');
@@ -11264,8 +9954,8 @@ void main() { gl_FragColor = uRGBA; }`;
   function syncEmpty() {
     if (!ui.empty) return;
     let nParts = 0;
-    try { nParts = window.CAD3DExtractor ? window.CAD3DExtractor.getState().parts.length : $('partList').children.length; } catch (e) { /* ignore */ }
-    const t = (($('statusBadge') || {}).textContent || '');
+    try { nParts = window.CAD3DExtractor.getState().parts.length; } catch (e) { /* ignore */ }
+    const t = status().text || '';
     const loaded = /NO MESH|NO 3D STREAM/.test(t);
     ui.empty.hidden = nParts > 0;
     const ll = (window.PDF3D || {}).lastLoad;
@@ -11285,7 +9975,7 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.emptyText.textContent = card
       ? 'Drop another 3D PDF here or click Open.'
       : loaded
-      ? `No 3D geometry found in ${(($('docFileName') || {}).textContent || 'this file').trim()}. Drop another 3D PDF here or click Open.`
+      ? `No 3D geometry found in ${(ui.docName.textContent || 'this file').trim()}. Drop another 3D PDF here or click Open.`
       : 'Drop a 3D PDF here or click Open';
   }
 
@@ -11429,86 +10119,23 @@ void main() { gl_FragColor = uRGBA; }`;
     if (!openDialog) return;
     openDialog.hidden = true;
     openDialog = null;
-    if (mode === 'simple') ui.btnMore.focus({ preventScroll: true });
-  }
-
-  // ------------------------------------------------------------------ the mode switch stays pinned in ONE spot
-  // Above 720px it is position:fixed at the same top-right point in both modes (Steven: it must not move
-  // when switching). Simple reserves its width with an empty slot at the end of the top bar; Advanced
-  // floats it over the free space right of the brand. On phones (<=720px) Simple keeps it in the top bar row.
-  const PHONE = window.matchMedia('(max-width: 720px)');
-  function placeSwitch() {
-    if (!ui.modeSwitch) return;
-    const sw = ui.modeSwitch;
-    sw.classList.remove('sm-modeswitch--corner');
-    if (mode === 'simple' && PHONE.matches) {
-      sw.classList.remove('sm-modeswitch--float');
-      if (sw.parentNode !== ui.switchSlot) ui.switchSlot.appendChild(sw);
-      return;
-    }
-    sw.classList.add('sm-modeswitch--float');
-    if (sw.parentNode !== document.body) document.body.appendChild(sw);
-    ui.switchSlot.style.width = sw.offsetWidth + 'px';
-    if (mode !== 'advanced') return;
-    const r = sw.getBoundingClientRect();
-    const hits = [...document.querySelectorAll('.topbar .brand, .topbar .top-controls, .exportbar')].some((el) => {
-      const b = el.getBoundingClientRect();
-      return b.width && !(r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom);
-    });
-    if (hits) sw.classList.add('sm-modeswitch--corner');
-  }
-
-  // ------------------------------------------------------------------ mode switching
-  function setMode(next, persist) {
-    if (!MODES.includes(next)) return;
-    if (persist) store(next);
-    build();
-    const hadFocus = ui.modeSwitch.contains(document.activeElement);
-    if (next === mode) return;
-    mode = next;
-    closePop(false);
-    hideAbout();
-    ui.btnSimple.setAttribute('aria-pressed', String(next === 'simple'));
-    ui.btnAdvanced.setAttribute('aria-pressed', String(next === 'advanced'));
-
-    if (next === 'simple') {
-      document.body.classList.add('sm-simple');
-      placeSwitch();
-      const partsCard = ($('partList') || {}).closest ? $('partList').closest('.panel-card') : null;
-      moveInto(partsCard, ui.partsBody);
-      for (const s of ui.infoSections) moveInto(s.card, s.body);
-      syncStatus(); syncDisplay(); syncPartCount(); syncSheetTop();
-    } else {
-      for (const s of [ui.partsSheet, ui.infoSheet]) toggleSheet(s, false, false);
-      ui.dropVeil.hidden = true;
-      restoreAll();
-      document.body.classList.remove('sm-simple');
-      placeSwitch();
-    }
-    syncHint();
-    if (hadFocus) (next === 'simple' ? ui.btnSimple : ui.btnAdvanced).focus({ preventScroll: true });
-    // canvas container changed size: let app.js / viewer-gl re-render at the new size
-    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
-    document.dispatchEvent(new CustomEvent('pdf3d:uimode', { detail: { mode: next } }));
+    ui.btnMore.focus({ preventScroll: true });
   }
 
   function init() {
     if (!$('viewportCanvas') || !document.body) return;   // not the extractor page
-    setMode(initialMode(), false);
+    try { localStorage.removeItem(OLD_MODE_KEY); } catch (e) { /* private mode */ }
+    document.body.classList.add('sm-simple');
+    build();
+    syncSheetTop();
   }
 
   window.PDF3DSimpleMode = {
-    get mode() { return mode; },
-    hintText: HINT_TEXT,
-    labels: { render: RENDER_LABELS, bodies: BODIES, background: BG_LABELS, projection: PROJ_LABELS, help: HELP_ROWS },
-    setMode: (m) => setMode(m, true),
-    toggle: () => setMode(mode === 'simple' ? 'advanced' : 'simple', true),
-    storageKey: STORE_KEY
+    labels: { render: RENDER_LABELS, bodies: BODIES, background: BG_LABELS, projection: PROJ_LABELS, help: HELP_ROWS, specs: SPECS }
   };
 
-  // Script is loaded after app.js at the end of <body>, so the markup already exists: apply the
-  // mode immediately (no flash of the Advanced UI). app.js binds its listeners on DOMContentLoaded,
-  // which is fine because Simple controls only ever proxy to the original elements at click time.
+  // Script is loaded after app.js at the end of <body>, so the viewport markup already exists: build the UI now.
+  // app.js binds its listeners (#fileInput, Show All / Invert) on DOMContentLoaded, after these elements exist.
   if (document.readyState === 'loading' && !$('viewportCanvas')) document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
@@ -11527,10 +10154,9 @@ void main() { gl_FragColor = uRGBA; }`;
  *   PDF3D.exportCadSurfaces(partIds, { fittedOnly, onProgress, signal }) -> Promise<{ blob, filename, status, reason, summary }>
  * Feature-detected: if PDF3D.exportCadSurfaces is missing, the add-on renders nothing (page unchanged).
  *
- * Simple mode: an item in the Export ▾ menu (found by DOM: #smMenuExport, re-inserted every time
- * simple-mode.js rebuilds the format list) + a "Fitted solid only" checkbox item.
- * Advanced mode: a button + checkbox appended to the original .exportbar export group.
- * Progress / result: a non-modal toast (role=region) with aria-live announcements; the viewer stays usable.
+ * 1.7.0: no menu item or export-bar button of its own any more (the Advanced UI and the old Simple Export ▾ menu are
+ * gone); export-flow.js owns the Export UI and uses describe() / normResult() for its wording. start() / cancel()
+ * stay as API. Progress / result: a non-modal toast (role=region) with aria-live announcements; the viewer stays usable.
  * No edits to simple-mode.js or app.js.
  */
 (function () {
@@ -11627,7 +10253,7 @@ void main() { gl_FragColor = uRGBA; }`;
       return normPre({ ok: false, reason: 'error', message: 'Check failed: ' + (e && e.message || e) });
     }
     if (r && typeof r.then === 'function') {
-      r.then((v) => { asyncPre = normPre(v); refreshAll(true); }, () => { asyncPre = normPre({ ok: false, reason: 'error' }); refreshAll(true); });
+      r.then((v) => { asyncPre = normPre(v); }, () => { asyncPre = normPre({ ok: false, reason: 'error' }); });
       return asyncPre || normPre({ ok: false, reason: 'checking' });
     }
     return normPre(r);
@@ -11677,129 +10303,7 @@ void main() { gl_FragColor = uRGBA; }`;
   let last = null;       // last finished result (for "Save again")
   let hideTimer = null;
 
-  // ------------------------------------------------------------------ Simple mode: Export ▾ menu items
-  function buildSimple() {
-    const menu = $('smMenuExport');
-    if (!menu) return;
-    ui.simpleMenu = menu;
-    ui.simpleTrigger = document.querySelector('[aria-controls="smMenuExport"]');
-    ui.miSub = h('span', { class: 'cad-mi-sub', id: 'cadMiSub' });
-    ui.miSub2 = h('span', { class: 'cad-mi-sub2', id: 'cadMiSub2' });
-    ui.mi = h('button', { type: 'button', class: 'sm-mi cad-mi', role: 'menuitem', 'data-cad': 'simple', 'aria-describedby': 'cadMiSub cadMiSub2' },
-      h('span', { class: 'sm-mi-check cad-mi-ico', 'aria-hidden': 'true', text: '◆' }),
-      h('span', { class: 'cad-mi-text' }, h('span', { class: 'sm-mi-label', text: 'CAD surfaces (STEP)' }), ui.miSub, ui.miSub2),
-      h('span', { class: 'sm-mi-ext', text: '.stp' }));
-    ui.miOpt = h('button', { type: 'button', class: 'sm-mi sm-mi--box cad-mi-opt', role: 'menuitemcheckbox', 'aria-checked': 'false', 'data-cad': 'fitted-only' },
-      h('span', { class: 'sm-mi-check', 'aria-hidden': 'true' }), h('span', { class: 'sm-mi-label', text: 'Fitted solid only' }),
-      h('span', { class: 'sm-mi-ext', text: 'no mesh body' }));
-    ui.mi.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      if (ui.mi.getAttribute('aria-disabled') === 'true') return;          // stays open; reason is on screen
-      closeSimpleMenu();
-      if (run) focusToast(); else start(ui.simpleTrigger || ui.mi);
-    });
-    ui.miOpt.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      if (ui.miOpt.getAttribute('aria-disabled') === 'true') return;
-      setFittedOnly(!fittedOnly);
-    });
-    const place = () => {
-      const group = menu.querySelector('[role="group"]');
-      if (!group || !group.children.length || !api()) {
-        if (ui.mi.isConnected && !api()) { ui.mi.remove(); ui.miOpt.remove(); }
-        return;
-      }
-      if (group.contains(ui.mi) && ui.mi.nextSibling === ui.miOpt) return;
-      const anchor = group.querySelector('[data-sm-export="btnExportOBJ"]') ||
-        [...group.querySelectorAll('[data-sm-export^="btnExportSTL"]')].pop();
-      if (anchor) anchor.after(ui.mi, ui.miOpt); else group.append(ui.mi, ui.miOpt);
-      refreshSimple();
-      if (!menu.hidden) {               // grew after simple-mode positioned it: keep it on screen
-        const r = menu.getBoundingClientRect();
-        if (r.bottom > window.innerHeight - 8) menu.style.maxHeight = Math.max(160, window.innerHeight - r.top - 8) + 'px';
-      }
-    };
-    new MutationObserver(place).observe(menu, { childList: true, subtree: true });
-    place();
-  }
-  function closeSimpleMenu() {
-    const t = ui.simpleTrigger;
-    if (t && t.getAttribute('aria-expanded') === 'true') t.click();      // simple-mode toggles it closed
-    if (t) t.focus({ preventScroll: true });
-  }
-  function refreshSimple() {
-    if (!ui.mi || !ui.mi.isConnected) return;
-    const pre = preflight();
-    if (!pre) return;
-    const sel = selection();
-    const dis = !run && !pre.ok;
-    ui.mi.setAttribute('aria-disabled', dis ? 'true' : 'false');
-    ui.mi.classList.toggle('is-disabled', dis);
-    ui.mi.dataset.reason = pre.reason || '';
-    ui.miOpt.setAttribute('aria-disabled', dis ? 'true' : 'false');
-    ui.miOpt.setAttribute('aria-checked', fittedOnly ? 'true' : 'false');
-    ui.miOpt.querySelector('.sm-mi-check').textContent = fittedOnly ? '✓' : '';
-    let sub, sub2 = [];
-    if (run) sub = 'Exporting… ' + (run.pct != null ? Math.round(run.pct) + '%' : '') + ' (show progress)';
-    else if (!pre.ok) sub = pre.message;
-    else {
-      sub = fittedOnly ? 'Fitted solid only, no mesh body' : 'Fitted solid + mesh fallback';
-      if (sel.name) sub2.push('Selected part only: ' + sel.name);
-      if (!pre.estimate.kernelCached) sub2.push('First use downloads ' + MB(pre.estimate.kernelBytes) + ' MB');
-    }
-    ui.miSub.textContent = sub;
-    ui.miSub.classList.toggle('cad-why', dis);
-    ui.miSub2.textContent = sub2.join(' · ');
-    ui.miSub2.hidden = !sub2.length;
-    ui.mi.title = dis ? pre.message : 'Fit CAD surfaces (planes, cylinders, B-splines…) and export STEP' + (fittedOnly ? '' : ' with the mesh body as fallback');
-  }
-
-  // ------------------------------------------------------------------ Advanced mode: button in the export bar
-  function buildAdvanced() {
-    const stepBtn = $('btnExportSTEP');
-    const group = stepBtn && stepBtn.closest('.export-group');
-    if (!group) return;
-    ui.advBtn = h('button', { type: 'button', class: 'btn cad-adv-btn', id: 'cadExportBtn', 'data-cad': 'advanced', 'aria-describedby': 'cadAdvNote' },
-      'CAD Surfaces (.stp)');
-    ui.advChk = h('input', { type: 'checkbox', id: 'cadFittedOnly', 'data-cad': 'fitted-only' });
-    ui.advOpt = h('label', { class: 'cad-adv-opt', for: 'cadFittedOnly', title: 'Write only the fitted solid / surfaces, without the mesh body fallback' }, ui.advChk, 'Fitted only');
-    ui.advNote = h('span', { class: 'cad-adv-note', id: 'cadAdvNote' });
-    // own .export-group right after the original one: on a full bar it wraps as a unit next to the status badge
-    ui.adv = h('div', { class: 'export-group cad-adv', role: 'group', 'aria-label': 'CAD surfaces export' }, ui.advBtn, ui.advOpt, ui.advNote);
-    ui.advGroup = group;
-    ui.advBtn.addEventListener('click', () => {
-      if (ui.advBtn.getAttribute('aria-disabled') === 'true') return;
-      if (run) focusToast(); else start(ui.advBtn);
-    });
-    ui.advChk.addEventListener('change', () => setFittedOnly(ui.advChk.checked));
-  }
-  function refreshAdvanced() {
-    if (!ui.adv) return;
-    const pre = preflight();
-    if (!pre) { if (ui.adv.isConnected) ui.adv.remove(); return; }
-    if (!ui.adv.isConnected) ui.advGroup.after(ui.adv);
-    const dis = !run && !pre.ok;
-    ui.advBtn.setAttribute('aria-disabled', dis ? 'true' : 'false');
-    ui.advBtn.dataset.reason = pre.reason || '';
-    ui.advChk.disabled = dis;
-    ui.advChk.checked = fittedOnly;
-    const sel = selection();
-    ui.advNote.textContent = run ? 'Exporting… ' + (run.pct != null ? Math.round(run.pct) + '%' : '') : (dis ? pre.message : (sel.name ? 'Selected part only' : ''));
-    ui.advNote.hidden = !ui.advNote.textContent;
-    ui.advNote.classList.toggle('cad-why', dis);
-    ui.advBtn.title = dis ? pre.message
-      : 'Fit CAD surfaces and export STEP: fitted solid' + (fittedOnly ? ' only' : ' + mesh body fallback') +
-        (pre.estimate.kernelCached ? '' : ' · first use downloads the ' + MB(pre.estimate.kernelBytes) + ' MB CAD kernel');
-  }
-
-  function setFittedOnly(v) { fittedOnly = !!v; refreshAll(); }
-  let refreshQueued = false;
-  function refreshAll(now) {
-    if (now) { refreshQueued = false; refreshSimple(); refreshAdvanced(); return; }
-    if (refreshQueued) return;
-    refreshQueued = true;
-    Promise.resolve().then(() => { if (refreshQueued) refreshAll(true); });
-  }
+  function setFittedOnly(v) { fittedOnly = !!v; }
 
   // ------------------------------------------------------------------ toast (progress + result)
   function buildToast() {
@@ -11835,7 +10339,7 @@ void main() { gl_FragColor = uRGBA; }`;
   function focusToast() { if (ui.toast && !ui.toast.hidden) ui.toast.focus({ preventScroll: true }); }
   function returnFocus() {
     const t = (run && run.trigger) || (last && last.trigger);
-    const tgt = t && t.isConnected && t.getClientRects().length ? t : (ui.simpleTrigger && ui.simpleTrigger.getClientRects().length ? ui.simpleTrigger : ui.advBtn);
+    const tgt = t && t.isConnected && t.getClientRects().length ? t : document.querySelector('.sm-topbar [data-xf="export"]');
     if (tgt) tgt.focus({ preventScroll: true });
   }
   function fmtTime(ms) { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
@@ -11889,7 +10393,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const ns = api();
     if (!ns || run) return;
     const pre = preflight();
-    if (pre && !pre.ok) { refreshAll(true); return; }
+    if (pre && !pre.ok) return;
     const sel = selection();
     last = null;
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -11899,7 +10403,6 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.toast.focus({ preventScroll: true });
     announce('CAD export started. ' + (pre && !pre.estimate.kernelCached ? 'Downloading the CAD kernel first.' : ''));
     run.timer = setInterval(() => { ui.tTime.textContent = fmtTime(performance.now() - me.t0); }, 500);
-    refreshAll(true);
     document.dispatchEvent(new CustomEvent('pdf3d:cadexport', { detail: { phase: 'start' } }));
 
     const onProgress = (a, b, c) => {
@@ -11912,8 +10415,6 @@ void main() { gl_FragColor = uRGBA; }`;
         me.stage = p.stage; me.lastAnn = Math.max(me.lastAnn, q);
         announce(p.label + (p.pct != null ? ', ' + Math.round(p.pct) + '%' : ''));
       }
-      if (ui.mi && ui.simpleMenu && !ui.simpleMenu.hidden) refreshSimple();
-      if (ui.advNote && ui.adv.isConnected) ui.advNote.textContent = 'Exporting… ' + (p.pct != null ? Math.round(p.pct) + '%' : '');
     };
     let res, err = null;
     try {
@@ -11960,7 +10461,6 @@ void main() { gl_FragColor = uRGBA; }`;
     if (hadFocus) (ui.tOk.hidden ? ui.tClose : ui.tOk).focus({ preventScroll: true });
     if (out.download) download(res.blob, res.filename);
     if (out.status === 'cancelled') hideTimer = setTimeout(() => { if (!focusInToast()) dismiss(false); }, 4000);
-    refreshAll(true);
     document.dispatchEvent(new CustomEvent('pdf3d:cadexport', { detail: { phase: 'done', status: out.status } }));
   }
   function dismiss(giveFocusBack) {
@@ -12050,20 +10550,10 @@ void main() { gl_FragColor = uRGBA; }`;
   function init() {
     if (!$('viewportCanvas') || !document.body) return;
     buildToast();
-    buildSimple();
-    buildAdvanced();
-    refreshAll(true);
-    // part list changes (load / selection), status changes, mode switches, late-loaded API
-    const obs = (el, opts) => { if (el) new MutationObserver(() => refreshAll()).observe(el, opts); };
-    obs($('partList'), { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-    obs($('statusBadge'), { childList: true, characterData: true, subtree: true });
-    document.addEventListener('pdf3d:uimode', () => refreshAll());
-    window.addEventListener('load', () => refreshAll());
-    if (ui.advBtn) ui.advBtn.addEventListener('pointerenter', () => refreshAll(true));
   }
 
   window.PDF3DCadExportUI = {
-    refresh: () => refreshAll(true),
+    refresh: () => preflight(),
     start: () => start(null),
     cancel,
     get running() { return !!run; },
@@ -12081,8 +10571,8 @@ void main() { gl_FragColor = uRGBA; }`;
 /*
  * export-flow.js — single "Export" button → format list → per-format options → "Save as…" (pdf-3d-extractor add-on).
  *
- * SIMPLE MODE ONLY: replaces the Simple-mode split button (Export STEP + ▾ menu) with ONE flow. Advanced mode keeps its
- * original export bar and the .cad-adv group untouched. The original #btnExport* buttons are still the mesh writers.
+ * The only export UI since 1.7.0 (the Advanced export bar is gone). The button sits in the simple-mode.js top bar
+ * (.sm-topbar .sm-actions). Units / body type / reduce detail are read and written through PDF3D.exportSettings.
  *
  * Engine hooks (all optional, feature-detected, never faked):
  *   PDF3D.capabilities.parasolid === true   → show "Parasolid (.x_t)" (needs PDF3D.exportFormat or #btnExportXT).
@@ -12230,16 +10720,15 @@ void main() { gl_FragColor = uRGBA; }`;
     inp.addEventListener('change', () => { if (inp.checked && !off) onchange(value); });
     return h('label', { class: 'xf-radio' + (off ? ' xf-radio--off' : '') }, inp, h('span', { class: 'xf-radio-l', text: label }), hint ? h('small', { text: hint }) : null);
   }
-  function proxySelect(origId, label) {
-    const o = $(origId);
-    if (!o) return null;
-    const sel = h('select', { class: 'select-ctrl', 'data-xf-proxy': origId });
-    for (const op of o.options) sel.append(h('option', { value: op.value, text: op.text }));
-    sel.value = o.value;
-    sel.addEventListener('change', () => {
-      const t = $(origId); if (!t || t.value === sel.value) return;
-      t.value = sel.value; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+  // export settings (units / brepMode / detail) live in app.js state: PDF3D.exportSettings { options, titles, get(), set() }
+  const xs = () => NS().exportSettings || null;
+  function settingSelect(key, label) {
+    const X = xs();
+    if (!X || !X.options || !X.options[key]) return null;
+    const sel = h('select', { class: 'select-ctrl', 'data-xf-setting': key, title: (X.titles && X.titles[key]) || null });
+    for (const [value, text] of X.options[key]) sel.append(h('option', { value, text }));
+    sel.value = X.get()[key];
+    sel.addEventListener('change', () => { const Y = xs(); if (Y && Y.get()[key] !== sel.value) Y.set(key, sel.value); });
     return h('label', { class: 'xf-field' }, h('span', { text: label }), sel);
   }
 
@@ -12303,18 +10792,16 @@ void main() { gl_FragColor = uRGBA; }`;
     place();
   }
 
-  // place the button in the Simple top bar, next to (and instead of) the split button. Advanced is left alone.
+  // place the button at the end of the top bar actions (simple-mode.js)
   function place() {
-    const split = document.querySelector('.sm-topbar .sm-split');
-    if (split && !ui.btnSimple.isConnected) split.after(ui.btnSimple);
+    const bar = document.querySelector('.sm-topbar .sm-actions');
+    if (bar && !ui.btnSimple.isConnected) bar.append(ui.btnSimple);
     document.body.classList.add('xf-on');
   }
   const trigger = () => ui.btnSimple;
-  const simpleMode = () => document.body.classList.contains('sm-simple');
 
   // ------------------------------------------------------------------ popover
   function openPop(btn) {
-    if (!simpleMode()) return;
     lastTrigger = btn || trigger();
     if (!available(FMT[prefs.format] || {})) prefs.format = (FORMATS.find(available) || {}).id;
     renderList(); renderOpts(); syncDamagedNote();
@@ -12332,7 +10819,7 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.pop.hidden = true;
     ui.btnSimple.setAttribute('aria-expanded', 'false');
     if (stashed) { stashed = false; ui.result.hidden = false; }   // closed without a new export: the last card comes back
-    if (returnFocus && lastTrigger && simpleMode()) lastTrigger.focus({ preventScroll: true });
+    if (returnFocus && lastTrigger && lastTrigger.isConnected) lastTrigger.focus({ preventScroll: true });
   }
   function position() {
     const t = lastTrigger, pop = ui.pop;
@@ -12424,11 +10911,11 @@ void main() { gl_FragColor = uRGBA; }`;
               radio('xfNoFit', 'omit', 'Leave unfitted parts out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
         }
       }
-      if (body !== 'fitted') add(proxySelect('brepModeSelect', 'Mesh B-Rep'));
+      if (body !== 'fitted') add(settingSelect('brepMode', 'Mesh B-Rep'));
       // Fitted / Both STEP is always written in mm (STEP records its unit, NX imports at true size): no Units choice,
-      // the saved #unitSelect value is left alone. capabilities.fittedUnits === true (writer honours units) shows it again.
-      if (body === 'mesh' || caps().fittedUnits === true) add(proxySelect('unitSelect', 'Units'));
-      if (body !== 'fitted') add(proxySelect('detailSelect', 'Reduce detail'));
+      // the saved units setting is left alone. capabilities.fittedUnits === true (writer honours units) shows it again.
+      if (body === 'mesh' || caps().fittedUnits === true) add(settingSelect('units', 'Units'));
+      if (body !== 'fitted') add(settingSelect('detail', 'Reduce detail'));
       const pre = cad && body !== 'mesh' ? preflight() : null;
       if (pre && pre.estimate && pre.estimate.kernelCached === false) add(h('p', { class: 'xf-note', text: 'First fitted export downloads the CAD kernel (' + mb(pre.estimate.kernelBytes || 13719175) + ' MB).' }));
       if (pre && pre.ok === false && pre.message) add(h('p', { class: 'xf-note xf-note--warn', text: pre.message }));
@@ -12437,11 +10924,11 @@ void main() { gl_FragColor = uRGBA; }`;
         h('div', { class: 'xf-seg-row' },
           radio('xfEnc', 'binary', 'Binary', null, prefs.stl.enc !== 'ascii', (v) => { prefs.stl.enc = v; save(); syncName(); }),
           radio('xfEnc', 'ascii', 'ASCII', null, prefs.stl.enc === 'ascii', (v) => { prefs.stl.enc = v; save(); syncName(); }))));
-      add(proxySelect('unitSelect', 'Units'), proxySelect('detailSelect', 'Reduce detail'));
+      add(settingSelect('units', 'Units'), settingSelect('detail', 'Reduce detail'));
     } else if (f.id === 'obj') {
-      add(proxySelect('unitSelect', 'Units'), proxySelect('detailSelect', 'Reduce detail'));
+      add(settingSelect('units', 'Units'), settingSelect('detail', 'Reduce detail'));
     } else if (f.id === 'iges') {
-      add(proxySelect('unitSelect', 'Units'));
+      add(settingSelect('units', 'Units'));
     } else if (f.id === 'xt') {
       add(h('p', { class: 'xf-note', 'data-xf': 'xt-note', text: XT_NOTE }));   // 1.5.2: merged mode only, no body/mode choice
     } else if (f.id === 'raw') {
@@ -12709,7 +11196,8 @@ void main() { gl_FragColor = uRGBA; }`;
     setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 30000);
   }
   function optsFor(f) {
-    const o = { units: ($('unitSelect') || {}).value, detail: ($('detailSelect') || {}).value, brepMode: ($('brepModeSelect') || {}).value, partIds: sel() };
+    const x = xs() ? xs().get() : {};
+    const o = { units: x.units, detail: x.detail, brepMode: x.brepMode, partIds: sel() };
     if (f.id === 'step') {
       const body = (hasCad() || hasHook()) && !cadOff() ? prefs.step.body : 'mesh';
       Object.assign(o, { body, onNoFit: prefs.step.onNoFit === 'omit' ? 'omit' : 'mesh', fittedOnly: body === 'fitted' });
@@ -13139,8 +11627,6 @@ void main() { gl_FragColor = uRGBA; }`;
     build();
     // simple-mode builds its top bar on init; re-place if it appears later
     new MutationObserver(() => { if (!ui.btnSimple.isConnected) place(); }).observe(document.body, { childList: true });
-    // switching to Advanced closes the popover (the flow is Simple-only); the result card stays until dismissed
-    new MutationObserver(() => { if (!simpleMode()) close(false); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     ui.name.addEventListener('input', () => { ui.name.dataset.touched = '1'; });
   }
   window.PDF3DExportFlow = {
