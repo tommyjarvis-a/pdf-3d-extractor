@@ -25,7 +25,7 @@
   const REASON_TEXT = {
     unavailable: 'Not available in this build',
     too_large: 'Model too large for surface fitting',
-    no_parts: 'Open a model with parts first',
+    no_parts: 'Open a model with bodies first',
     checking: 'Checking…',
     error: 'Unavailable (check failed)'
   };
@@ -44,7 +44,7 @@
     offline: { title: 'You\u2019re offline',
       line: 'The surface-fitting kernel needs an internet connection the first time. Reconnect and try again.' },
     out_of_memory: { title: 'Ran out of memory',
-      line: 'The browser ran out of memory while fitting surfaces. Select fewer parts and try again.' }
+      line: 'The browser ran out of memory while fitting surfaces. Select fewer bodies and try again.' }
   };
   function engineFailKey(code) {
     if ((code === 'worker_failed' || code === 'kernel_download') && typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline';
@@ -83,7 +83,7 @@
     const s = appState();
     if (!s || !s.parts) return { ids: null, name: null };
     const i = s.selectedPartIdx;
-    if (typeof i === 'number' && i >= 0 && i < s.parts.length) return { ids: [i], name: s.parts[i].name || 'part ' + (i + 1) };
+    if (typeof i === 'number' && i >= 0 && i < s.parts.length) return { ids: [i], name: s.parts[i].name || 'body ' + (i + 1) };
     return { ids: null, name: null };
   }
   let asyncPre = null;   // last result of an async preflight (tolerated, not in the contract)
@@ -219,7 +219,7 @@
     ui.tStage.hidden = false; ui.tBar.hidden = false;
     ui.tMsg.textContent = ''; ui.tMsg.hidden = true;
     const notes = [];
-    if (sel.name) notes.push('Selected part: ' + sel.name);
+    if (sel.name) notes.push('Selected body: ' + sel.name);
     if (fittedOnly) notes.push('Fitted solid only');
     if (pre && !pre.estimate.kernelCached) notes.push('First run downloads the CAD kernel (' + MB(pre.estimate.kernelBytes) + ' MB)');
     notes.push('Usually 15–40 s. You can keep using the viewer.');

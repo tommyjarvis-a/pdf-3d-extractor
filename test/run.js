@@ -336,6 +336,15 @@ function syntheticAttachmentPDF(names) {
     check(!/XT_UI_ENABLED|cachedSTEP|cachedXT|previewLines|statusBadge|activeTab|exportParasolidXT|[?&]xt=/.test(appSrc), 'app.js still has the Advanced preview / inspector code');
     check(!/data-xf-proxy|unitSelect|detailSelect|brepModeSelect|btnExport|function capture/.test(fs.readFileSync(path.join(ROOT, 'export-flow.js'), 'utf8')), 'export-flow.js still proxies the Advanced selects / export buttons');
     check(!/buildAdvanced|smMenuExport|statusBadge|pdf3d:uimode/.test(fs.readFileSync(path.join(ROOT, 'cad-export-ui.js'), 'utf8')), 'cad-export-ui.js still has the Advanced / menu UI');
+    // 1.7.0 recheck M2: View menu hover titles; M1: user-facing "part(s)" -> "body/bodies" (export file text untouched)
+    check(/top: 'Top \(XY\)', front: 'Front \(XZ\)', right: 'Right \(YZ\)'/.test(smSrc) && /title: VIEW_TITLES\[key\]/.test(smSrc), 'View menu Top / Front / Right lost their (XY) / (XZ) / (YZ) titles');
+    {
+      const uiSrc = ['simple-mode.js', 'export-flow.js', 'cad-export-ui.js', 'recon/cad-export.js', 'recon/cad-worker.js', 'index.html'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') + appSrc;
+      const partWords = /Explode parts|part groups|unfitted parts|visible parts?\b|parts? (loaded|may be missing|fitted|couldn|was left|were left|are closed|merged)|No part could|Selected part|fewer parts|some parts|missing parts|This part isn|' parts'|\(part '|part-by-part|'Parts'|Every part/;
+      const hit = uiSrc.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l) && partWords.test(l));
+      check(!hit.length, `user-facing "part(s)" wording left: ${hit.slice(0, 3).map((l) => l.trim().slice(0, 80)).join(' | ')}`);
+      check(/so only \$\{n\} \$\{n === 1 \? 'body' : 'bodies'\} loaded/.test(smSrc), 'damaged-load note does not say body / bodies');
+    }
     const V0 = window.PDF3DView, X = window.PDF3D.exportSettings, A = window.CAD3DExtractor;
     check(V0 && ['setRenderMode', 'preset', 'fit', 'setExplode', 'setOrbitMode', 'state'].every((k) => typeof V0[k] === 'function') && Array.isArray(V0.renderModes), 'PDF3DView view controls API missing');
     check(A && ['getStatus', 'loadSample', 'showAllParts', 'invertParts'].every((k) => typeof A[k] === 'function') && typeof A.getStatus().text === 'string', 'CAD3DExtractor UI API missing');

@@ -111,7 +111,7 @@
     const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode };
     const un = unavailableWhy();
     if (un) return { ok: false, reason: 'unavailable', message: un, estimate };
-    if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible parts first', estimate };
+    if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible bodies first', estimate };
     if (sel.tris > LIMITS.maxTris) return { ok: false, reason: 'too_large', message: 'Model too large to fit surfaces in the browser (' + fmtK(sel.tris) + ', limit ' + fmtK(LIMITS.maxTris) + ')', estimate };
     return { ok: true, reason: null, message: sel.why || '', estimate };
   }

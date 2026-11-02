@@ -8020,7 +8020,7 @@ void main() { gl_FragColor = uRGBA; }`;
       banner.style.display = big ? '' : 'none';
       if (big) {
         banner.textContent = `Large model: ${bounds.totalParsedTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
-          'exports stream part-by-part at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
+          'exports stream body by body at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
       }
     }
     const unitScale = getScaleFromMM(state.units);
@@ -8589,7 +8589,7 @@ void main() { gl_FragColor = uRGBA; }`;
     if (fmt === 'step' && (o.body === 'fitted' || o.body === 'both')) return exportStepFitted(o, stem, progress);
 
     const sel = exportSelection(o.partIds);
-    if (!sel.ids.length) { const r = exportSkipped('no_parts', 'No visible part to export');
+    if (!sel.ids.length) { const r = exportSkipped('no_parts', 'No visible body to export');
       if (fmt === 'xt') r.summary = { parts: [], bodies: 0, faces: 0 };   // card: "Nothing to export"
       return r; }
     const wo = { detail };   // writers read state.exportDetail when detail is omitted; passing it gives the same value
@@ -8619,8 +8619,8 @@ void main() { gl_FragColor = uRGBA; }`;
         if (!tooLarge && !oom) throw e;   // the flow shows "Parasolid export failed" with the message
         const eb = tooLarge && e.estimatedBytes; const gb = eb ? fmtBytes(eb) : null;
         return { blob: null, filename: null, status: 'error', reasonCode: tooLarge ? 'XT_TOO_LARGE' : 'out_of_memory',   // Designer's card keys on 'XT_TOO_LARGE'
-          reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some parts or use Reduce detail, then try again`
-            : 'The browser ran out of memory while writing the Parasolid file. Hide some parts or use Reduce detail, then try again',
+          reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some bodies or use Reduce detail, then try again`
+            : 'The browser ran out of memory while writing the Parasolid file. Hide some bodies or use Reduce detail, then try again',
           summary: { parts: [], estimatedBytes: (e && e.estimatedBytes) || null } };
       }
       const parts = meshPartsSummary(sel);
@@ -8628,7 +8628,7 @@ void main() { gl_FragColor = uRGBA; }`;
       const xs = { parts, faces: st.faces || 0, bodies: st.bodies || 0, bodyType: st.bodyType || null, sewn: st.sewn !== false, openEdges: st.openEdges || 0,
         viewerFaces: st.viewerFaces, splitFaces: st.splitFaces, estimatedBytes: st.estimatedBytes,
         schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
-      if (!xs.faces) { if (gen) gen.return(); return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } }; }
+      if (!xs.faces) { if (gen) gen.return(); return { ...exportSkipped('no_parts', 'No visible body has B-Rep faces'), summary: { ...xs, faces: 0 } }; }
       if (gen) return { blob: null, _gen: gen, _first: first, _type: 'text/plain;charset=utf-8', _estimate: st.estimatedBytes || null, filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
       progress({ stage: 'write', pct: 100, label: 'Done' });
       return { ...fileParts(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
@@ -8651,7 +8651,7 @@ void main() { gl_FragColor = uRGBA; }`;
     // no Worker / WebAssembly: no fitting at all; every part gets its mesh body (the Mesh STEP file), or nothing with 'omit'
     if ((PDF3D_NS.capabilities || {}).cadSurfacesReason === 'browser_unsupported') {
       const sel = exportSelection(o.partIds);
-      if (!sel.ids.length) return exportSkipped('no_parts', 'No visible part to export');
+      if (!sel.ids.length) return exportSkipped('no_parts', 'No visible body to export');
       const why = 'This browser can\u2019t run surface fitting (no Web Workers or WebAssembly)';
       const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: 0, reasonCode: 'browser_unsupported', reason: why, written: omit ? 'omitted' : 'mesh' }));
       if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0, fitSkippedReason: 'browser_unsupported' } };
@@ -9128,7 +9128,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const estimate = { tris: sel.tris, kernelBytes: KERNEL_BYTES, kernelCached: kernelCached(), mode: sel.mode };
     const un = unavailableWhy();
     if (un) return { ok: false, reason: 'unavailable', message: un, estimate };
-    if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible parts first', estimate };
+    if (!sel.parts.length) return { ok: false, reason: 'no_parts', message: 'Open a 3D PDF with visible bodies first', estimate };
     if (sel.tris > LIMITS.maxTris) return { ok: false, reason: 'too_large', message: 'Model too large to fit surfaces in the browser (' + fmtK(sel.tris) + ', limit ' + fmtK(LIMITS.maxTris) + ')', estimate };
     return { ok: true, reason: null, message: sel.why || '', estimate };
   }
@@ -9369,6 +9369,7 @@ void main() { gl_FragColor = uRGBA; }`;
     ['Esc', 'Close a menu, panel or dialog']
   ];
   const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
+  const VIEW_TITLES = { iso: 'Iso', top: 'Top (XY)', front: 'Front (XZ)', right: 'Right (YZ)' };   // hover titles (as the <= 1.6.2 view buttons)
   const ORBIT_LABELS = { free: ['Free', 'tumble any axis'], turntable: ['Turntable', 'Z stays up'] };
   // Explode is a 0-100 % range; Reset view keeps the old toolbar wording
   const RESET_TITLE = 'Reset orientation, zoom and pan';
@@ -9658,7 +9659,7 @@ void main() { gl_FragColor = uRGBA; }`;
       h('div', { role: 'group', 'aria-label': 'Background' }, ui.bgItems.map((b) => b.it)),
       h('hr', { class: 'sm-sep' }), ui.gridItem);
     ui.menuView = h('div', { id: 'smMenuView', class: 'sm-pop', role: 'menu', 'aria-label': 'Camera view', hidden: true },
-      Object.keys(VIEW_LABELS).map((key) => menuItem(VIEW_LABELS[key], { action: () => { if (PV()) PV().preset(key); } })));
+      Object.keys(VIEW_LABELS).map((key) => menuItem(VIEW_LABELS[key], { title: VIEW_TITLES[key], action: () => { if (PV()) PV().preset(key); } })));
     // 1.7.0: Perspective / Orthographic (window.PDF3DView projection)
     ui.projItems = PROJ_LABELS.map(([key, label]) => {
       const it = menuItem(label, { role: 'menuitemradio', check: true, keepOpen: true,
@@ -9670,7 +9671,7 @@ void main() { gl_FragColor = uRGBA; }`;
       h('div', { role: 'group', 'aria-label': 'Projection' }, ui.projItems.map((p) => p.it)));
 
     // "More": explode, orbit mode, line options
-    ui.explode = h('input', { type: 'range', min: '0', max: '100', value: String(viewState().explode || 0), 'aria-label': 'Explode parts' });
+    ui.explode = h('input', { type: 'range', min: '0', max: '100', value: String(viewState().explode || 0), 'aria-label': 'Explode bodies' });
     ui.explodeOut = h('output', { text: ui.explode.value + '%' });
     ui.explode.addEventListener('input', () => {
       ui.explodeOut.textContent = ui.explode.value + '%';
@@ -9749,7 +9750,7 @@ void main() { gl_FragColor = uRGBA; }`;
         h('dt', { text: 'Opens' }), h('dd', null, '3D PDF (', h('code', { text: '.pdf' }), ') with embedded U3D (ECMA-363) or PRC (ISO 14739-1) streams, plus raw ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' files.'),
         h('dt', { text: 'STEP' }), h('dd', null, h('code', { text: '.stp' }), ' AP214 B-Rep, ready for Siemens NX and most CAD tools.'),
         h('dt', { text: 'STL' }), h('dd', null, h('code', { text: '.stl' }), ' triangle mesh, binary or ASCII.'),
-        h('dt', { text: 'OBJ' }), h('dd', null, h('code', { text: '.obj' }), ' mesh with part groups and normals.'),
+        h('dt', { text: 'OBJ' }), h('dd', null, h('code', { text: '.obj' }), ' mesh with body groups and normals.'),
         h('dt', { text: 'IGES' }), h('dd', null, h('code', { text: '.igs' }), ' 5.3 feature-edge wireframe curves.'),
         h('dt', { text: 'Raw' }), h('dd', null, 'The extracted ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' stream bytes.'),
         h('dt', { text: 'Settings' }), h('dd', { text: 'Units, body type and reduce detail are in the Export dialog. Stream sizes, bounds and the product tree are under Info.' }),
@@ -10099,8 +10100,8 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.dmg.hidden = !on;
     if (!on) return;
     const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
-    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} part${n === 1 ? '' : 's'} loaded.`
-      : 'Part of this model couldn\u2019t be read, so some parts may be missing.';
+    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
+      : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
     if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }
 
@@ -10169,7 +10170,7 @@ void main() { gl_FragColor = uRGBA; }`;
   const REASON_TEXT = {
     unavailable: 'Not available in this build',
     too_large: 'Model too large for surface fitting',
-    no_parts: 'Open a model with parts first',
+    no_parts: 'Open a model with bodies first',
     checking: 'Checking…',
     error: 'Unavailable (check failed)'
   };
@@ -10188,7 +10189,7 @@ void main() { gl_FragColor = uRGBA; }`;
     offline: { title: 'You\u2019re offline',
       line: 'The surface-fitting kernel needs an internet connection the first time. Reconnect and try again.' },
     out_of_memory: { title: 'Ran out of memory',
-      line: 'The browser ran out of memory while fitting surfaces. Select fewer parts and try again.' }
+      line: 'The browser ran out of memory while fitting surfaces. Select fewer bodies and try again.' }
   };
   function engineFailKey(code) {
     if ((code === 'worker_failed' || code === 'kernel_download') && typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline';
@@ -10227,7 +10228,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const s = appState();
     if (!s || !s.parts) return { ids: null, name: null };
     const i = s.selectedPartIdx;
-    if (typeof i === 'number' && i >= 0 && i < s.parts.length) return { ids: [i], name: s.parts[i].name || 'part ' + (i + 1) };
+    if (typeof i === 'number' && i >= 0 && i < s.parts.length) return { ids: [i], name: s.parts[i].name || 'body ' + (i + 1) };
     return { ids: null, name: null };
   }
   let asyncPre = null;   // last result of an async preflight (tolerated, not in the contract)
@@ -10363,7 +10364,7 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.tStage.hidden = false; ui.tBar.hidden = false;
     ui.tMsg.textContent = ''; ui.tMsg.hidden = true;
     const notes = [];
-    if (sel.name) notes.push('Selected part: ' + sel.name);
+    if (sel.name) notes.push('Selected body: ' + sel.name);
     if (fittedOnly) notes.push('Fitted solid only');
     if (pre && !pre.estimate.kernelCached) notes.push('First run downloads the CAD kernel (' + MB(pre.estimate.kernelBytes) + ' MB)');
     notes.push('Usually 15–40 s. You can keep using the viewer.');
@@ -10650,7 +10651,7 @@ void main() { gl_FragColor = uRGBA; }`;
   const FORMATS = [
     { id: 'step', label: 'STEP', ext: '.stp', sub: 'CAD solid for NX, SolidWorks, Fusion…', mime: 'application/step' },
     { id: 'stl', label: 'STL', ext: '.stl', sub: 'Triangle mesh for 3D printing', mime: 'model/stl' },
-    { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with part groups', mime: 'model/obj' },
+    { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with body groups', mime: 'model/obj' },
     { id: 'iges', label: 'IGES', ext: '.igs', sub: 'Wireframe edges only', mime: 'model/iges' },
     { id: 'raw', label: 'Raw stream', ext: '.u3d', sub: 'The embedded U3D / PRC bytes', mime: 'application/octet-stream' },
     { id: 'xt', label: 'Parasolid', ext: '.x_t', sub: 'Faceted body, flat faces', mime: 'text/plain', cap: 'parasolid' }
@@ -10908,7 +10909,7 @@ void main() { gl_FragColor = uRGBA; }`;
             h('span', { text: 'If a face can\u2019t be fitted' }),
             h('div', { class: 'xf-seg-row' },
               radio('xfNoFit', 'mesh', 'Save mesh STEP instead', null, p.onNoFit !== 'omit', (v) => { p.onNoFit = v; save(); }),
-              radio('xfNoFit', 'omit', 'Leave unfitted parts out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
+              radio('xfNoFit', 'omit', 'Leave unfitted bodies out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
         }
       }
       if (body !== 'fitted') add(settingSelect('brepMode', 'Mesh B-Rep'));
@@ -10996,7 +10997,7 @@ void main() { gl_FragColor = uRGBA; }`;
   // ------------------------------------------------------------------ partial (damaged) loads
   // lastLoad.damaged (1.6.2, 'ok' loads only) = some of the model couldn't be read. Exports from such a load get a _partial
   // file name, a note in the popover and an amber card. Export results may carry it too (damaged / summary.damaged).
-  const DMG_NOTE = 'Only part of this model loaded. The file may be missing parts.';
+  const DMG_NOTE = 'Only part of this model loaded. The file may be missing bodies.';
   const DMG_LINE = 'This model was only partly read. Check it against the drawing before using it.';
   const nonEmpty = (v) => typeof v === 'string' && !!v.trim();
   // 1.6.2 (9ba8d26): PDF3D.partialNote() (note text while damaged, else null) is the trigger; older engines: lastLoad.damaged
@@ -11117,7 +11118,7 @@ void main() { gl_FragColor = uRGBA; }`;
         // check as its first line. Never on picker saves.
         const bytes = dl ? bytesOf(res, out.blob) : 0;
         if (bytes > BIG) {
-          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If the file is missing or 0 bytes, try Chrome or Edge, or hide some parts.';
+          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If the file is missing or 0 bytes, try Chrome or Edge, or hide some bodies.';
           out = out.tone === 'ok'
             ? Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished', lines: [chk, f.id === 'xt' ? XT_UNITS : null] })
             : Object.assign({}, out, { lines: ['Check that the download finished. ' + chk].concat(out.lines || []) });
@@ -11250,7 +11251,7 @@ void main() { gl_FragColor = uRGBA; }`;
     if (!ps || !ps.length) return null;
     return ps.map((p, i) => {
       const q = Object.assign({}, p);
-      if (!q.name) q.name = 'Part ' + (i + 1);
+      if (!q.name) q.name = 'Body ' + (i + 1);
       if (!/^(solid|mesh|omitted)$/.test(q.written)) q.written = q.status === 'solid' ? 'solid' : 'omitted';
       return q;
     });
@@ -11279,18 +11280,18 @@ void main() { gl_FragColor = uRGBA; }`;
     ui.rBody.textContent = '';
     for (const l of lines || []) if (l) ui.rBody.append(h('p', { text: l }));
     if (parts && parts.length) {
-      const ul = h('ul', { class: 'xf-parts', 'data-xf': 'parts', id: 'xfParts', 'aria-label': 'Parts' });
+      const ul = h('ul', { class: 'xf-parts', 'data-xf': 'parts', id: 'xfParts', 'aria-label': 'Bodies' });
       parts.forEach((p, i) => ul.append(h('li', { class: 'xf-part', 'data-written': p.kind, 'data-open': p.open ? '1' : null, hidden: i >= PARTS_SHOWN },
         h('span', { class: 'xf-part-n', text: p.name }), h('span', { class: 'xf-part-w', text: p.what }),
         p.why || p.body ? h('span', { class: 'xf-part-r', text: [bodyLabel(p), cap(p.why)].filter(Boolean).join(' \u00b7 ') }) : null)));
       ui.rBody.append(ul);
       if (parts.length > PARTS_SHOWN) {
-        const more = h('button', { type: 'button', class: 'xf-more', 'data-xf': 'show-all', 'aria-expanded': 'false', 'aria-controls': 'xfParts', text: 'Show all ' + parts.length + ' parts' });
+        const more = h('button', { type: 'button', class: 'xf-more', 'data-xf': 'show-all', 'aria-expanded': 'false', 'aria-controls': 'xfParts', text: 'Show all ' + parts.length + ' bodies' });
         more.addEventListener('click', () => {
           const all = more.getAttribute('aria-expanded') !== 'true';
           ul.querySelectorAll('.xf-part').forEach((li, i) => { li.hidden = !all && i >= PARTS_SHOWN; });
           more.setAttribute('aria-expanded', String(all));
-          more.textContent = all ? 'Show fewer' : 'Show all ' + parts.length + ' parts';
+          more.textContent = all ? 'Show fewer' : 'Show all ' + parts.length + ' bodies';
         });
         ui.rBody.append(more);
       }
@@ -11470,23 +11471,23 @@ void main() { gl_FragColor = uRGBA; }`;
     const meshOnly = list.filter((l) => l.kind === 'mesh').length, out = list.filter((l) => l.kind === 'omitted').length, solids = fit - open;
     const faces = parts.reduce((a, p) => a + (bothFitted(p) ? (+p.faces || 0) : 0), 0) || (res.summary && res.summary.faces);
     const allMesh = list.every((l) => l.kind !== 'omitted');
-    const meshLine = allMesh ? (n > 1 ? 'Every part\u2019s mesh body is in the file too.' : 'The mesh body is included too.') : null;
+    const meshLine = allMesh ? (n > 1 ? 'Every body\u2019s mesh is in the file too.' : 'The mesh body is included too.') : null;
     if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
     if (fit === 0) {
       return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
-        lines: ['No part could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
+        lines: ['No body could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
     }
     if (solids === n) {
       return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
         title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
-        lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.', meshLine] };
+        lines: [n > 1 ? 'All ' + n + ' bodies fitted into closed solids.' : 'Fitted into a closed solid.', meshLine] };
     }
-    const openLine = open ? (open === 1 ? (n === 1 ? 'The fitted surfaces don\u2019t close into a solid.' : '1 fitted part has open surfaces, not a closed solid.') : open + ' fitted parts have open surfaces, not closed solids.') : null;
-    const meshOnlyLine = meshOnly ? (meshOnly === 1 ? '1 part couldn\u2019t be fitted, so it has only its mesh body.' : meshOnly + ' parts couldn\u2019t be fitted, so they have only their mesh body.') : null;
-    const outLine = out ? (out === 1 ? '1 part was left out of the file.' : out + ' parts were left out of the file.') : null;
+    const openLine = open ? (open === 1 ? (n === 1 ? 'The fitted surfaces don\u2019t close into a solid.' : '1 fitted body has open surfaces, not a closed solid.') : open + ' fitted bodies have open surfaces, not closed solids.') : null;
+    const meshOnlyLine = meshOnly ? (meshOnly === 1 ? '1 body couldn\u2019t be fitted, so it has only its mesh body.' : meshOnly + ' bodies couldn\u2019t be fitted, so they have only their mesh body.') : null;
+    const outLine = out ? (out === 1 ? '1 body was left out of the file.' : out + ' bodies were left out of the file.') : null;
     const title = fit === n
-      ? (n === 1 ? 'Fitted surfaces exported (open, not a solid)' : 'Fitted: ' + solids + ' of ' + n + ' parts are closed solids')
-      : 'Partly fitted: ' + fit + ' of ' + n + ' parts fitted' + [meshOnly ? meshOnly + ' mesh only' : null, out ? out + ' left out' : null].filter(Boolean).map((t) => ', ' + t).join('');
+      ? (n === 1 ? 'Fitted surfaces exported (open, not a solid)' : 'Fitted: ' + solids + ' of ' + n + ' bodies are closed solids')
+      : 'Partly fitted: ' + fit + ' of ' + n + ' bodies fitted' + [meshOnly ? meshOnly + ' mesh only' : null, out ? out + ' left out' : null].filter(Boolean).map((t) => ', ' + t).join('');
     return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
   }
 
@@ -11516,7 +11517,7 @@ void main() { gl_FragColor = uRGBA; }`;
   const limitRows = (parts, list) => (parts.every((p) => normCode(p.reasonCode) === 'fit_limit' || p.reasonCode == null) ? undefined : list);
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
   const XT_UNITS = 'Stored in meters, opens at true size in NX.';
-  const XT_NOTE = 'All parts merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
+  const XT_NOTE = 'All bodies merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
 
   function describe(f, o, res, err) {
     const label = f.id === 'stl' ? 'STL (' + (o.encoding === 'ascii' ? 'ASCII' : 'binary') + ')' : f.label;
@@ -11531,14 +11532,14 @@ void main() { gl_FragColor = uRGBA; }`;
         // XT_TOO_LARGE (estimated output > 8 GB): own wording only; the engine's reason text also says "Nothing was saved"
         if (!blob && normCode(res.reasonCode) === 'too_large') {
           return { tone: 'warn', status: 'too_large', title: 'Model too large to export' + (+g('estimatedBytes') > 0 ? ' (about ' + fmtGB(+g('estimatedBytes')) + ')' : ''),
-            lines: ['This model is too large for the browser to write as Parasolid.', 'Nothing was saved. Try hiding some parts, or export STEP or STL instead.'] };
+            lines: ['This model is too large for the browser to write as Parasolid.', 'Nothing was saved. Try hiding some bodies, or export STEP or STL instead.'] };
         }
         if (g('faces') != null && +g('faces') === 0) {
           return { tone: 'warn', status: 'empty', title: 'Nothing to export', lines: ['The model has no faces to write.', 'No file was saved.'] };
         }
         if (blob && (g('bodyType') === 'sheet' || +g('openEdges') > 0 || g('sewn') === false)) {
           return { tone: 'warn', status: 'sheet', blob, title: 'Parasolid sheet body exported (open model)',
-            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.',
+            lines: ['This body isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.',
               +g('openEdges') > 0 ? (+g('openEdges') === 1 ? '1 open edge.' : Math.round(+g('openEdges')).toLocaleString('en-US') + ' open edges.') : null, XT_UNITS] };
         }
       }
@@ -11560,23 +11561,23 @@ void main() { gl_FragColor = uRGBA; }`;
       if (blob && o.body === 'both') return describeBoth(res, parts, blob, why);
       const list = parts.map(partLine);
       if (!blob) {
-        return { tone: 'warn', status: res.status || 'skipped', title: 'Nothing saved: no part could be fitted', parts: list,
-          lines: [omitMode ? '\u201cLeave unfitted parts out\u201d is on, so no file was written.' : 'No file was written.',
+        return { tone: 'warn', status: res.status || 'skipped', title: 'Nothing saved: no body could be fitted', parts: list,
+          lines: [omitMode ? '\u201cLeave unfitted bodies out\u201d is on, so no file was written.' : 'No file was written.',
             omitMode ? 'Choose \u201cSave mesh STEP instead\u201d to always get a file.' : null] };
       }
       if (fit === n) {
         return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
           title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
-          lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.'] };
+          lines: [n > 1 ? 'All ' + n + ' bodies fitted into closed solids.' : 'Fitted into a closed solid.'] };
       }
       if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
       if (fit === 0) {
         return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
-          lines: ['No part could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
+          lines: ['No body could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
       }
       const tail = [mesh ? mesh + ' saved as mesh' : null, out ? out + ' left out' : null].filter(Boolean).join(', ');
-      return { tone: 'warn', status: 'partial', blob, parts: list, title: 'Partly fitted: ' + fit + ' of ' + n + ' parts fitted' + (tail ? ', ' + tail : ''),
-        lines: [out ? 'Parts that couldn\u2019t be fitted were left out of the file.' : 'Parts that couldn\u2019t be fitted were saved as mesh bodies in the same file.'] };
+      return { tone: 'warn', status: 'partial', blob, parts: list, title: 'Partly fitted: ' + fit + ' of ' + n + ' bodies fitted' + (tail ? ', ' + tail : ''),
+        lines: [out ? 'Bodies that couldn\u2019t be fitted were left out of the file.' : 'Bodies that couldn\u2019t be fitted were saved as mesh bodies in the same file.'] };
     }
 
     // whole-file results
@@ -11596,7 +11597,7 @@ void main() { gl_FragColor = uRGBA; }`;
     let lines = (d.lines || []).map((l) => (/Fitted solid only/.test(l) ? 'Choose \u201cSave mesh STEP instead\u201d to always get a file.' : l));
     if (omitMode && !b && d.status !== 'cancelled') {
       lines = lines.filter((l) => !/Save mesh STEP instead|Nothing was exported/.test(l));
-      lines.push('\u201cLeave unfitted parts out\u201d is on, so no file was written.', 'Choose \u201cSave mesh STEP instead\u201d to always get a file.');
+      lines.push('\u201cLeave unfitted bodies out\u201d is on, so no file was written.', 'Choose \u201cSave mesh STEP instead\u201d to always get a file.');
     }
     return { tone: d.tone === 'muted' && !b ? 'warn' : d.tone, status: d.status, title, lines, blob: b };
   }

@@ -40,6 +40,7 @@
     ['Esc', 'Close a menu, panel or dialog']
   ];
   const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
+  const VIEW_TITLES = { iso: 'Iso', top: 'Top (XY)', front: 'Front (XZ)', right: 'Right (YZ)' };   // hover titles (as the <= 1.6.2 view buttons)
   const ORBIT_LABELS = { free: ['Free', 'tumble any axis'], turntable: ['Turntable', 'Z stays up'] };
   // Explode is a 0-100 % range; Reset view keeps the old toolbar wording
   const RESET_TITLE = 'Reset orientation, zoom and pan';
@@ -329,7 +330,7 @@
       h('div', { role: 'group', 'aria-label': 'Background' }, ui.bgItems.map((b) => b.it)),
       h('hr', { class: 'sm-sep' }), ui.gridItem);
     ui.menuView = h('div', { id: 'smMenuView', class: 'sm-pop', role: 'menu', 'aria-label': 'Camera view', hidden: true },
-      Object.keys(VIEW_LABELS).map((key) => menuItem(VIEW_LABELS[key], { action: () => { if (PV()) PV().preset(key); } })));
+      Object.keys(VIEW_LABELS).map((key) => menuItem(VIEW_LABELS[key], { title: VIEW_TITLES[key], action: () => { if (PV()) PV().preset(key); } })));
     // 1.7.0: Perspective / Orthographic (window.PDF3DView projection)
     ui.projItems = PROJ_LABELS.map(([key, label]) => {
       const it = menuItem(label, { role: 'menuitemradio', check: true, keepOpen: true,
@@ -341,7 +342,7 @@
       h('div', { role: 'group', 'aria-label': 'Projection' }, ui.projItems.map((p) => p.it)));
 
     // "More": explode, orbit mode, line options
-    ui.explode = h('input', { type: 'range', min: '0', max: '100', value: String(viewState().explode || 0), 'aria-label': 'Explode parts' });
+    ui.explode = h('input', { type: 'range', min: '0', max: '100', value: String(viewState().explode || 0), 'aria-label': 'Explode bodies' });
     ui.explodeOut = h('output', { text: ui.explode.value + '%' });
     ui.explode.addEventListener('input', () => {
       ui.explodeOut.textContent = ui.explode.value + '%';
@@ -420,7 +421,7 @@
         h('dt', { text: 'Opens' }), h('dd', null, '3D PDF (', h('code', { text: '.pdf' }), ') with embedded U3D (ECMA-363) or PRC (ISO 14739-1) streams, plus raw ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' files.'),
         h('dt', { text: 'STEP' }), h('dd', null, h('code', { text: '.stp' }), ' AP214 B-Rep, ready for Siemens NX and most CAD tools.'),
         h('dt', { text: 'STL' }), h('dd', null, h('code', { text: '.stl' }), ' triangle mesh, binary or ASCII.'),
-        h('dt', { text: 'OBJ' }), h('dd', null, h('code', { text: '.obj' }), ' mesh with part groups and normals.'),
+        h('dt', { text: 'OBJ' }), h('dd', null, h('code', { text: '.obj' }), ' mesh with body groups and normals.'),
         h('dt', { text: 'IGES' }), h('dd', null, h('code', { text: '.igs' }), ' 5.3 feature-edge wireframe curves.'),
         h('dt', { text: 'Raw' }), h('dd', null, 'The extracted ', h('code', { text: '.u3d' }), ' / ', h('code', { text: '.prc' }), ' stream bytes.'),
         h('dt', { text: 'Settings' }), h('dd', { text: 'Units, body type and reduce detail are in the Export dialog. Stream sizes, bounds and the product tree are under Info.' }),
@@ -770,8 +771,8 @@
     ui.dmg.hidden = !on;
     if (!on) return;
     const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
-    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} part${n === 1 ? '' : 's'} loaded.`
-      : 'Part of this model couldn\u2019t be read, so some parts may be missing.';
+    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
+      : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
     if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }
 

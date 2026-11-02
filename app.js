@@ -3702,7 +3702,7 @@
       banner.style.display = big ? '' : 'none';
       if (big) {
         banner.textContent = `Large model: ${bounds.totalParsedTris.toLocaleString()} triangles. The viewer shows a decimated preview; ` +
-          'exports stream part-by-part at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
+          'exports stream body by body at full detail (STL/OBJ are the lightest). Use "Reduce detail" to shrink exported files.';
       }
     }
     const unitScale = getScaleFromMM(state.units);
@@ -4271,7 +4271,7 @@
     if (fmt === 'step' && (o.body === 'fitted' || o.body === 'both')) return exportStepFitted(o, stem, progress);
 
     const sel = exportSelection(o.partIds);
-    if (!sel.ids.length) { const r = exportSkipped('no_parts', 'No visible part to export');
+    if (!sel.ids.length) { const r = exportSkipped('no_parts', 'No visible body to export');
       if (fmt === 'xt') r.summary = { parts: [], bodies: 0, faces: 0 };   // card: "Nothing to export"
       return r; }
     const wo = { detail };   // writers read state.exportDetail when detail is omitted; passing it gives the same value
@@ -4301,8 +4301,8 @@
         if (!tooLarge && !oom) throw e;   // the flow shows "Parasolid export failed" with the message
         const eb = tooLarge && e.estimatedBytes; const gb = eb ? fmtBytes(eb) : null;
         return { blob: null, filename: null, status: 'error', reasonCode: tooLarge ? 'XT_TOO_LARGE' : 'out_of_memory',   // Designer's card keys on 'XT_TOO_LARGE'
-          reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some parts or use Reduce detail, then try again`
-            : 'The browser ran out of memory while writing the Parasolid file. Hide some parts or use Reduce detail, then try again',
+          reason: tooLarge ? `The Parasolid file would be ${gb ? `about ${gb}, ` : ''}more than the browser can save. Hide some bodies or use Reduce detail, then try again`
+            : 'The browser ran out of memory while writing the Parasolid file. Hide some bodies or use Reduce detail, then try again',
           summary: { parts: [], estimatedBytes: (e && e.estimatedBytes) || null } };
       }
       const parts = meshPartsSummary(sel);
@@ -4310,7 +4310,7 @@
       const xs = { parts, faces: st.faces || 0, bodies: st.bodies || 0, bodyType: st.bodyType || null, sewn: st.sewn !== false, openEdges: st.openEdges || 0,
         viewerFaces: st.viewerFaces, splitFaces: st.splitFaces, estimatedBytes: st.estimatedBytes,
         schema: XT_NX_SCHEMA, brepMode: XT_UI_BREP_MODE, units: 'm' };
-      if (!xs.faces) { if (gen) gen.return(); return { ...exportSkipped('no_parts', 'No visible part has B-Rep faces'), summary: { ...xs, faces: 0 } }; }
+      if (!xs.faces) { if (gen) gen.return(); return { ...exportSkipped('no_parts', 'No visible body has B-Rep faces'), summary: { ...xs, faces: 0 } }; }
       if (gen) return { blob: null, _gen: gen, _first: first, _type: 'text/plain;charset=utf-8', _estimate: st.estimatedBytes || null, filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
       progress({ stage: 'write', pct: 100, label: 'Done' });
       return { ...fileParts(content, 'text/plain'), filename: `${stem}.x_t`, status: 'ok', reasonCode: null, reason: null, summary: xs };
@@ -4333,7 +4333,7 @@
     // no Worker / WebAssembly: no fitting at all; every part gets its mesh body (the Mesh STEP file), or nothing with 'omit'
     if ((PDF3D_NS.capabilities || {}).cadSurfacesReason === 'browser_unsupported') {
       const sel = exportSelection(o.partIds);
-      if (!sel.ids.length) return exportSkipped('no_parts', 'No visible part to export');
+      if (!sel.ids.length) return exportSkipped('no_parts', 'No visible body to export');
       const why = 'This browser can\u2019t run surface fitting (no Web Workers or WebAssembly)';
       const parts = sel.ids.map((i, k) => ({ index: i, name: sel.chosen[k].name, status: 'mesh_only', faces: 0, reasonCode: 'browser_unsupported', reason: why, written: omit ? 'omitted' : 'mesh' }));
       if (omit) return { blob: null, filename: null, status: 'skipped', reasonCode: 'browser_unsupported', reason: why, summary: { parts, faces: 0, fitSkippedReason: 'browser_unsupported' } };

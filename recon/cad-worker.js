@@ -84,7 +84,7 @@ self.onmessage = async (ev) => {
     for (let s = 0; s < sel.length; s++) {
       const i = sel[s]; const p = dparts[i]; const span = 0.85 * tris[s] / triSum; const nm = (m.names && m.names[s]) || p.name;
       const mesh = Pipe.meshFromPart(p, r.units && r.units.unitsInMM);
-      const of = sel.length > 1 ? ' (part ' + (s + 1) + '/' + sel.length + ')' : '';
+      const of = sel.length > 1 ? ' (body ' + (s + 1) + '/' + sel.length + ')' : '';
       // within a part: segment 0-0.05, primitives 0.05-0.25, free-form 0.25-0.8, build 0.8-0.97, validate 0.97-1
       let segT0 = now(), stageT = now(), curStage = 'segment';
       const enter = st => { if (st === curStage) return; const t2 = now(); timings[curStage] = (timings[curStage] || 0) + Math.round(t2 - stageT); stageT = t2; curStage = st; };

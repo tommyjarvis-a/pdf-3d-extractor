@@ -80,7 +80,7 @@
   const FORMATS = [
     { id: 'step', label: 'STEP', ext: '.stp', sub: 'CAD solid for NX, SolidWorks, Fusion…', mime: 'application/step' },
     { id: 'stl', label: 'STL', ext: '.stl', sub: 'Triangle mesh for 3D printing', mime: 'model/stl' },
-    { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with part groups', mime: 'model/obj' },
+    { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with body groups', mime: 'model/obj' },
     { id: 'iges', label: 'IGES', ext: '.igs', sub: 'Wireframe edges only', mime: 'model/iges' },
     { id: 'raw', label: 'Raw stream', ext: '.u3d', sub: 'The embedded U3D / PRC bytes', mime: 'application/octet-stream' },
     { id: 'xt', label: 'Parasolid', ext: '.x_t', sub: 'Faceted body, flat faces', mime: 'text/plain', cap: 'parasolid' }
@@ -338,7 +338,7 @@
             h('span', { text: 'If a face can\u2019t be fitted' }),
             h('div', { class: 'xf-seg-row' },
               radio('xfNoFit', 'mesh', 'Save mesh STEP instead', null, p.onNoFit !== 'omit', (v) => { p.onNoFit = v; save(); }),
-              radio('xfNoFit', 'omit', 'Leave unfitted parts out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
+              radio('xfNoFit', 'omit', 'Leave unfitted bodies out', null, p.onNoFit === 'omit', (v) => { p.onNoFit = v; save(); }))));
         }
       }
       if (body !== 'fitted') add(settingSelect('brepMode', 'Mesh B-Rep'));
@@ -426,7 +426,7 @@
   // ------------------------------------------------------------------ partial (damaged) loads
   // lastLoad.damaged (1.6.2, 'ok' loads only) = some of the model couldn't be read. Exports from such a load get a _partial
   // file name, a note in the popover and an amber card. Export results may carry it too (damaged / summary.damaged).
-  const DMG_NOTE = 'Only part of this model loaded. The file may be missing parts.';
+  const DMG_NOTE = 'Only part of this model loaded. The file may be missing bodies.';
   const DMG_LINE = 'This model was only partly read. Check it against the drawing before using it.';
   const nonEmpty = (v) => typeof v === 'string' && !!v.trim();
   // 1.6.2 (9ba8d26): PDF3D.partialNote() (note text while damaged, else null) is the trigger; older engines: lastLoad.damaged
@@ -547,7 +547,7 @@
         // check as its first line. Never on picker saves.
         const bytes = dl ? bytesOf(res, out.blob) : 0;
         if (bytes > BIG) {
-          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If the file is missing or 0 bytes, try Chrome or Edge, or hide some parts.';
+          const chk = 'Your browser was given a ' + fmtGB(bytes) + ' file but can\u2019t confirm it saved. If the file is missing or 0 bytes, try Chrome or Edge, or hide some bodies.';
           out = out.tone === 'ok'
             ? Object.assign({}, out, { tone: 'warn', status: 'check_download', title: 'Check that the download finished', lines: [chk, f.id === 'xt' ? XT_UNITS : null] })
             : Object.assign({}, out, { lines: ['Check that the download finished. ' + chk].concat(out.lines || []) });
@@ -680,7 +680,7 @@
     if (!ps || !ps.length) return null;
     return ps.map((p, i) => {
       const q = Object.assign({}, p);
-      if (!q.name) q.name = 'Part ' + (i + 1);
+      if (!q.name) q.name = 'Body ' + (i + 1);
       if (!/^(solid|mesh|omitted)$/.test(q.written)) q.written = q.status === 'solid' ? 'solid' : 'omitted';
       return q;
     });
@@ -709,18 +709,18 @@
     ui.rBody.textContent = '';
     for (const l of lines || []) if (l) ui.rBody.append(h('p', { text: l }));
     if (parts && parts.length) {
-      const ul = h('ul', { class: 'xf-parts', 'data-xf': 'parts', id: 'xfParts', 'aria-label': 'Parts' });
+      const ul = h('ul', { class: 'xf-parts', 'data-xf': 'parts', id: 'xfParts', 'aria-label': 'Bodies' });
       parts.forEach((p, i) => ul.append(h('li', { class: 'xf-part', 'data-written': p.kind, 'data-open': p.open ? '1' : null, hidden: i >= PARTS_SHOWN },
         h('span', { class: 'xf-part-n', text: p.name }), h('span', { class: 'xf-part-w', text: p.what }),
         p.why || p.body ? h('span', { class: 'xf-part-r', text: [bodyLabel(p), cap(p.why)].filter(Boolean).join(' \u00b7 ') }) : null)));
       ui.rBody.append(ul);
       if (parts.length > PARTS_SHOWN) {
-        const more = h('button', { type: 'button', class: 'xf-more', 'data-xf': 'show-all', 'aria-expanded': 'false', 'aria-controls': 'xfParts', text: 'Show all ' + parts.length + ' parts' });
+        const more = h('button', { type: 'button', class: 'xf-more', 'data-xf': 'show-all', 'aria-expanded': 'false', 'aria-controls': 'xfParts', text: 'Show all ' + parts.length + ' bodies' });
         more.addEventListener('click', () => {
           const all = more.getAttribute('aria-expanded') !== 'true';
           ul.querySelectorAll('.xf-part').forEach((li, i) => { li.hidden = !all && i >= PARTS_SHOWN; });
           more.setAttribute('aria-expanded', String(all));
-          more.textContent = all ? 'Show fewer' : 'Show all ' + parts.length + ' parts';
+          more.textContent = all ? 'Show fewer' : 'Show all ' + parts.length + ' bodies';
         });
         ui.rBody.append(more);
       }
@@ -900,23 +900,23 @@
     const meshOnly = list.filter((l) => l.kind === 'mesh').length, out = list.filter((l) => l.kind === 'omitted').length, solids = fit - open;
     const faces = parts.reduce((a, p) => a + (bothFitted(p) ? (+p.faces || 0) : 0), 0) || (res.summary && res.summary.faces);
     const allMesh = list.every((l) => l.kind !== 'omitted');
-    const meshLine = allMesh ? (n > 1 ? 'Every part\u2019s mesh body is in the file too.' : 'The mesh body is included too.') : null;
+    const meshLine = allMesh ? (n > 1 ? 'Every body\u2019s mesh is in the file too.' : 'The mesh body is included too.') : null;
     if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
     if (fit === 0) {
       return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
-        lines: ['No part could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
+        lines: ['No body could be fitted, so the file has only mesh bodies.', why ? cap(why) : null] };
     }
     if (solids === n) {
       return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
         title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
-        lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.', meshLine] };
+        lines: [n > 1 ? 'All ' + n + ' bodies fitted into closed solids.' : 'Fitted into a closed solid.', meshLine] };
     }
-    const openLine = open ? (open === 1 ? (n === 1 ? 'The fitted surfaces don\u2019t close into a solid.' : '1 fitted part has open surfaces, not a closed solid.') : open + ' fitted parts have open surfaces, not closed solids.') : null;
-    const meshOnlyLine = meshOnly ? (meshOnly === 1 ? '1 part couldn\u2019t be fitted, so it has only its mesh body.' : meshOnly + ' parts couldn\u2019t be fitted, so they have only their mesh body.') : null;
-    const outLine = out ? (out === 1 ? '1 part was left out of the file.' : out + ' parts were left out of the file.') : null;
+    const openLine = open ? (open === 1 ? (n === 1 ? 'The fitted surfaces don\u2019t close into a solid.' : '1 fitted body has open surfaces, not a closed solid.') : open + ' fitted bodies have open surfaces, not closed solids.') : null;
+    const meshOnlyLine = meshOnly ? (meshOnly === 1 ? '1 body couldn\u2019t be fitted, so it has only its mesh body.' : meshOnly + ' bodies couldn\u2019t be fitted, so they have only their mesh body.') : null;
+    const outLine = out ? (out === 1 ? '1 body was left out of the file.' : out + ' bodies were left out of the file.') : null;
     const title = fit === n
-      ? (n === 1 ? 'Fitted surfaces exported (open, not a solid)' : 'Fitted: ' + solids + ' of ' + n + ' parts are closed solids')
-      : 'Partly fitted: ' + fit + ' of ' + n + ' parts fitted' + [meshOnly ? meshOnly + ' mesh only' : null, out ? out + ' left out' : null].filter(Boolean).map((t) => ', ' + t).join('');
+      ? (n === 1 ? 'Fitted surfaces exported (open, not a solid)' : 'Fitted: ' + solids + ' of ' + n + ' bodies are closed solids')
+      : 'Partly fitted: ' + fit + ' of ' + n + ' bodies fitted' + [meshOnly ? meshOnly + ' mesh only' : null, out ? out + ' left out' : null].filter(Boolean).map((t) => ', ' + t).join('');
     return { tone: 'warn', status: fit === n ? 'open' : 'partial', blob, parts: list, title, lines: [meshLine, openLine, meshOnlyLine, outLine] };
   }
 
@@ -946,7 +946,7 @@
   const limitRows = (parts, list) => (parts.every((p) => normCode(p.reasonCode) === 'fit_limit' || p.reasonCode == null) ? undefined : list);
   const fmtGB = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(n / 1e6)) + ' MB');
   const XT_UNITS = 'Stored in meters, opens at true size in NX.';
-  const XT_NOTE = 'All parts merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
+  const XT_NOTE = 'All bodies merged into one faceted body. No B-spline surfaces yet.';   // same words as the list sub-line
 
   function describe(f, o, res, err) {
     const label = f.id === 'stl' ? 'STL (' + (o.encoding === 'ascii' ? 'ASCII' : 'binary') + ')' : f.label;
@@ -961,14 +961,14 @@
         // XT_TOO_LARGE (estimated output > 8 GB): own wording only; the engine's reason text also says "Nothing was saved"
         if (!blob && normCode(res.reasonCode) === 'too_large') {
           return { tone: 'warn', status: 'too_large', title: 'Model too large to export' + (+g('estimatedBytes') > 0 ? ' (about ' + fmtGB(+g('estimatedBytes')) + ')' : ''),
-            lines: ['This model is too large for the browser to write as Parasolid.', 'Nothing was saved. Try hiding some parts, or export STEP or STL instead.'] };
+            lines: ['This model is too large for the browser to write as Parasolid.', 'Nothing was saved. Try hiding some bodies, or export STEP or STL instead.'] };
         }
         if (g('faces') != null && +g('faces') === 0) {
           return { tone: 'warn', status: 'empty', title: 'Nothing to export', lines: ['The model has no faces to write.', 'No file was saved.'] };
         }
         if (blob && (g('bodyType') === 'sheet' || +g('openEdges') > 0 || g('sewn') === false)) {
           return { tone: 'warn', status: 'sheet', blob, title: 'Parasolid sheet body exported (open model)',
-            lines: ['This part isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.',
+            lines: ['This body isn\u2019t closed, so it was saved as surfaces, not a solid. This form hasn\u2019t been tested in NX.',
               +g('openEdges') > 0 ? (+g('openEdges') === 1 ? '1 open edge.' : Math.round(+g('openEdges')).toLocaleString('en-US') + ' open edges.') : null, XT_UNITS] };
         }
       }
@@ -990,23 +990,23 @@
       if (blob && o.body === 'both') return describeBoth(res, parts, blob, why);
       const list = parts.map(partLine);
       if (!blob) {
-        return { tone: 'warn', status: res.status || 'skipped', title: 'Nothing saved: no part could be fitted', parts: list,
-          lines: [omitMode ? '\u201cLeave unfitted parts out\u201d is on, so no file was written.' : 'No file was written.',
+        return { tone: 'warn', status: res.status || 'skipped', title: 'Nothing saved: no body could be fitted', parts: list,
+          lines: [omitMode ? '\u201cLeave unfitted bodies out\u201d is on, so no file was written.' : 'No file was written.',
             omitMode ? 'Choose \u201cSave mesh STEP instead\u201d to always get a file.' : null] };
       }
       if (fit === n) {
         return { tone: res.summary && res.summary.valid === false ? 'warn' : 'ok', status: 'solid', blob, parts: list,
           title: 'Fitted solid exported' + (faces ? ' (' + plural(+faces, 'face') + ')' : ''),
-          lines: [n > 1 ? 'All ' + n + ' parts fitted into closed solids.' : 'Fitted into a closed solid.'] };
+          lines: [n > 1 ? 'All ' + n + ' bodies fitted into closed solids.' : 'Fitted into a closed solid.'] };
       }
       if (fit === 0 && limitHit(res, parts)) return { tone: 'warn', status: 'mesh_only', limit: true, blob, parts: limitRows(parts, list), title: LIMIT_TITLE, lines: [limitLine(res)] };
       if (fit === 0) {
         return { tone: 'warn', status: 'mesh_only', blob, parts: list, title: 'Mesh STEP exported',
-          lines: ['No part could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
+          lines: ['No body could be fitted, so the mesh STEP was saved instead.', why ? cap(why) : null] };
       }
       const tail = [mesh ? mesh + ' saved as mesh' : null, out ? out + ' left out' : null].filter(Boolean).join(', ');
-      return { tone: 'warn', status: 'partial', blob, parts: list, title: 'Partly fitted: ' + fit + ' of ' + n + ' parts fitted' + (tail ? ', ' + tail : ''),
-        lines: [out ? 'Parts that couldn\u2019t be fitted were left out of the file.' : 'Parts that couldn\u2019t be fitted were saved as mesh bodies in the same file.'] };
+      return { tone: 'warn', status: 'partial', blob, parts: list, title: 'Partly fitted: ' + fit + ' of ' + n + ' bodies fitted' + (tail ? ', ' + tail : ''),
+        lines: [out ? 'Bodies that couldn\u2019t be fitted were left out of the file.' : 'Bodies that couldn\u2019t be fitted were saved as mesh bodies in the same file.'] };
     }
 
     // whole-file results
@@ -1026,7 +1026,7 @@
     let lines = (d.lines || []).map((l) => (/Fitted solid only/.test(l) ? 'Choose \u201cSave mesh STEP instead\u201d to always get a file.' : l));
     if (omitMode && !b && d.status !== 'cancelled') {
       lines = lines.filter((l) => !/Save mesh STEP instead|Nothing was exported/.test(l));
-      lines.push('\u201cLeave unfitted parts out\u201d is on, so no file was written.', 'Choose \u201cSave mesh STEP instead\u201d to always get a file.');
+      lines.push('\u201cLeave unfitted bodies out\u201d is on, so no file was written.', 'Choose \u201cSave mesh STEP instead\u201d to always get a file.');
     }
     return { tone: d.tone === 'muted' && !b ? 'warn' : d.tone, status: d.status, title, lines, blob: b };
   }
