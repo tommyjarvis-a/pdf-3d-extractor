@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.7.0 (alpha) — 2026-11-02
+
+Alpha: carries the 1.6.2 release candidate (below) plus a Simple-mode viewer refresh. Exports are byte-identical to 1.6.2.
+
+### Included from 1.6.2
+- Everything listed under 1.6.2 below: `PDF3D.saveAttachment`, `attachmentDetails[].fileName` / `.mime`,
+  `lastLoad.trisParsed`, `lastLoad.damaged` partial loads, the `NO_3D` attachment card, STEP string escaping, Designer's
+  Simple mode / export flow update, one file-name rule for `exportFormat` results and `PDF3D.suggestedFileName`, the
+  sanitized attachment `fileName` in Advanced's status badge, and the README `createWritable()` retry.
+
+### Changed (Simple mode)
+- The bottom-left file / geometry readout moved into **Info → File & geometry** (stream, bodies / faces / tris, bounds,
+  units, renderer; nothing dropped). The controls help moved to **More → Help**. The bottom-left now holds only the axis
+  triad (moved there from the lower right, at every window size); the decimation note moved to the lower right.
+- **Info** is the last tab, at the far right of the tab bar.
+- "Parts" is now **Solid Bodies** (tab, panel, tooltips, row labels).
+- Upper-right status: `File loaded: name.pdf | Bodies Detected: N`; long names truncate with "…", full name on hover.
+- "X-ray" is now **Transparent** (label only; same render mode).
+
+### Added
+- **Background** (Display menu): Default, Black, White, Black to white gradient (black at the top).
+- **Floor grid** toggle (Display menu), on by default.
+- **Perspective / Orthographic** (View menu), Perspective by default. Both renderers (WebGL and the Canvas 2D fallback)
+  use the same framing: the plane through the view centre matches orthographic, so Fit and zoom frame the model the same way.
+- `window.PDF3DView` (`get()`, `set(key, value)`, `'pdf3d:viewprefs'` event); the three choices are remembered in
+  `localStorage` (`pdf3d-extractor.viewPrefs`).
+- Worker cache key is now `1.7.0-w1`.
+
 ## 1.6.2 (alpha) — 2026-11-01
 
 Alpha: Simple mode now handles PDFs without a 3D model but with embedded files, and partial (damaged) loads. Its wording may still change.

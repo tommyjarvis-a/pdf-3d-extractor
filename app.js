@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.6.2
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.7.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.6.2';
+  const APP_VERSION = '1.7.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: shown in the UI while buildParasolidXT writes the NX 2512 form
@@ -70,6 +70,26 @@
     cachedXT: null,
     cachedSTEP: null
   };
+
+  // 1.7.0 viewport preferences (UI only, never touch exports): background, floor grid, projection.
+  // Remembered in localStorage under VIEW_PREFS_KEY; read / changed through window.PDF3DView.
+  const VIEW_PREFS_KEY = 'pdf3d-extractor.viewPrefs';
+  const VIEW_PREF_VALUES = {
+    background: ['default', 'black', 'white', 'gradient'],
+    grid: [true, false],
+    projection: ['perspective', 'orthographic']
+  };
+  const VIEW_PREF_DEFAULTS = { background: 'default', grid: true, projection: 'perspective' };
+  function loadViewPrefs() {
+    const p = Object.assign({}, VIEW_PREF_DEFAULTS);
+    try {
+      const raw = window.localStorage && window.localStorage.getItem(VIEW_PREFS_KEY);
+      const o = raw ? JSON.parse(raw) : null;
+      if (o && typeof o === 'object') for (const k of Object.keys(VIEW_PREF_VALUES)) if (VIEW_PREF_VALUES[k].includes(o[k])) p[k] = o[k];
+    } catch (e) { /* private mode / bad JSON: defaults */ }
+    return p;
+  }
+  state.viewPrefs = loadViewPrefs();
 
   // -------------------------------------------------------------------------
   // 1. Decompression Helpers (Browser DecompressionStream + pure-JS fallback)
@@ -3351,10 +3371,37 @@
     glv.render({
       epoch: state.parts, center: bounds.center, radius: bounds.radius, camera: state.camera,
       renderMode: state.renderMode || 'shaded-edges', selectedPartIdx: state.selectedPartIdx,
-      items, wires: state.wires || [], palette: PALETTE, grid: { z: bounds.min[2], step: 20, extent: 80 },
+      items, wires: state.wires || [], palette: PALETTE,
+      grid: state.viewPrefs.grid ? { z: bounds.min[2], step: 20, extent: 80 } : null,
+      projection: state.viewPrefs.projection, triad: triadCorner(), lightBg: isLightBackground(),
       note: ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : ''
     });
   }
+
+  // 1.7.0: the axis triad sits lower-left in Simple mode (its bottom-left holds nothing else); Advanced keeps lower-right
+  function triadCorner() {
+    return document.body && document.body.classList && document.body.classList.contains('sm-simple') ? 'bl' : 'br';
+  }
+  function isLightBackground() { return state.viewPrefs.background === 'white' || state.viewPrefs.background === 'gradient'; }
+  function applyViewBackground() {
+    const wrap = document.querySelector && document.querySelector('.viewport-wrap');
+    if (wrap && wrap.setAttribute) wrap.setAttribute('data-bg', state.viewPrefs.background);
+  }
+  // window.PDF3DView (1.7.0): get() -> { background, grid, projection }; set(key, value) validates, applies, re-renders,
+  // remembers it (localStorage) and fires 'pdf3d:viewprefs' on document. values / defaults list the allowed choices.
+  window.PDF3DView = {
+    values: VIEW_PREF_VALUES, defaults: VIEW_PREF_DEFAULTS, storageKey: VIEW_PREFS_KEY,
+    get() { return Object.assign({}, state.viewPrefs); },
+    set(key, value) {
+      if (!VIEW_PREF_VALUES[key] || !VIEW_PREF_VALUES[key].includes(value)) return false;
+      state.viewPrefs[key] = value;
+      try { if (window.localStorage) window.localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(state.viewPrefs)); } catch (e) { /* private mode */ }
+      applyViewBackground();
+      renderViewport();
+      try { document.dispatchEvent(new CustomEvent('pdf3d:viewprefs', { detail: Object.assign({}, state.viewPrefs) })); } catch (e) { /* old browsers */ }
+      return true;
+    }
+  };
 
   // Camera orientation: free quaternion arcball (default) or legacy Z-up turntable, via window.PDF3DCamera (viewer-gl.js).
   function viewBasis(cam) {
@@ -3413,6 +3460,11 @@
     const scale = baseScale * cam.zoom;
     const cxScreen = w * 0.5 + cam.panX;
     const cyScreen = h * 0.52 + cam.panY;
+    // 1.7.0 perspective: same framing on the plane through the view center as viewer-gl.js (PDF3DCamera.perspective)
+    const explodeR = (state.explodeFactor || 0) / 100;
+    const perspR = bounds.radius * (1 + explodeR) + 14 * explodeR * state.parts.length;
+    const eyeDist = state.viewPrefs.projection === 'perspective' && window.PDF3DCamera && window.PDF3DCamera.perspective
+      ? window.PDF3DCamera.perspective(scale, w, h, perspR) : 0;
 
     function projectPoint(x, y, z) {
       const dx = x - bounds.center[0];
@@ -3422,9 +3474,10 @@
       const x1 = dx * vR[0] + dy * vR[1] + dz * vR[2];
       const y2 = dx * vD[0] + dy * vD[1] + dz * vD[2];
       const z2 = dx * vU[0] + dy * vU[1] + dz * vU[2];
+      const k = eyeDist ? eyeDist / Math.max(eyeDist + y2, eyeDist * 0.05) : 1;
       return {
-        sx: cxScreen + x1 * scale,
-        sy: cyScreen - z2 * scale,
+        sx: cxScreen + x1 * scale * k,
+        sy: cyScreen - z2 * scale * k,
         depth: y2
       };
     }
@@ -3433,12 +3486,12 @@
       return [nx * vR[0] + ny * vR[1] + nz * vR[2], nx * vD[0] + ny * vD[1] + nz * vD[2], nx * vU[0] + ny * vU[1] + nz * vU[2]];
     }
 
-    // 1. Draw subtle CAD XY datum grid on Z = bounds.min[2]
+    // 1. Draw subtle CAD XY datum grid on Z = bounds.min[2] (1.7.0: Floor grid toggle)
     const zGrid = bounds.min[2];
     const gridStep = 20;
-    const gridExtent = 80;
+    const gridExtent = state.viewPrefs.grid ? 80 : -1;
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.14)';
+    ctx.strokeStyle = isLightBackground() ? 'rgba(59, 130, 246, 0.32)' : 'rgba(59, 130, 246, 0.14)';
     ctx.beginPath();
     for (let g = -gridExtent; g <= gridExtent; g += gridStep) {
       const pA = projectPoint(g, -gridExtent, zGrid);
@@ -3619,35 +3672,9 @@
         ctx.stroke();
       }
     }
-    if (ratio < 1) {
-      ctx.font = '11px "JetBrains Mono", monospace';
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-      ctx.fillText(`Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)`, 12, h - 12);
-    }
-
-    // 3. Draw CAD XYZ orientation triad in bottom-right corner
-    const triadCx = w - 54;
-    const triadCy = h - 48;
-    const triadLen = 28;
-    const axes = [
-      { label: 'X', vec: [1, 0, 0], color: '#f43f5e' },
-      { label: 'Y', vec: [0, 1, 0], color: '#10b981' },
-      { label: 'Z', vec: [0, 0, 1], color: '#3b82f6' }
-    ];
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
-    for (const ax of axes) {
-      const [rx, , rz] = rotateVec(ax.vec[0], ax.vec[1], ax.vec[2]);
-      const ex = triadCx + rx * triadLen;
-      const ey = triadCy - rz * triadLen;
-      ctx.strokeStyle = ax.color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(triadCx, triadCy);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
-      ctx.fillStyle = ax.color;
-      ctx.fillText(ax.label, ex + (rx >= 0 ? 4 : -10), ey + (rz >= 0 ? -4 : 10));
-    }
+    // 3. decimation note + CAD XYZ orientation triad (shared drawing with viewer-gl.js; corner per triadCorner())
+    const note = ratio < 1 ? `Preview decimated to ~${nDraw.toLocaleString()} of ${totalTris.toLocaleString()} tris (exports use full detail)` : '';
+    if (window.PDF3DViewerGL && window.PDF3DViewerGL.drawTriadAndNote) window.PDF3DViewerGL.drawTriadAndNote(ctx, w, h, vR, vU, note, triadCorner());
 
     ctx.restore();
   }
@@ -4888,6 +4915,7 @@
   PDF3D_NS.saveAttachment = saveAttachment;
 
   window.addEventListener('DOMContentLoaded', () => {
+    applyViewBackground();
     initEvents();
     if (window.SAMPLE_3D_PDF_B64) {
       loadPDFBuffer(base64ToUint8Array(window.SAMPLE_3D_PDF_B64), 'sample-cad-assembly-3d.pdf');

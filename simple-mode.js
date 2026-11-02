@@ -28,12 +28,28 @@
   const $ = (id) => document.getElementById(id);
 
   const RENDER_LABELS = {
-    'shaded-edges': 'Shaded with edges', 'brep-faces': 'Face groups', shaded: 'Smooth', wireframe: 'Wireframe', xray: 'X-ray'
+    'shaded-edges': 'Shaded with edges', 'brep-faces': 'Face groups', shaded: 'Smooth', wireframe: 'Wireframe', xray: 'Transparent'
   };
+  // 1.7.0 viewport preferences (window.PDF3DView in app.js; remembered in localStorage there)
+  const BG_LABELS = [['default', 'Default'], ['black', 'Black'], ['white', 'White'], ['gradient', 'Black to white gradient']];
+  const PROJ_LABELS = [['perspective', 'Perspective'], ['orthographic', 'Orthographic']];
+  const BODIES = 'Solid Bodies';   // 1.7.0: the "Parts" tab / sheet
+  // More > Help (1.7.0): the full controls list that used to sit bottom-left in the viewport
+  const HELP_ROWS = [
+    ['Drag', 'Orbit'],
+    ['Ctrl / Alt-drag or middle-drag', 'Twist about the view axis'],
+    ['Shift-drag or right-drag', 'Pan'],
+    ['Scroll', 'Zoom'],
+    ['Fit', 'Reset zoom and pan'],
+    ['Reset', 'Back to the starting view'],
+    [BODIES, 'Click a body to highlight it; tick boxes show or hide bodies'],
+    ['Open or drop', 'Open a 3D PDF, .u3d or .prc file, or drop it anywhere on the page'],
+    ['Esc', 'Close a menu, panel or dialog']
+  ];
   const VIEW_LABELS = { iso: 'Iso', top: 'Top', front: 'Front', right: 'Right' };
   const ORBIT_LABELS = { free: ['Free', 'tumble any axis'], turntable: ['Turntable', 'Z stays up'] };
   const HINT_RE = /Click (?:a )?part in (?:the )?tree to highlight/;
-  const HINT_TEXT = { simple: 'Click a part in Parts to highlight', advanced: 'Click a part in the part list to highlight' };
+  const HINT_TEXT = { simple: 'Click a body in Solid Bodies to highlight', advanced: 'Click a part in the part list to highlight' };
   const VIEWOPT_LABELS = {
     wires: ['Wires', 'PRC curves'], hiddenLines: ['Hidden', 'dimmed hidden edges'],
     meshWire: ['Mesh', 'triangle overlay'], flat: ['Flat', 'faceted shading']
@@ -302,8 +318,13 @@
     const titleEl = document.querySelector('.brand-title');
     const verMatch = titleEl && (titleEl.textContent.match(/v\d+(?:\.\d+)+/) || [])[0];
     const version = verMatch || (window.CAD3DExtractorVersion ? 'v' + window.CAD3DExtractorVersion : '');
+    // 1.7.0 status (upper right): exactly "File loaded: name.pdf | Bodies Detected: N"; the name truncates with an
+    // ellipsis and shows in full on hover; the dot keeps the load tone and the bodies part keeps the old status tooltip
     ui.docName = h('span', { class: 'sm-doc-name', text: ($('docFileName') || {}).textContent || '' });
-    ui.status = h('span', { class: 'sm-status', role: 'status', 'aria-live': 'polite' }, h('span', { class: 'sm-dot', 'aria-hidden': 'true' }), h('span', { class: 'sm-status-t' }));
+    ui.bodies = h('span', { class: 'sm-status-n', text: '0' });
+    ui.statusT = h('span', { class: 'sm-status-t' }, ' | Bodies Detected: ', ui.bodies);
+    ui.status = h('span', { class: 'sm-status', role: 'status', 'aria-live': 'polite' }, h('span', { class: 'sm-dot', 'aria-hidden': 'true' }),
+      h('span', { class: 'sm-status-k', text: 'File loaded: ' }), ui.docName, ui.statusT);
 
     ui.btnOpen = h('button', { type: 'button', class: 'btn sm-btn-open', title: 'Open a 3D PDF, .u3d or .prc file' },
       h('span', null, 'Open', h('span', { class: 'sm-long', text: ' 3D PDF' }), '…'));
@@ -312,6 +333,7 @@
     ui.btnMore = h('button', { type: 'button', class: 'btn sm-iconbtn', 'aria-label': 'More actions', title: 'More actions', text: '⋯' });
     ui.menuMore = h('div', { id: 'smMenuMore', class: 'sm-pop', role: 'menu', 'aria-label': 'More actions', hidden: true },
       menuItem('Load sample', { ext: 'NX-ASM-402', action: () => { const o = $('btnLoadSample'); if (o) o.click(); } }),
+      menuItem('Help', { action: () => showAbout(ui.help) }),
       menuItem('About formats', { action: () => showAbout() }));
 
     ui.btnExportMain = h('button', { type: 'button', class: 'btn btn-primary', title: 'Export STEP AP214 (.stp) — Siemens NX ready' }, 'Export STEP');
@@ -346,7 +368,7 @@
       h('div', { class: 'sm-brand' },
         h('div', { class: 'brand-badge', 'aria-hidden': 'true', text: '3D' }),
         h('div', { class: 'sm-brand-title' }, '3D PDF → CAD', version ? h('span', { class: 'sm-brand-ver', text: version }) : null)),
-      h('div', { class: 'sm-doc' }, ui.docName, ui.status, ui.dmg),
+      h('div', { class: 'sm-doc' }, ui.dmg, ui.status),
       h('div', { class: 'sm-actions' },
         ui.btnOpen, ui.btnMore,
         h('div', { class: 'sm-split', role: 'group', 'aria-label': 'Export' }, ui.btnExportMain, ui.btnExportCaret),
@@ -356,8 +378,8 @@
 
     // ---------- floating viewport pill
     const wrap = document.querySelector('.viewport-wrap');
-    ui.btnParts = h('button', { type: 'button', class: 'btn btn-sm', 'aria-expanded': 'false', 'aria-pressed': 'false', 'aria-controls': 'smSheetParts', title: 'Show / hide parts' },
-      'Parts', ui.partCount = h('span', { class: 'sm-count', text: '0' }));
+    ui.btnParts = h('button', { type: 'button', class: 'btn btn-sm', 'aria-expanded': 'false', 'aria-pressed': 'false', 'aria-controls': 'smSheetParts', title: 'Show / hide solid bodies' },
+      BODIES, ui.partCount = h('span', { class: 'sm-count', text: '0' }));
     ui.btnInfo = h('button', { type: 'button', class: 'btn btn-sm', 'aria-expanded': 'false', 'aria-pressed': 'false', 'aria-controls': 'smSheetInfo', title: 'Streams, size, features, product tree', text: 'Info' });
     ui.btnDisplay = h('button', { type: 'button', class: 'btn btn-sm' }, h('span', { class: 'sm-pill-k', text: 'Display' }), ui.displayLabel = h('span', { class: 'sm-pill-v' }), h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
     ui.btnView = h('button', { type: 'button', class: 'btn btn-sm' }, 'View', h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
@@ -368,8 +390,9 @@
     if (ui.btnReset) ui.btnReset.addEventListener('click', () => { const o = viewerAll('[data-view="reset"]')[0]; if (o) o.click(); });
     ui.btnViewMore = h('button', { type: 'button', class: 'btn btn-sm' }, 'More', h('span', { class: 'sm-caret', 'aria-hidden': 'true', text: '▼' }));
     ui.pill = h('div', { class: 'sm-pill', role: 'toolbar', 'aria-label': 'Viewer' },
-      ui.btnParts, ui.btnInfo, h('span', { class: 'sm-pill-sep', 'aria-hidden': 'true' }),
-      ui.btnDisplay, ui.btnView, ui.btnFit, ui.btnReset, ui.btnViewMore);
+      ui.btnParts, h('span', { class: 'sm-pill-sep', 'aria-hidden': 'true' }),
+      ui.btnDisplay, ui.btnView, ui.btnFit, ui.btnReset, ui.btnViewMore,
+      h('span', { class: 'sm-pill-sep', 'aria-hidden': 'true' }), ui.btnInfo);   // 1.7.0: Info at the far right
     ui.btnParts.addEventListener('click', () => toggleSheet(ui.partsSheet));
     ui.btnInfo.addEventListener('click', () => toggleSheet(ui.infoSheet));
 
@@ -382,11 +405,33 @@
       observe(orig, syncDisplay, { attributes: true, attributeFilter: ['class'] });
       return { it, orig, key };
     });
+    // 1.7.0: background choice + floor grid (window.PDF3DView)
+    const PV = () => window.PDF3DView;
+    ui.bgItems = BG_LABELS.map(([key, label]) => {
+      const it = menuItem(label, { role: 'menuitemradio', check: true, keepOpen: true, action: () => { if (PV()) PV().set('background', key); syncDisplay(); } });
+      it.dataset.smBg = key;
+      return { it, key };
+    });
+    ui.gridItem = menuItem('Floor grid', { role: 'menuitemcheckbox', check: true, keepOpen: true,
+      action: () => { if (PV()) PV().set('grid', !PV().get().grid); syncDisplay(); } });
+    ui.gridItem.classList.add('sm-mi--box');
+    ui.menuDisplay.append(h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', text: 'Background' }),
+      h('div', { role: 'group', 'aria-label': 'Background' }, ui.bgItems.map((b) => b.it)),
+      h('hr', { class: 'sm-sep' }), ui.gridItem);
     ui.menuView = h('div', { id: 'smMenuView', class: 'sm-pop', role: 'menu', 'aria-label': 'Camera view', hidden: true },
       viewerAll('[data-view]').filter((o) => o.getAttribute('data-view') !== 'reset').map((orig) => {
         const key = orig.getAttribute('data-view');
         return menuItem(VIEW_LABELS[key] || orig.textContent.trim(), { title: orig.textContent.trim(), action: () => orig.click() });
       }));
+    // 1.7.0: Perspective / Orthographic (window.PDF3DView projection)
+    ui.projItems = PROJ_LABELS.map(([key, label]) => {
+      const it = menuItem(label, { role: 'menuitemradio', check: true, keepOpen: true,
+        action: () => { if (window.PDF3DView) window.PDF3DView.set('projection', key); syncProjection(); } });
+      it.dataset.smProj = key;
+      return { it, key };
+    });
+    ui.menuView.append(h('hr', { class: 'sm-sep' }), h('div', { class: 'sm-pop-h', text: 'Projection' }),
+      h('div', { role: 'group', 'aria-label': 'Projection' }, ui.projItems.map((p) => p.it)));
 
     // "More": explode + line options
     const explode = $('explodeSlider');
@@ -444,10 +489,28 @@
     if (wrap) wrap.append(ui.pill, ui.empty, ui.dropVeil);
 
     // ---------- sheets
-    const parts = makeSheet('smSheetParts', 'Parts', 'left', 'sm-sheet--parts');
+    const parts = makeSheet('smSheetParts', BODIES, 'left', 'sm-sheet--parts');
     ui.partsSheet = parts.sheet; ui.partsBody = parts.body;
     const info = makeSheet('smSheetInfo', 'Info', 'right', 'sm-sheet--info');
     ui.infoSheet = info.sheet; ui.infoBody = info.body;
+    // 1.7.0: the viewport readout (stream, bodies / faces / tris, bounds, units, renderer) lives here now, all of it,
+    // mirrored live from the HUD nodes app.js keeps writing (hidden in Simple). "Solids:" reads "Solid Bodies:".
+    ui.readout = h('div', { class: 'sm-readout', 'data-sm': 'readout' });
+    ui.readoutRows = ['hudStreamTitle', 'hudAssemblyStats', 'hudBounds', 'hudScaleInfo', 'hudRenderStats'].map((id) => {
+      const row = h('div', { class: 'sm-readout-r', 'data-hud': id });
+      const src = $(id);
+      const sync = () => {
+        const t = src ? (src.textContent || '').trim().replace(/^(?:Parts|Solids):/, BODIES + ':') : '';
+        if (row.textContent !== t) row.textContent = t;
+        row.hidden = !t;
+      };
+      sync();
+      observe(src, sync);
+      ui.readout.append(row);
+      return row;
+    });
+    ui.infoBody.append(h('details', { class: 'sm-sec', open: true }, h('summary', null, h('span', { text: 'File & geometry' })),
+      h('div', { class: 'sm-sec-b' }, ui.readout)));
     ui.infoSections = [
       ['streamList', 'Streams', 'streamCountBadge', false],
       ['bboxGrid', 'Bounding box & topology', 'unitBadge', true],
@@ -481,13 +544,20 @@
         h('dt', { text: 'Settings' }), h('dd', { text: 'Units, body type and reduce detail live under Export ▼ → Export settings. The STEP / stream inspector is in Advanced mode.' }),
         sub ? h('dt', { text: 'Specs' }) : null, sub ? h('dd', { text: sub.textContent.trim() }) : null));
 
-    document.body.append(ui.menuMore, ui.menuExport, ui.menuDisplay, ui.menuView, ui.menuViewMore, ui.partsSheet, ui.infoSheet, ui.about);
+    // ---------- Help dialog (More > Help, 1.7.0)
+    ui.help = h('div', { id: 'smHelp', class: 'sm-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'smHelpTitle', tabindex: '-1', hidden: true },
+      h('div', { class: 'sm-sheet-h' }, h('h2', { id: 'smHelpTitle', text: 'Controls' }),
+        h('button', { type: 'button', class: 'btn btn-sm sm-close', 'aria-label': 'Close', text: '×', onclick: () => hideAbout() })),
+      h('dl', null, HELP_ROWS.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })])));
+
+    document.body.append(ui.menuMore, ui.menuExport, ui.menuDisplay, ui.menuView, ui.menuViewMore, ui.partsSheet, ui.infoSheet, ui.about, ui.help);
 
     // ---------- popover wiring
     bindPopover(ui.btnMore, ui.menuMore, { align: 'right' });
     bindPopover(ui.btnExportCaret, ui.menuExport, { align: 'right', onOpen: syncExportMenu });
     bindPopover(ui.btnDisplay, ui.menuDisplay, { onOpen: syncDisplay });
-    bindPopover(ui.btnView, ui.menuView);
+    bindPopover(ui.btnView, ui.menuView, { onOpen: syncProjection });
+    document.addEventListener('pdf3d:viewprefs', () => { syncDisplay(); syncProjection(); });
     bindPopover(ui.btnViewMore, ui.menuViewMore, { align: 'right', onOpen: syncViewMore });
 
     // ---------- live mirrors of original state
@@ -548,7 +618,7 @@
     });
 
     // ---------- keyboard-reachable selectable rows (both modes; app.js untouched)
-    enhanceRows($('partList'), '.part-item', 'selected', 'Parts');
+    enhanceRows($('partList'), '.part-item', 'selected', BODIES);
     enhanceRows($('streamList'), '.stream-item', 'active', 'Embedded 3D streams');
 
     syncStatus(); syncDisplay(); syncPartCount(); syncEmpty();
@@ -644,7 +714,8 @@
     else short = t.length > 30 ? t.slice(0, 30) + '…' : t;
     if (tone === 'warn' && b.title && !/No mesh|Attachment/.test(short)) short += ' · warnings';
     ui.status.dataset.tone = tone;
-    ui.status.querySelector('.sm-status-t').textContent = short;
+    ui.status.dataset.short = short;   // the old chip wording, kept for the tooltip
+    syncBodies();
     // A decode error's raw text stays in the console (app.js console.error + syncEmpty's console.warn); the chip's
     // hover text uses the approved card line instead.
     const ll = (window.PDF3D || {}).lastLoad;
@@ -654,12 +725,27 @@
     if (dmg) tip = tip.split('\n').filter((l) => l.trim() !== dmg).join('\n');
     // NO 3D STREAM: the badge carries the raw attachment name; Simple shows the sanitized fileName (attachment card line)
     const ac = /NO 3D STREAM/.test(t) ? attCard(ll) : null;
-    ui.status.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : ac ? ac.lines[0] : tip;
+    ui.statusT.title = /NO MESH/.test(t) && ll && ll.reasonCode === 'DECODE_ERROR' ? loadCard(ll).line : ac ? ac.lines[0] : tip;
     syncDamaged();
     syncEmpty();
   }
+  // N in "Bodies Detected: N" = solid bodies (parts) of the loaded stream
+  function syncBodies() {
+    if (!ui.bodies) return;
+    let n = 0;
+    try { n = window.CAD3DExtractor ? window.CAD3DExtractor.getState().parts.length : ($('partList') || { querySelectorAll: () => [] }).querySelectorAll('.part-chk').length; } catch (e) { /* ignore */ }
+    const t = String(n);
+    if (ui.bodies.textContent !== t) ui.bodies.textContent = t;
+  }
+  function syncProjection() {
+    const p = window.PDF3DView ? window.PDF3DView.get() : null;
+    for (const it of ui.projItems || []) setChecked(it.it, !!p && p.projection === it.key);
+  }
   function syncDisplay() {
     if (!ui.displayItems) return;
+    const vp = window.PDF3DView ? window.PDF3DView.get() : null;
+    for (const b of ui.bgItems || []) setChecked(b.it, !!vp && vp.background === b.key);
+    if (ui.gridItem) setChecked(ui.gridItem, !!vp && !!vp.grid);
     let cur = null;
     for (const d of ui.displayItems) {
       const on = d.orig.classList.contains('btn-active');
@@ -716,7 +802,8 @@
     const chks = list.querySelectorAll('.part-chk');
     const vis = [...chks].filter((c) => c.checked).length;
     ui.partCount.textContent = chks.length ? (vis === chks.length ? String(chks.length) : `${vis}/${chks.length}`) : '0';
-    ui.btnParts.title = chks.length ? `${vis} of ${chks.length} parts visible` : 'No parts';
+    ui.btnParts.title = chks.length ? `${vis} of ${chks.length} solid bodies visible` : 'No solid bodies';
+    syncBodies();
     syncEmpty();
   }
   function syncEmpty() {
@@ -873,16 +960,19 @@
   }
 
   // ------------------------------------------------------------------ About dialog
-  function showAbout() {
+  // About formats and Help (1.7.0) share this: one modal dialog at a time
+  function showAbout(dlg) {
+    const d = dlg || ui.about;
     closePop(false);
-    ui.about.hidden = false;
-    openDialog = ui.about;
-    const c = ui.about.querySelector('.sm-close');
+    if (openDialog && openDialog !== d) openDialog.hidden = true;
+    d.hidden = false;
+    openDialog = d;
+    const c = d.querySelector('.sm-close');
     if (c) c.focus();
   }
   function hideAbout() {
     if (!openDialog) return;
-    ui.about.hidden = true;
+    openDialog.hidden = true;
     openDialog = null;
     if (mode === 'simple') ui.btnMore.focus({ preventScroll: true });
   }
@@ -955,6 +1045,7 @@
   window.PDF3DSimpleMode = {
     get mode() { return mode; },
     hintText: HINT_TEXT,
+    labels: { render: RENDER_LABELS, bodies: BODIES, background: BG_LABELS, projection: PROJ_LABELS, help: HELP_ROWS },
     setMode: (m) => setMode(m, true),
     toggle: () => setMode(mode === 'simple' ? 'advanced' : 'simple', true),
     storageKey: STORE_KEY

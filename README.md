@@ -13,7 +13,7 @@ Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECM
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.6.2 decodes
+## What 1.7.0 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|
@@ -95,6 +95,26 @@ Simple mode does not show `message`. It renders its own load card from `reasonCo
 `UNSUPPORTED_MESH`): amber "This 3D model can't be read yet", neutral "No 3D model in this PDF", or amber
 "Couldn't read this 3D model". For `DECODE_ERROR` the error text goes only to `console.warn`.
 
+## Viewer (1.7.0 alpha)
+
+Simple mode's viewport: the bottom-left holds only the XYZ axis triad. The file / geometry readout (stream, solid
+bodies / faces / tris, bounds, units, renderer) is in **Info → File & geometry** and the controls list in **More → Help**.
+The upper-right status reads `File loaded: name.pdf | Bodies Detected: N` (long names end in "…"; hover shows the full name).
+The tab bar is **Solid Bodies** | Display, View, Fit, Reset, More | **Info**.
+
+- **Display:** Shaded + edges, Shaded, Wireframe, Transparent; **Background** Default, Black, White or Black to white
+  gradient (black at the top); **Floor grid** (on by default).
+- **View:** view presets and **Perspective** (default) or **Orthographic**. Fit and zoom frame the model the same way in both.
+
+Background, floor grid and projection are remembered in `localStorage` (`pdf3d-extractor.viewPrefs`). They change only
+the view, never an export. Script access:
+
+```js
+PDF3DView.get();                         // { background: 'default', grid: true, projection: 'perspective' }
+PDF3DView.set('background', 'gradient'); // 'default' | 'black' | 'white' | 'gradient'; also 'grid' (true/false), 'projection' ('perspective' | 'orthographic')
+document.addEventListener('pdf3d:viewprefs', (e) => console.log(e.detail));
+```
+
 ## Export in Simple mode (1.6.0 alpha)
 
 Simple mode has one **Export** button (`export-flow.js` / `export-flow.css`, by Designer): pick a format, set its
@@ -111,7 +131,7 @@ options, then **Save**. Advanced mode keeps its export bar unchanged.
 - **Result card:** every export ends with a card: saved, partly fitted (one line per part), fell back to mesh, nothing saved, cancelled or failed.
   A Parasolid sheet body or open model gets an amber "Parasolid sheet body exported (open model)" card; a model with no
   faces gets "Nothing to export" and no file is saved.
-- A selected part (Parts list) limits the export to that part.
+- A selected body (Solid Bodies list) limits the export to that body.
 - The fitted kernel needs the multi-file app served over http(s); in `file://` pages and the single-file build the card says it is unavailable.
 
 All formats go through `PDF3D.exportFormat(format, opts)` in `app.js`, which calls the same writers as the Advanced

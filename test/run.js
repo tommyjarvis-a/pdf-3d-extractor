@@ -31,6 +31,8 @@
  * back to the name; PDF3DStepMerge.mergeSTEP / mergeSTEPChunks with that fileName too; a plain-ASCII name is unchanged.
  * Sample (always): exportFormat step / iges / raw results have no damaged key, no _partial name, no PARTIAL note.
  * $NX_PDF (or <corpus>/../nx2512-input.pdf) must give 37,196 triangles.
+ * 1.7.0 (always): Simple labels (Transparent, Solid Bodies, Background / Projection choices, Help list), ?v=1.7.0 (worker
+ *   key 1.7.0-w1), PDF3DView defaults / set validation / localStorage round trip, perspective eye distance at Fit.
  */
 const fs = require('fs'); const path = require('path'); const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
@@ -38,12 +40,13 @@ const args = process.argv.slice(2); const flag = (n) => args.find((a) => a.start
 const only = (flag('only') || '').split('=')[1]; const update = !!flag('update'); const doExports = !!flag('exports'); const identity = !!flag('identity');
 const corpus = args.find((a) => !a.startsWith('--')) || process.env.PDF3D_CORPUS || '';
 
-function loadApp() {
+function loadApp(extraWindow) {
   const noop = () => {};
   const el = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'length' ? 0 : el()), apply: () => el(), set: () => true });
   const document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => el(), addEventListener: noop, body: el(), documentElement: el() };
   const window = { addEventListener: noop, removeEventListener: noop, devicePixelRatio: 1, innerWidth: 1280, innerHeight: 800, requestAnimationFrame: () => 0, alert: (m) => { window.__alerts.push(m); }, __alerts: [],
     matchMedia: () => ({ matches: false, media: '', addEventListener: noop, removeEventListener: noop, addListener: noop, removeListener: noop }) };   // simple-mode.js / export-flow.js read media queries at load
+  Object.assign(window, extraWindow || {});
   const ctx = { window, self: window, document, console, setTimeout, clearTimeout, setInterval, clearInterval, TextDecoder, TextEncoder, Blob: typeof Blob !== 'undefined' ? Blob : undefined,
     DecompressionStream: typeof DecompressionStream !== 'undefined' ? DecompressionStream : undefined, Response: typeof Response !== 'undefined' ? Response : undefined,
     URL, atob, btoa, performance, crypto: globalThis.crypto, alert: window.alert, matchMedia: window.matchMedia, requestAnimationFrame: () => 0 };
@@ -315,7 +318,34 @@ function syntheticAttachmentPDF(names) {
     check(det.length === yes.length + no.length && !wrong.length, `isCAD wrong for ${wrong.join(', ')} (${det.length} attachments)`);
     console.log(`isCAD: ${det.filter((d) => d.isCAD).length} of ${yes.length} CAD names (19 extensions x lower / UPPER / mixed case) and 0 of ${no.length} others`); }
 
-  // 3. corpus
+  // 3. 1.7.0 Simple UI labels, version / worker key, view preferences (PDF3DView) with a localStorage stub
+  { const sm = window.PDF3DSimpleMode || {}; const L = sm.labels || {};
+    check(L.render && L.render.xray === 'Transparent', `render label xray = ${L.render && L.render.xray}, expected Transparent`);
+    check(L.bodies === 'Solid Bodies', `bodies tab label ${L.bodies}`);
+    check(sm.hintText && /Solid Bodies/.test(sm.hintText.simple) && !/\bParts?\b/.test(sm.hintText.simple), `hint text ${sm.hintText && sm.hintText.simple}`);
+    check(JSON.stringify((L.background || []).map((b) => b[1])) === JSON.stringify(['Default', 'Black', 'White', 'Black to white gradient']), 'background labels');
+    check(JSON.stringify((L.projection || []).map((b) => b[1])) === JSON.stringify(['Perspective', 'Orthographic']), 'projection labels');
+    check((L.help || []).length >= 6 && L.help.some((r) => /Pan/.test(r[1])) && L.help.some((r) => /Zoom/.test(r[1])) && L.help.some((r) => /Orbit/.test(r[1])), 'Help controls list');
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    check(!/\?v=1\.6\.2/.test(html) && /recon\/cad-export\.js\?v=1\.7\.0"/.test(html), 'index.html ?v= not 1.7.0 (worker key 1.7.0-w1)');
+    check(/WORKER_REV = '1'/.test(fs.readFileSync(path.join(ROOT, 'recon/cad-export.js'), 'utf8')), 'WORKER_REV is not 1');
+    const V = window.PDF3DView; const d = V && V.get();
+    check(d && d.background === 'default' && d.grid === true && d.projection === 'perspective', `PDF3DView defaults ${JSON.stringify(d)}`);
+    const store = {}; const ls = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+    const a = loadApp({ localStorage: ls }).window.PDF3DView;
+    check(a.set('background', 'gradient') && a.set('grid', false) && a.set('projection', 'orthographic') && !a.set('background', 'pink') && !a.set('grid', 'no'), 'PDF3DView.set accept / reject');
+    const b = loadApp({ localStorage: ls }).window.PDF3DView.get();
+    check(b.background === 'gradient' && b.grid === false && b.projection === 'orthographic', `view prefs not remembered: ${JSON.stringify(b)} (${store['pdf3d-extractor.viewPrefs']})`);
+    store['pdf3d-extractor.viewPrefs'] = '{"background":"pink","grid":"x","projection":1}';
+    const c = loadApp({ localStorage: ls }).window.PDF3DView.get();
+    check(c.background === 'default' && c.grid === true && c.projection === 'perspective', `bad stored prefs not ignored: ${JSON.stringify(c)}`);
+    const P = window.PDF3DCamera;   // perspective framing: >= 1.5 r, and the nominal distance at Fit (zoom 1, scale = 0.39 min / r)
+    const r0 = 50, sc = 800 * 0.39 / r0, dd = P && P.perspective ? P.perspective(sc, 1280, 800, r0) : 0;
+    check(dd > 1.5 * r0 && Math.abs(dd * sc * Math.tan(P.PERSP_FOV / 2) - 400) < 1e-6, `perspective distance ${dd}`);
+    check(P && P.perspective(sc * 8, 1280, 800, r0) === 1.5 * r0, 'perspective distance not clamped at 1.5 r');
+    console.log(`1.7.0 UI: labels ok, PDF3DView defaults ${JSON.stringify(d)}, remembered ${JSON.stringify(b)}, perspective eye ${(dd / r0).toFixed(2)} r at Fit`); }
+
+  // 4. corpus
   if (corpus) {
     const expFile = path.join(__dirname, 'expect.json'); const expect = fs.existsSync(expFile) ? JSON.parse(fs.readFileSync(expFile, 'utf8')) : {};
     const files = fs.readdirSync(corpus).filter((f) => f.endsWith('.pdf') && (!only || only.split(',').some((o) => f.startsWith(o)))).sort();

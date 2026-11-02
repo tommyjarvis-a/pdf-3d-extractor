@@ -103,7 +103,12 @@ body.sm-simple .sm-topbar {
   text-overflow: ellipsis;
   min-width: 0;
 }
-.sm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; flex-shrink: 0; cursor: default; }
+/* 1.7.0: status sits upper right, "File loaded: name | Bodies Detected: N"; only the name shrinks (ellipsis, full on hover) */
+body.sm-simple .sm-doc { justify-content: flex-end; }
+.sm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; min-width: 0; flex: 0 1 auto; cursor: default; }
+.sm-status .sm-doc-name { gap: 0; flex: 0 1 auto; color: inherit; font: inherit; font-weight: 600; margin-left: -6px; }
+.sm-status-k, .sm-status-t { flex-shrink: 0; white-space: pre; }
+.sm-status-t { margin-left: -6px; }
 .sm-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); flex-shrink: 0; }
 .sm-status[data-tone="ok"] .sm-dot { background: var(--emerald); box-shadow: 0 0 0 3px var(--emerald-dim); }
 .sm-status[data-tone="warn"] .sm-dot { background: var(--amber); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15); }
@@ -232,11 +237,12 @@ body.sm-simple .sm-pill {
 .sm-pill-k { color: var(--text-2); font-weight: 500; }
 .sm-count { font: 600 10px var(--mono); color: var(--text-2); background: var(--bg-0); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
 
-/* HUD: compact and parked bottom-left in Simple mode so the pill owns the top edge */
-body.sm-simple .viewport-hud-tl { top: auto; bottom: 42px; padding: 5px 9px; font-size: 10.5px; gap: 2px; }
-body.sm-simple .viewport-hud-bl { font-size: 10px; }
-/* renderer stats (ms/frame, GPU MB; 1.4.0+) stay read-only, muted info - never a control */
-body.sm-simple .viewport-hud-tl .hud-render { color: var(--text-2); opacity: 0.75; font-size: 10px; }
+/* 1.7.0: the viewport readout moved to Info > File & geometry and the controls help to More > Help;
+   the bottom-left of the viewport holds only the axis triad (drawn on the canvas) */
+body.sm-simple .viewport-hud-tl, body.sm-simple .viewport-hud-bl { display: none !important; }
+.sm-readout { display: grid; gap: 4px; font: 11px var(--mono); color: var(--text-1); }
+.sm-readout-r { overflow-wrap: anywhere; }
+.sm-readout-r[data-hud="hudRenderStats"] { color: var(--text-2); }
 
 /* ---------------------------------------------------------------- side sheets */
 .sm-sheet {
@@ -424,8 +430,6 @@ body.sm-simple .sm-switch-slot { display: block; flex: 0 0 auto; height: 27px; }
   body.sm-simple .sm-topbar .sm-btn-open .sm-long { display: none; }
   body.sm-simple .sm-pill { top: 8px; border-radius: 14px; width: calc(100% - 16px); max-width: none; }
   body.sm-simple .sm-pill .btn { padding: 5px 9px; }
-  body.sm-simple .viewport-hud-tl { display: none; }
-  body.sm-simple .viewport-hud-bl { right: 12px; font-size: 9.5px; }
   .sm-sheet, .sm-sheet--left, .sm-sheet--right {
     left: 0;
     right: 0;

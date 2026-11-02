@@ -9,9 +9,14 @@
  *
  * scene = { epoch, center:[x,y,z], radius, camera:{mode,q,yaw,pitch,zoom,panX,panY}, renderMode, selectedPartIdx,
  *           items:[{ g:{vx,tv,nt,triFace,fev}, pIdx, color:[r,g,b], offset:[x,y,z] }], wires:[...],
- *           palette:[[r,g,b]x6], grid:{z,step,extent}, note:string }
- * Camera: orthographic, view basis from window.PDF3DCamera (free quaternion arcball by default, or the legacy
- * Z-up turntable); the canvas fallback uses the same basis so both renderers match exactly.
+ *           palette:[[r,g,b]x6], grid:{z,step,extent} | null, note:string,
+ *           projection:'perspective'|'orthographic' (1.7.0, default orthographic), triad:'bl'|'br' (corner, default 'br'),
+ *           lightBg:boolean (1.7.0: white / gradient background -> darker grid and wire colours) }
+ * Camera: orthographic or perspective (1.7.0), view basis from window.PDF3DCamera (free quaternion arcball by default,
+ * or the legacy Z-up turntable); the canvas fallback uses the same basis and PDF3DCamera.perspective() so both
+ * renderers match exactly. Perspective keeps the ortho framing on the plane through the view center (same zoom and
+ * pan feel, Fit frames the same sphere) and dollies the eye: eye distance = PERSP_FOV framing, clamped to >= 1.5 x
+ * the drawn radius (beyond that zoom narrows the field of view instead, so the eye never enters the model).
  */
 (function () {
   'use strict';
@@ -244,18 +249,18 @@ void main() {
   const VS_LINE = `
 attribute vec3 aPos;
 uniform mat4 uMVP; uniform vec3 uOff; uniform float uBias;
-void main() { gl_Position = uMVP * vec4(aPos + uOff, 1.0); gl_Position.z -= uBias; }`;
+void main() { gl_Position = uMVP * vec4(aPos + uOff, 1.0); gl_Position.z -= uBias * gl_Position.w; }`;
   const VS_THICK = `
 attribute vec3 aA; attribute vec3 aB; attribute vec2 aS;
 uniform mat4 uMVP; uniform vec3 uOff; uniform vec2 uVP; uniform float uHalfW; uniform float uBias;
 void main() {
   vec4 a = uMVP * vec4(aA + uOff, 1.0), b = uMVP * vec4(aB + uOff, 1.0);
-  vec2 d = (b.xy - a.xy) * uVP; float l = length(d);
+  vec2 d = (b.xy / b.w - a.xy / a.w) * uVP; float l = length(d);   // w = 1 in orthographic
   d = l > 1e-6 ? d / l : vec2(1.0, 0.0);
   vec2 nrm = vec2(-d.y, d.x);
   vec4 p = aS.x > 0.5 ? b : a;
-  p.xy += (nrm * aS.y * uHalfW + d * (aS.x > 0.5 ? 1.0 : -1.0) * uHalfW * 0.5) / uVP;
-  p.z -= uBias;   // small depth bias toward the viewer (on top of the fill polygonOffset): no edge shimmer
+  p.xy += (nrm * aS.y * uHalfW + d * (aS.x > 0.5 ? 1.0 : -1.0) * uHalfW * 0.5) / uVP * p.w;
+  p.z -= uBias * p.w;   // small depth bias toward the viewer (on top of the fill polygonOffset): no edge shimmer
   gl_Position = p;
 }`;
   const FS_LINE = `
@@ -490,16 +495,31 @@ void main() { gl_FragColor = uRGBA; }`;
     const wireEntries = wires.map((wr) => [wr, this._wire(wr)]);
     for (const [, we] of wireEntries) if (we.bbox) growBox(we.bbox, [0, 0, 0]);
     const r = Math.max(Math.sqrt(r2), 1e-6);
-    const dist = 3 * r;
+    const persp = s.projection === 'perspective';
+    const dist = persp ? Camera.perspective(scale, w, h, r) : 3 * r;
     const near = Math.max(dist - r * 1.05, r * 0.001), far = dist + r * 1.05;
-    const kx = 2 * scale / w, ky = 2 * scale / h, kz = 2 / (far - near);
-    const bx = 2 * cxS / w - 1, by = 1 - 2 * cyS / h, bz = kz * (dist - near) - 1;
-    // column-major MVP mapping (world - center) -> clip, identical to the legacy projectPoint()
-    const M = new Float32Array([
-      kx * R[0], ky * U[0], kz * D[0], 0,
-      kx * R[1], ky * U[1], kz * D[1], 0,
-      kx * R[2], ky * U[2], kz * D[2], 0,
-      bx, by, bz, 1]);
+    const bx = 2 * cxS / w - 1, by = 1 - 2 * cyS / h;
+    let M;
+    if (!persp) {
+      const kx = 2 * scale / w, ky = 2 * scale / h, kz = 2 / (far - near), bz = kz * (dist - near) - 1;
+      // column-major MVP mapping (world - center) -> clip, identical to the legacy projectPoint()
+      M = new Float32Array([
+        kx * R[0], ky * U[0], kz * D[0], 0,
+        kx * R[1], ky * U[1], kz * D[1], 0,
+        kx * R[2], ky * U[2], kz * D[2], 0,
+        bx, by, bz, 1]);
+    } else {
+      // eye at -dist along D; clip w = eye depth zc = dist + D.p. The plane through the view center (zc = dist)
+      // maps exactly like the orthographic matrix (focal = scale * dist px), so Fit / zoom / pan framing match.
+      const fx = 2 * scale * dist / w, fy = 2 * scale * dist / h;
+      const A = (far + near) / (far - near), Bz = -2 * far * near / (far - near);
+      M = new Float32Array([
+        fx * R[0] + bx * D[0], fy * U[0] + by * D[0], A * D[0], D[0],
+        fx * R[1] + bx * D[1], fy * U[1] + by * D[1], A * D[1], D[1],
+        fx * R[2] + bx * D[2], fy * U[2] + by * D[2], A * D[2], D[2],
+        bx * dist, by * dist, A * dist + Bz, dist]);
+    }
+    this.stats.projection = persp ? 'perspective' : 'orthographic'; this.stats.eyeDist = dist;
     const NM = new Float32Array([R[0], U[0], -D[0], R[1], U[1], -D[1], R[2], U[2], -D[2]]);
     this.stats.near = near; this.stats.far = far; this.stats.radius = r; this.stats.depthBits = this.depthBits;
     const offOf = (origin, off) => [origin[0] + off[0] - C[0], origin[1] + off[1] - C[1], origin[2] + off[2] - C[2]];
@@ -507,7 +527,7 @@ void main() { gl_FragColor = uRGBA; }`;
     const mode = s.renderMode || 'shaded-edges', sel = s.selectedPartIdx;
 
     // 1. datum grid (background, not depth tested, like the legacy view)
-    if (s.grid) this._drawGrid(s.grid, M, C);
+    if (s.grid) this._drawGrid(s.grid, M, C, !!s.lightBg);
 
     const pf = this.progFill;
     const useProg = (p) => { gl.useProgram(p.p); gl.uniformMatrix4fv(p.u.uMVP, false, M); };
@@ -570,7 +590,7 @@ void main() { gl_FragColor = uRGBA; }`;
     for (const [wr, we] of wireEntries) {
       if (!we.lines) continue;
       const c = wr.color || [0, 0, 0];
-      const rgba = (c[0] + c[1] + c[2]) * 255 < 60 ? [0.886, 0.91, 0.94, 0.55] : [c[0], c[1], c[2], 1];
+      const rgba = (c[0] + c[1] + c[2]) * 255 < 60 ? (s.lightBg ? [0.2, 0.25, 0.33, 0.6] : [0.886, 0.91, 0.94, 0.55]) : [c[0], c[1], c[2], 1];
       lineJobs.push({ obj: we.lines, off: [we.origin[0] - C[0], we.origin[1] - C[1], we.origin[2] - C[2]], rgba, w: 1 });
     }
     const noDepth = mode === 'wireframe' || mode === 'xray';
@@ -587,7 +607,7 @@ void main() { gl_FragColor = uRGBA; }`;
     this._gc();
 
     // 4. 2D overlay: orientation triad + decimation note
-    this._overlay(w, h, dpr, R, U, s.note);
+    this._overlay(w, h, dpr, R, U, s.note, s.triad);
     this.stats.frames = this.frame; this.stats.items = items.length; this.stats.lineJobs = lineJobs.length;
     this.stats.api = this.isGL2 ? 'WebGL2' : 'WebGL1';
     this.stats.drawnTris = items.reduce((a, it) => a + (it.g.nt || (it.g.tv ? it.g.tv.length / 3 : 0)), 0);
@@ -605,7 +625,7 @@ void main() { gl_FragColor = uRGBA; }`;
     this._bindDraw(p, o, o.thick ? gl.TRIANGLES : gl.LINES);
   };
 
-  VP._drawGrid = function (grid, M, C) {
+  VP._drawGrid = function (grid, M, C, lightBg) {
     const gl = this.gl;
     const key = grid.z + ':' + grid.step + ':' + grid.extent + ':' + C.join(',');
     if (!this.gridBuf || this.gridBuf.key !== key) {
@@ -622,11 +642,11 @@ void main() { gl_FragColor = uRGBA; }`;
     gl.disable(gl.DEPTH_TEST);
     const p = this.progLine;
     gl.useProgram(p.p); gl.uniformMatrix4fv(p.u.uMVP, false, M); gl.uniform3fv(p.u.uOff, [0, 0, 0]); gl.uniform1f(p.u.uBias, 0);
-    gl.uniform4f(p.u.uRGBA, 59 / 255, 130 / 255, 246 / 255, 0.14);
+    gl.uniform4f(p.u.uRGBA, 59 / 255, 130 / 255, 246 / 255, lightBg ? 0.32 : 0.14);
     this._bindDraw(p, this.gridBuf.obj, gl.LINES);
   };
 
-  VP._overlay = function (w, h, dpr, R, U, note) {
+  VP._overlay = function (w, h, dpr, R, U, note, corner) {
     const canvas = this.canvas;
     if (!this.overlay) {
       const o = document.createElement('canvas');
@@ -640,12 +660,20 @@ void main() { gl_FragColor = uRGBA; }`;
     const ctx = o.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    drawTriadAndNote(ctx, w, h, R, U, note, corner);
+  };
+  // Orientation triad + decimation note (shared with the Canvas 2D fallback in app.js). corner 'bl' (1.7.0 Simple):
+  // triad lower-left, note right-aligned lower-right; 'br' (legacy): triad lower-right, note lower-left.
+  function drawTriadAndNote(ctx, w, h, R, U, note, corner) {
+    const bl = corner === 'bl';
     if (note) {
       ctx.font = '11px "JetBrains Mono", monospace';
       ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-      ctx.fillText(note, 12, h - 12);
+      ctx.textAlign = bl ? 'right' : 'left';
+      ctx.fillText(note, bl ? w - 12 : 12, h - 12);
+      ctx.textAlign = 'left';
     }
-    const tx = w - 54, ty = h - 48, L = 28;
+    const tx = bl ? 54 : w - 54, ty = h - 48, L = 28;
     const axes = [['X', [1, 0, 0], '#f43f5e'], ['Y', [0, 1, 0], '#10b981'], ['Z', [0, 0, 1], '#3b82f6']];
     ctx.font = 'bold 11px "JetBrains Mono", monospace';
     for (const [label, a, col] of axes) {
@@ -655,7 +683,7 @@ void main() { gl_FragColor = uRGBA; }`;
       ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(ex, ey); ctx.stroke();
       ctx.fillStyle = col; ctx.fillText(label, ex + (rx >= 0 ? 4 : -10), ey + (rz >= 0 ? -4 : 10));
     }
-  };
+  }
 
   function bboxOf(vx) {
     let a = Infinity, b = Infinity, c = Infinity, A = -Infinity, B = -Infinity, C = -Infinity;
@@ -696,7 +724,14 @@ void main() { gl_FragColor = uRGBA; }`;
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     return { r: [cy, -sy, 0], u: [sp * sy, sp * cy, cp], d: [cp * sy, cp * cy, -sp] };
   }
+  const PERSP_FOV = 30 * Math.PI / 180;   // field of view across min(w, h) at Fit
   const Camera = {
+    PERSP_FOV,
+    // perspective eye distance (world units from the view center) for a pixel scale and a drawn radius r
+    perspective(scale, w, h, r) {
+      const nominal = (Math.min(w, h) / 2) / (scale * Math.tan(PERSP_FOV / 2));
+      return Math.max(nominal, 1.5 * r);
+    },
     loadMode() { try { const m = window.localStorage && window.localStorage.getItem(ORBIT_KEY); return m === 'turntable' ? 'turntable' : 'free'; } catch (e) { return 'free'; } },
     saveMode(m) { try { if (window.localStorage) window.localStorage.setItem(ORBIT_KEY, m); } catch (e) { /* private mode */ } },
     fromYawPitch(yaw, pitch) { const b = ypBasis(yaw, pitch); return rowsToQ([b.r, b.u, [-b.d[0], -b.d[1], -b.d[2]]]); },
@@ -739,7 +774,7 @@ void main() { gl_FragColor = uRGBA; }`;
   // ------------------------------------------------------------------ toolbar options (Lines: wires / hidden / mesh / flat)
   const api = {
     attach, options: OPTIONS, MAX_TRIS, MAX_EDGES, onOptionsChange: null, onStats: null,
-    _buildFillMesh: buildFillMesh, displayEdges,
+    _buildFillMesh: buildFillMesh, displayEdges, drawTriadAndNote,
     setOption(k, v) {
       OPTIONS[k] = v;
       if (typeof api.onOptionsChange === 'function') api.onOptionsChange(k, v);
