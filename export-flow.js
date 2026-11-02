@@ -5,7 +5,7 @@
  * (.sm-topbar .sm-actions). Units / body type / reduce detail are read and written through PDF3D.exportSettings.
  *
  * Engine hooks (all optional, feature-detected, never faked):
- *   PDF3D.capabilities.parasolid === true   → show "Parasolid (.x_t)" (needs PDF3D.exportFormat or #btnExportXT).
+ *   PDF3D.capabilities.parasolid === true   → show "Parasolid (.x_t)" (needs PDF3D.exportFormat).
  *       1.5.2 writer is merged-only: one faceted body (list line "Faceted body, flat faces"), note "Faceted solid, merged into one body (no B-spline surfaces yet)",
  *       no body/mode choice; exportFormat('xt', opts) always gets brepMode: 'merged'.
  *       Result keys (summary.<k>, else top-level <k>): faces === 0 → amber "Nothing to export", no file;
@@ -78,12 +78,12 @@
 
   // ------------------------------------------------------------------ formats (only what the app can write today)
   const FORMATS = [
-    { id: 'step', label: 'STEP', ext: '.stp', sub: 'CAD solid for NX, SolidWorks, Fusion…', mime: 'application/step', btn: 'btnExportSTEP' },
-    { id: 'stl', label: 'STL', ext: '.stl', sub: 'Triangle mesh for 3D printing', mime: 'model/stl', btn: 'btnExportSTL' },
-    { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with part groups', mime: 'model/obj', btn: 'btnExportOBJ' },
-    { id: 'iges', label: 'IGES', ext: '.igs', sub: 'Wireframe edges only', mime: 'model/iges', btn: 'btnExportIGES' },
-    { id: 'raw', label: 'Raw stream', ext: '.u3d', sub: 'The embedded U3D / PRC bytes', mime: 'application/octet-stream', btn: 'btnExportRaw' },
-    { id: 'xt', label: 'Parasolid', ext: '.x_t', sub: 'Faceted body, flat faces', mime: 'text/plain', btn: 'btnExportXT', cap: 'parasolid' }
+    { id: 'step', label: 'STEP', ext: '.stp', sub: 'CAD solid for NX, SolidWorks, Fusion…', mime: 'application/step' },
+    { id: 'stl', label: 'STL', ext: '.stl', sub: 'Triangle mesh for 3D printing', mime: 'model/stl' },
+    { id: 'obj', label: 'OBJ', ext: '.obj', sub: 'Mesh with part groups', mime: 'model/obj' },
+    { id: 'iges', label: 'IGES', ext: '.igs', sub: 'Wireframe edges only', mime: 'model/iges' },
+    { id: 'raw', label: 'Raw stream', ext: '.u3d', sub: 'The embedded U3D / PRC bytes', mime: 'application/octet-stream' },
+    { id: 'xt', label: 'Parasolid', ext: '.x_t', sub: 'Faceted body, flat faces', mime: 'text/plain', cap: 'parasolid' }
   ];
   const FMT = Object.fromEntries(FORMATS.map((f) => [f.id, f]));
   const caps = () => (NS().capabilities || {});
@@ -100,8 +100,8 @@
   };
   const cadReason = () => CAD_REASON[caps().cadSurfacesReason] || 'Surface fitting isn\u2019t available here.';
   function available(f) {
-    if (f.cap) return caps()[f.cap] === true && (hasHook() || !!$(f.btn));     // capability flag AND a writer
-    return hasHook() || !!$(f.btn);
+    if (f.cap) return caps()[f.cap] === true && hasHook();     // capability flag AND a writer
+    return hasHook();
   }
   function extOf(f) {
     if (f.id !== 'raw') return f.ext;
@@ -637,7 +637,7 @@
     return o;
   }
 
-  // engine: Dev's hook if present, else CAD API for fitted STEP, else the original button (blob captured)
+  // engine: PDF3D.exportFormat (always present since 1.7.0), else the CAD API for fitted STEP
   async function runExport(f, o, run) {
     const onProgress = (p) => setPct(p);
     const cadStep = f.id === 'step' && o.body !== 'mesh';
@@ -654,7 +654,7 @@
       const noFile = !r.blob;
       // nothing fitted (or the engine could not run) → the whole mesh STEP, so the user always gets a file
       if (noFile && !/^(too_large|no_parts|unavailable)$/.test(normCode(r.reasonCode) || '')) {
-        const m = hasHook() ? streamed(await NS().exportFormat('step', Object.assign({}, o, { body: 'mesh', fittedOnly: false, signal: run.ctrl.signal }, run.writable ? { writable: run.writable } : {})), run) : await capture('btnExportSTEP');
+        const m = hasHook() ? streamed(await NS().exportFormat('step', Object.assign({}, o, { body: 'mesh', fittedOnly: false, signal: run.ctrl.signal }, run.writable ? { writable: run.writable } : {})), run) : null;
         if (!m || !m.blob) return r;
         if (parts) for (const p of parts) if (p.written !== 'solid') p.written = 'mesh';
         return Object.assign(r, { status: 'mesh_only', blob: m.blob, meshStep: true, summary: Object.assign({}, r.summary, parts ? { parts } : {}) });
@@ -667,9 +667,7 @@
       }
       return r;
     }
-    const id = f.id === 'stl' && o.encoding === 'ascii' ? 'btnExportSTLText' : f.btn;
-    const c = await capture(id);
-    return { status: 'ok', blob: c.blob, filename: c.filename };
+    throw new Error('This export isn\u2019t available in this build.');
   }
   // { blob: null, delivery: 'picker' } from a writer that got opts.writable = the file was streamed into it
   function streamed(r, run) {
@@ -700,24 +698,6 @@
       const meshText = typeof mesh === 'string' ? mesh : await new Blob([].concat(mesh)).text();
       return new Blob([merge.mergeSTEP([fitted, meshText])], { type: 'application/step' });
     } catch (e) { return null; }
-  }
-  // Click the original export button and capture the Blob it hands to <a download>, instead of letting it download.
-  function capture(id) {
-    return new Promise((resolve, reject) => {
-      const btn = $(id);
-      if (!btn) { reject(new Error('This export isn\u2019t available in this build.')); return; }
-      let got = null, thrown = null;
-      const proto = HTMLAnchorElement.prototype, orig = proto.click;
-      const onErr = (ev) => { thrown = ev.error || new Error(ev.message); ev.preventDefault(); };
-      proto.click = function () {
-        if (!got && this.hasAttribute('download') && /^blob:/.test(this.href) && !this.dataset.xfOwn) { got = { href: this.href, filename: this.getAttribute('download') }; return; }
-        return orig.call(this);
-      };
-      window.addEventListener('error', onErr);
-      try { btn.disabled = false; btn.click(); } finally { proto.click = orig; window.removeEventListener('error', onErr); }
-      if (!got) { reject(thrown || new Error('The app produced no file. Is a model with parts loaded?')); return; }
-      fetch(got.href).then((r) => r.blob()).then((blob) => resolve({ blob, filename: got.filename }), reject);
-    });
   }
 
   // ------------------------------------------------------------------ result card

@@ -334,7 +334,7 @@ function syntheticAttachmentPDF(names) {
     const smSrc = fs.readFileSync(path.join(ROOT, 'simple-mode.js'), 'utf8'), appSrc = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
     check(!/[?&]ui=|setMode|modeswitch|viewerAll|statusBadge|smMenuExport/.test(smSrc) && sm.setMode === undefined && sm.toggle === undefined, 'simple-mode.js still has the mode switch / Advanced proxies');
     check(!/XT_UI_ENABLED|cachedSTEP|cachedXT|previewLines|statusBadge|activeTab|exportParasolidXT|[?&]xt=/.test(appSrc), 'app.js still has the Advanced preview / inspector code');
-    check(!/data-xf-proxy|unitSelect|detailSelect|brepModeSelect/.test(fs.readFileSync(path.join(ROOT, 'export-flow.js'), 'utf8')), 'export-flow.js still proxies the Advanced selects');
+    check(!/data-xf-proxy|unitSelect|detailSelect|brepModeSelect|btnExport|function capture/.test(fs.readFileSync(path.join(ROOT, 'export-flow.js'), 'utf8')), 'export-flow.js still proxies the Advanced selects / export buttons');
     check(!/buildAdvanced|smMenuExport|statusBadge|pdf3d:uimode/.test(fs.readFileSync(path.join(ROOT, 'cad-export-ui.js'), 'utf8')), 'cad-export-ui.js still has the Advanced / menu UI');
     const V0 = window.PDF3DView, X = window.PDF3D.exportSettings, A = window.CAD3DExtractor;
     check(V0 && ['setRenderMode', 'preset', 'fit', 'setExplode', 'setOrbitMode', 'state'].every((k) => typeof V0[k] === 'function') && Array.isArray(V0.renderModes), 'PDF3DView view controls API missing');
