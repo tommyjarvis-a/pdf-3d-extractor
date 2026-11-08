@@ -75,7 +75,13 @@ async function run({loadApp, pages = ['index.html'], external = false}) {
       const e = parse(metadata()); edit(e);
       try { await damaged(pdf(serialize(e)), code); } catch (error) { error.message = label + ': ' + error.message; throw error; }
     }
-    for (const id of [null, 'null', '999 0 R', '[<00><11111111111111111111111111111111>]', '[<00000000000000000000000000000000><00>]', '[42 43]', '<<>>', '[<00000000000000000000000000000000>]']) await damaged(pdf(metadata(), id));
+    for (const id of [null, 'null', '999 0 R', '[<><11111111111111111111111111111111>]', '[<00000000000000000000000000000000><>]', '[42 43]', '<<>>', '[<00000000000000000000000000000000>]']) await damaged(pdf(metadata(), id));
+    // IDs are arbitrary nonempty byte strings, not necessarily 16-byte MD5s.
+    // These synthetic metadata-only probes authenticate neither user nor owner.
+    for (const R of [2,3,4,5,6]) for (const length of [1,8,16,33]) {
+      const id = '<' + 'ab'.repeat(length) + '>';
+      await assert.rejects(() => X.extract3DStreamsFromPDF(pdf(metadata(R), `[${id}${id}]`)), e => e.code === 'PDF_PASSWORD_REQUIRED'); cases++;
+    }
     for (const R of [2,3,4]) {
       const e = parse(metadata(R)); delete e.Length;
       if (R === 4) { e.CF.StdCF.CFM = parse('/V2'); delete e.CF.StdCF.Length; }

@@ -1541,7 +1541,8 @@ return function prepare(input){
       const ids = value(this.trailer.ID, 'trailer /ID');
       if (!Array.isArray(ids) || ids.length !== 2) damaged('trailer /ID array');
       const idStrings = ids.map(v => bytes(v, 'trailer /ID'));
-      if (idStrings.some(b => b.length < 16)) damaged('trailer /ID (at least 16 bytes per identifier)');
+      // ISO 32000-1 14.4 recommends MD5; 16 bytes is not a minimum length.
+      if (idStrings.some(b => !b.length)) damaged('trailer /ID (nonempty byte strings required)');
       const id0 = idStrings[0];
       const bits = E.Length === undefined ? (R >= 5 ? 256 : 40) : integer(E.Length, '/Length');
       if ((R === 2 && bits !== 40) || (R >= 5 && bits !== 256) || (R < 5 && (bits < 40 || bits > 128 || bits % 8))) damaged('/Length encryption key size');

@@ -42,3 +42,16 @@ if absent, plus incremental metadata mutations and valid indirect-ID revisions.
 These external PDFs are not committed. No passwords are needed. Run
 `node test/security-metadata190.js` for served/standalone source-VM checks; it is
 not a browser or corpus gate.
+
+`node test/short-id190.js` uses survey-venv pikepdf/libqpdf to generate genuine
+1-byte and 8-byte first-ID encrypted variants for R2, R3, R4 RC4/AESV2 and R6,
+then compares decrypted stream hashes and app raw exports in both builds. It also
+checks Tester's external `cb75-compat/*-genuine-id8.pdf` and id16 control when
+present. Generated PDFs stay in a temporary directory and are removed. Missing
+venv/external fixtures are reported as explicit skips. No R5 fixtures are generated.
+
+ISO 32000-1:2008 14.4 recommends a digest such as MD5; it sets no 16-byte minimum.
+Table 15 still requires an array of two byte strings when Encrypt is present; empty
+identifiers, missing IDs and malformed reference/type controls remain rejected.
+R2–R4 use ID[0] in key derivation; R5/R6 do not, but their structural trailer check
+is retained. The existing compatibility for resolvable indirect IDs is unchanged.
