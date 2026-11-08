@@ -740,7 +740,7 @@ body.sm-simple .sm-empty {
   border-radius: 999px; background: rgba(245, 158, 11, 0.08); color: #fbbf24; font-size: 11.5px; }
 .sm-damaged[hidden] { display: none !important; }
 .sm-damaged-ico { width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; background: var(--amber); color: #03101d; font: 700 9.5px var(--sans); }
-.sm-damaged-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-damaged-t { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .sm-damaged-x { flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: 600 14px/1 var(--sans); cursor: pointer; }
 .sm-damaged-x:hover { background: rgba(245, 158, 11, 0.18); }
 
@@ -10698,19 +10698,34 @@ void main() { gl_FragColor = uRGBA; }`;
   }
 
   // ------------------------------------------------------------------ partial (damaged) load note
+  // Pure formatter shared with the fast harness; mesh-block errors are not body-instance counts.
+  function damagedNoteText(ll) {
+    const raw = ll && ll.status === 'ok' ? String(ll.damaged || ll.warning || '').trim() : '';
+    if (!raw) return '';
+    if (ll.warning && !ll.damaged) return String(ll.warning);
+    const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
+    const tails = (raw.match(/unexplained trailing byte/g) || []).length;
+    const unreadable = /^RHAdobe:\s*(\d+)\s+mesh blocks? unreadable(?:;|$)/.exec(raw);
+    const missing = unreadable ? Number(unreadable[1]) : 0;
+    const notes = [];
+    if (missing) notes.push(`${missing} mesh ${missing === 1 ? 'block' : 'blocks'} unreadable/missing`);
+    if (tails) notes.push(`${tails} mesh ${tails === 1 ? 'block' : 'blocks'} recovered with unexplained trailing byte (0x00) warning`);
+    if (notes.length) {
+      if (missing && !tails && n) notes.push(`${n} ${n === 1 ? 'body' : 'bodies'} recovered`);
+      return notes.join('; ') + '. Verify this model against the source.';
+    }
+    return n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
+      : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
+  }
   var warnedDamaged = null;
   function syncDamaged() {
     if (!ui.dmg) return;
     const ll = (window.PDF3D || {}).lastLoad;
-    const raw = ll && ll.status === 'ok' ? String(ll.damaged || ll.warning || '').trim() : '';
-    if (raw && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
-    const on = !!raw && ui.dmgDismissed !== ll;
+    const t = damagedNoteText(ll);
+    if (t && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
+    const on = !!t && ui.dmgDismissed !== ll;
     ui.dmg.hidden = !on;
     if (!on) return;
-    const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
-    const tails = (raw.match(/unexplained trailing byte/g) || []).length;
-    const t = ll.warning && !ll.damaged ? ll.warning : tails ? `Unexplained trailing byte (0x00) in ${tails} mesh ${tails === 1 ? 'block' : 'blocks'}; verify this model against the source.` : n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
-      : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
     if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }
 
@@ -10741,6 +10756,7 @@ void main() { gl_FragColor = uRGBA; }`;
   }
 
   window.PDF3DSimpleMode = {
+    damagedNoteText,
     labels: { render: RENDER_LABELS, bodies: BODIES, background: BG_LABELS, projection: PROJ_LABELS, help: HELP_ROWS, specs: SPECS }
   };
 

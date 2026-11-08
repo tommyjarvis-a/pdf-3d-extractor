@@ -70,7 +70,13 @@ For an unknown vendor mesh encoding, one option is to capture the geometry while
 
 The independent synthetic encoder in `test/arithmetic-reference.js` follows
 ECMA-363 10.4, including histogram division **rounding down**, escape frequency
-increment on rescale, and the uncompressed zero U32 flush. The production decoder
+increment on rescale, and the uncompressed zero U32 flush. **Exception:** encoding-9
+frequency counting includes histogram symbol `0xFFFF` (escaped value **65534**).
+This is an **empirical producer rule**, inferred from just **two real arrays**
+(mandibular artery and palatine artery `normals.alpha_theta`), not spec-derived.
+ECMA-363 A.3.3's strict `< 0xFFFF` listing excludes that symbol; following it makes
+those two arrays fail the flush check. Other histogram rules remain spec-derived.
+The production decoder
 uses bounded bit reads and a Fenwick histogram; it verifies the known flush by
 forward interval updates rather than fabricating missing lookahead bits.
 
@@ -87,3 +93,7 @@ values, every integer domain, payload ends and per-mesh allocation budgets are
 validated. Skeleton/subchunk data is explicitly rejected. No geometric ground-truth
 render/reference exists: normals/winding, components, finite bboxes and face areas
 are structural checks, not proof of exact visual equivalence.
+
+Ohio export evidence is full raw/STL/OBJ plus the Mesh_40 STEP/XT/IGES subset.
+Full Ohio XT exceeded Tester's **4 GB test heap**; full Ohio STEP/XT export success
+is not claimed. The r09 export results above concern that smaller fixture only.

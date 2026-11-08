@@ -303,7 +303,7 @@ body.sm-simple .sm-empty {
   border-radius: 999px; background: rgba(245, 158, 11, 0.08); color: #fbbf24; font-size: 11.5px; }
 .sm-damaged[hidden] { display: none !important; }
 .sm-damaged-ico { width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center; background: var(--amber); color: #03101d; font: 700 9.5px var(--sans); }
-.sm-damaged-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-damaged-t { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .sm-damaged-x { flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: 600 14px/1 var(--sans); cursor: pointer; }
 .sm-damaged-x:hover { background: rgba(245, 158, 11, 0.18); }
 

@@ -766,19 +766,34 @@
   }
 
   // ------------------------------------------------------------------ partial (damaged) load note
+  // Pure formatter shared with the fast harness; mesh-block errors are not body-instance counts.
+  function damagedNoteText(ll) {
+    const raw = ll && ll.status === 'ok' ? String(ll.damaged || ll.warning || '').trim() : '';
+    if (!raw) return '';
+    if (ll.warning && !ll.damaged) return String(ll.warning);
+    const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
+    const tails = (raw.match(/unexplained trailing byte/g) || []).length;
+    const unreadable = /^RHAdobe:\s*(\d+)\s+mesh blocks? unreadable(?:;|$)/.exec(raw);
+    const missing = unreadable ? Number(unreadable[1]) : 0;
+    const notes = [];
+    if (missing) notes.push(`${missing} mesh ${missing === 1 ? 'block' : 'blocks'} unreadable/missing`);
+    if (tails) notes.push(`${tails} mesh ${tails === 1 ? 'block' : 'blocks'} recovered with unexplained trailing byte (0x00) warning`);
+    if (notes.length) {
+      if (missing && !tails && n) notes.push(`${n} ${n === 1 ? 'body' : 'bodies'} recovered`);
+      return notes.join('; ') + '. Verify this model against the source.';
+    }
+    return n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
+      : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
+  }
   var warnedDamaged = null;
   function syncDamaged() {
     if (!ui.dmg) return;
     const ll = (window.PDF3D || {}).lastLoad;
-    const raw = ll && ll.status === 'ok' ? String(ll.damaged || ll.warning || '').trim() : '';
-    if (raw && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
-    const on = !!raw && ui.dmgDismissed !== ll;
+    const t = damagedNoteText(ll);
+    if (t && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
+    const on = !!t && ui.dmgDismissed !== ll;
     ui.dmg.hidden = !on;
     if (!on) return;
-    const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
-    const tails = (raw.match(/unexplained trailing byte/g) || []).length;
-    const t = ll.warning && !ll.damaged ? ll.warning : tails ? `Unexplained trailing byte (0x00) in ${tails} mesh ${tails === 1 ? 'block' : 'blocks'}; verify this model against the source.` : n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
-      : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
     if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }
 
@@ -809,6 +824,7 @@
   }
 
   window.PDF3DSimpleMode = {
+    damagedNoteText,
     labels: { render: RENDER_LABELS, bodies: BODIES, background: BG_LABELS, projection: PROJ_LABELS, help: HELP_ROWS, specs: SPECS }
   };
 

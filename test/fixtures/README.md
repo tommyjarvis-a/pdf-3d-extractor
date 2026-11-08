@@ -19,7 +19,12 @@ this third-party PDF. The decoder test skips this fixture explicitly if absent.
 Spec-derived: arithmetic encoder/state, static intervals, escape handling,
 rescaling, U32-zero flush and byte alignment (ECMA-363 fourth edition, section10.4).
 Empirically inferred for this RH producer: encoding8 uses the declared domain;
-encoding9 uses a fresh dynamic context and U16 escape values. Every array must
+encoding9 uses a fresh dynamic context and U16 escape values, and includes histogram
+symbol `0xFFFF` (escaped value **65534**) in frequency counting. This last rule is
+**empirical, not spec-derived**, inferred from only **two real arrays** (mandibular
+artery and palatine artery `normals.alpha_theta`). It differs from ECMA-363 A.3.3's
+strict `< 0xFFFF` listing. The encoder's corresponding boundary rule is empirical
+too; it is not an independent spec oracle for that exception. Every array must
 satisfy counts, domains and exact flush/end checks; production never tries alternate
 widths to salvage a broken payload. The external real sample has no independent
 geometric/visual reference, so structural validity is not visual equivalence.

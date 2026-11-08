@@ -7,8 +7,10 @@ Compatibility candidate; not a general converter and not fitted Parasolid.
 ### Added
 - RHAdobeMeshResource integer-array arithmetic encodings **8 (static domain)** and
   **9 (dynamic, U16 escapes)**. The mapping is inferred from all 110 arithmetic arrays
-  in one Ohio University producer sample, independently checked by a spec-derived
-  test encoder, declared domains, exact flush bytes and mesh structure. Existing
+  in one Ohio University producer sample, checked by an independent test encoder,
+  declared domains, exact flush bytes and mesh structure. The encoder arithmetic is
+  spec-derived, but encoding-9 frequency counting of symbol `0xFFFF` (escaped value
+  **65534**) is empirical, inferred from **two real arrays**, not spec-derived. Existing
   RH39/7 and UIC1/10 are retained. This is not an independent visual-equivalence claim.
 - Local masked password entry, wrong-password retry and Cancel/Esc. Empty-user PDFs
   still open without prompting. New loads clear entry state and supersede old loads.
@@ -22,6 +24,8 @@ Compatibility candidate; not a general converter and not fitted Parasolid.
 - Partial RH recovery is explicit: unknown trailing data rejects the chunk; one
   unexplained trailing zero byte preserves geometry with a visible warning and
   partial-export marking. The real sample recovers 90/90 meshes (86 exact, 4 warned).
+  The load card shows unreadable/missing mesh-block counts together with recovered
+  trailing-byte-warning counts, wrapping rather than hiding either warning.
   Skeleton/subchunk descriptions remain explicitly unsupported, never silently ignored.
 - Unknown security revisions/handlers/crypt methods are rejected before prompting;
   security errors never fall back to scanning ciphertext. Named `/Crypt`, Identity,
@@ -31,6 +35,8 @@ Compatibility candidate; not a general converter and not fitted Parasolid.
   failures remain errors. Corrected the R6 Algorithm 2.B round-number termination.
 - All 28 built-in sample exports remain byte-identical to 1.8.0. No new backend,
   password persistence, main/tag/release/Pages change or UI redesign.
+- Ohio export evidence is full raw/STL/OBJ and subset STEP/XT/IGES only. Full Ohio
+  XT exceeded Tester's **4 GB test heap**; full Ohio STEP/XT success is not claimed.
 - Served cache keys: `1.9.0` / worker `1.9.0-w1`; standalone rebuilt.
 
 ## 1.8.0 (alpha) — 2026-11-02

@@ -349,6 +349,36 @@ if (require.main === module) (async () => {
       check(!hit.length, `user-facing "part(s)" wording left: ${hit.slice(0, 3).map((l) => l.trim().slice(0, 80)).join(' | ')}`);
       check(/so only \$\{n\} \$\{n === 1 \? 'body' : 'bodies'\} loaded/.test(smSrc), 'damaged-load note does not say body / bodies');
     }
+    // 1.9.0 M1: recovered tail-warning blocks and unreadable blocks must both be visible.
+    {
+      const note = sm.damagedNoteText;
+      check(typeof note === 'function', 'damaged-load formatter missing');
+      if (typeof note === 'function') {
+        const tail = 'PartBody_2Resource: RHAdobe: unexplained trailing byte 0x00';
+        const cases = [
+          ['trailing only', { status: 'ok', parts: 2, damaged: `RHAdobe: 0 mesh blocks unreadable; ${tail}` },
+            [/1 mesh block recovered with unexplained trailing byte \(0x00\) warning/], [/unreadable\/missing/]],
+          ['missing only', { status: 'ok', parts: 1, damaged: 'RHAdobe: 1 mesh blocks unreadable' },
+            [/1 mesh block unreadable\/missing/, /1 body recovered/], [/trailing byte/]],
+          ['both', { status: 'ok', parts: 1, damaged: `RHAdobe: 1 mesh blocks unreadable; ${tail}` },
+            [/1 mesh block unreadable\/missing/, /1 mesh block recovered with unexplained trailing byte \(0x00\) warning/], []],
+          ['neither', { status: 'ok', parts: 2 }, [/^$/], [/unreadable|trailing byte/]]
+        ];
+        for (const [name, ll, required, absent] of cases) {
+          const text = note(ll);
+          check(required.every(r => r.test(text)) && absent.every(r => !r.test(text)), `M1 ${name}: ${text}`);
+        }
+        const plural = note({ status: 'ok', parts: 7, damaged: `RHAdobe: 3 mesh blocks unreadable; ${tail}; ${tail}` });
+        check(/3 mesh blocks unreadable\/missing; 2 mesh blocks recovered/.test(plural), 'M1 distinct plural counts');
+        check(note({ status: 'ok', parts: 2, damaged: 'Other decoder: partial' }).includes('only 2 bodies loaded'), 'generic partial-load fallback');
+        check(note({ status: 'ok', warning: 'Optional PDF text unavailable' }) === 'Optional PDF text unavailable', 'metadata-only note unchanged');
+        check(note({ status: 'error', damaged: tail }) === '' && note(null) === '', 'non-loaded model note hidden');
+      }
+      const css = fs.readFileSync(path.join(ROOT, 'simple-mode.css'), 'utf8');
+      const rule = /\.sm-damaged-t\s*\{([^}]+)\}/.exec(css);
+      check(rule && /white-space:\s*normal/.test(rule[1]) && !/ellipsis|overflow:\s*hidden/.test(rule[1]), 'mixed warnings must wrap, not truncate');
+      check(/const t = damagedNoteText\(ll\)/.test(smSrc), 'load card must use tested note formatter');
+    }
     const V0 = window.PDF3DView, X = window.PDF3D.exportSettings, A = window.CAD3DExtractor;
     check(V0 && ['setRenderMode', 'preset', 'fit', 'setExplode', 'setOrbitMode', 'state'].every((k) => typeof V0[k] === 'function') && Array.isArray(V0.renderModes), 'PDF3DView view controls API missing');
     check(A && ['getStatus', 'loadSample', 'showAllParts', 'invertParts'].every((k) => typeof A[k] === 'function') && typeof A.getStatus().text === 'string', 'CAD3DExtractor UI API missing');
