@@ -30,6 +30,10 @@ Compatibility candidate; not a general converter and not fitted Parasolid.
 - Unknown security revisions/handlers/crypt methods are rejected before prompting;
   security errors never fall back to scanning ciphertext. Named `/Crypt`, Identity,
   metadata and attachment filters follow the selected security method.
+- Encryption dictionaries and trailer IDs are validated before authentication;
+  valid indirect IDs resolve, while malformed metadata gives a typed damaged error.
+  Unexpected errors on encrypted inputs fail closed at the PDF and app boundaries;
+  the legacy scanner remains available for unencrypted inputs only.
 - AES-CBC length/padding validation is strict. Damaged optional encrypted text is
   omitted with a visible metadata warning, not passed off as decrypted text; stream
   failures remain errors. Corrected the R6 Algorithm 2.B round-number termination.

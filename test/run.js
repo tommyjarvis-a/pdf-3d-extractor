@@ -517,6 +517,7 @@ if (require.main === module) (async () => {
     if (update) { fs.writeFileSync(expFile, JSON.stringify(expect, null, 1) + '\n'); console.log('wrote ' + expFile); }
     fs.writeFileSync(path.join(require('os').tmpdir(), 'pdf3d-test-table.md'), '| file | result | streams | decode path | tris | ms | first warning |\n|---|---|---|---|---|---|---|\n' + rows.join('\n') + '\n');
   }
+  await require('./security-metadata190').run({loadApp});
   if (failures) console.log(`${failures} FAILURE(S)`);
   else if (!corpus) console.log('OK: built-in checks only (no corpus given: 0 corpus files checked; pass a corpus dir or set PDF3D_CORPUS)');
   else console.log(`ALL OK (${corpusRan} corpus files)`);

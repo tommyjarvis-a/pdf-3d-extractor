@@ -137,6 +137,11 @@
   async function extract3DStreamsFromPDF(u8, fileName, options) {
     const X = getModule('PDF3DExtract', 'pdf-extract.js');
     let attachments = [];
+    const refuseCiphertext = () => {
+      const e = new Error('Damaged encrypted PDF: encryption metadata or encrypted content could not be read.');
+      e.code = 'PDF_DAMAGED'; e.encrypted = true; return e;
+    };
+    const encryptedInput = async () => !!(X && X.hasEncryption && await X.hasEncryption(u8));
     if (X) {
       try {
         const res = await X.extract3DStreamsFromPDF(u8, fileName, { ...(options || {}), inflate: inflateFlateStream });
@@ -144,9 +149,11 @@
         attachments = (res && res.attachments) || [];
       } catch (err) {
         if (/^PDF_(PASSWORD_|SECURITY_|DAMAGED)/.test(err && err.code || '')) throw err;
+        if (err?.encrypted || await encryptedInput()) throw refuseCiphertext();
         console.warn('pdf-extract failed, falling back to legacy scanner:', err);
       }
     }
+    if (await encryptedInput()) throw refuseCiphertext();
     const legacy = await extract3DStreamsFromPDFLegacy(u8, fileName);
     if (!legacy.attachments) legacy.attachments = attachments;
     return legacy;

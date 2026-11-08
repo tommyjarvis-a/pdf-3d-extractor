@@ -34,3 +34,11 @@ which contains both U3D and PRC, plus a tiny test attachment. They are generated
 and removed by `test/compatibility190.js` using `password-fixtures.py`. No third-party
 model or user password is required for these tests. R5 uses an external existing
 r11 fixture, since new R5 encryption is deprecated; it is not newly generated.
+
+`test/security-metadata190.js` supplies small **synthetic metadata-only** malformed
+PDFs to the fast harness (not crypto/geometry oracles). Its CLI also uses Tester's
+external `v190/repro/{r3,r4rc4,r4aes}-{base,idref}.pdf` controls, explicitly skipped
+if absent, plus incremental metadata mutations and valid indirect-ID revisions.
+These external PDFs are not committed. No passwords are needed. Run
+`node test/security-metadata190.js` for served/standalone source-VM checks; it is
+not a browser or corpus gate.
