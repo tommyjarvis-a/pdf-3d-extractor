@@ -1,5 +1,5 @@
 /**
- * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.8.0
+ * 3D PDF -> CAD Geometry Extractor & B-Rep Workbench (app.js) v1.9.0
  * Supports:
  *  - PDF 1.7 /3D (/Subtype /U3D & /Subtype /PRC) + /RichMedia stream extraction & FlateDecode decompression
  *  - ECMA-363 (U3D) binary stream parser (NoCompression & BitStreamRead arithmetic contexts)
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.9.0';
   if (typeof window !== 'undefined') window.CAD3DExtractorVersion = APP_VERSION;
 
   // Parasolid XT (.x_t) export: offered while buildParasolidXT writes the NX 2512 form
@@ -133,16 +133,17 @@
   // 2. PDF /3D & /RichMedia Stream Extractor
   // -------------------------------------------------------------------------
   // PDF layer lives in pdf-extract.js (object parser, xref streams/ObjStm, filters+predictors, Standard security
-  // handler with empty user password, /3D + /RichMedia annotation walk). The old regex scanner remains as fallback.
-  async function extract3DStreamsFromPDF(u8, fileName) {
+  // handler with local password entry, /3D + /RichMedia annotation walk). The old regex scanner remains as fallback.
+  async function extract3DStreamsFromPDF(u8, fileName, options) {
     const X = getModule('PDF3DExtract', 'pdf-extract.js');
     let attachments = [];
     if (X) {
       try {
-        const res = await X.extract3DStreamsFromPDF(u8, fileName, { inflate: inflateFlateStream });
-        if (res && res.length) return res;
+        const res = await X.extract3DStreamsFromPDF(u8, fileName, { ...(options || {}), inflate: inflateFlateStream });
+        if (res && (res.length || res.securityHandled)) return res;
         attachments = (res && res.attachments) || [];
       } catch (err) {
+        if (/^PDF_(PASSWORD_|SECURITY_|DAMAGED)/.test(err && err.code || '')) throw err;
         console.warn('pdf-extract failed, falling back to legacy scanner:', err);
       }
     }
@@ -897,6 +898,8 @@
               };
             });
             r.decodePath = 'U3D/RHAdobeMeshResource';
+            const incomplete = (rr.warnings || []).filter(w => /unexplained trailing byte/.test(w));
+            if (rr.meshErrors?.length || incomplete.length) r.damaged = `RHAdobe: ${rr.meshErrors?.length || 0} mesh blocks unreadable${incomplete.length ? '; ' + incomplete.join('; ') : ''}`;
             for (const w of rr.warnings || []) r.warnings.push(w);
             return r;
           }
@@ -907,7 +910,7 @@
           if (e && e.rhDamaged) throw e;
           r.warnings.push(`RHAdobeMeshResource: ${damageMessage(e)}`);
           // 1.6.2: a vendor mesh block whose size overruns the stream is damage, not an unsupported format
-          if (/overruns|past the end|truncat/i.test(String(e && e.message)) || damageMessage(e) !== String(e && e.message)) (r.damage = r.damage || []).push(`RHAdobeMeshResource: ${damageMessage(e)}`);
+          if (/overruns|past the end|truncat|budget|bounds|nonfinite/i.test(String(e && e.message)) || damageMessage(e) !== String(e && e.message)) (r.damage = r.damage || []).push(`RHAdobeMeshResource: ${damageMessage(e)}`);
         }
       }
       if (r.damage && r.damage.length) {
@@ -3876,8 +3879,10 @@
     return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
   }
 
+  let activationGeneration = 0;
   async function activateStream(idx) {
     if (idx < 0 || idx >= state.streams.length) return;
+    const activation = ++activationGeneration, generation = loadGeneration;
     state.activeStreamIdx = idx;
     const st = state.streams[idx];
     if (!st.parsed) {
@@ -3898,6 +3903,7 @@
         st.parsed = { format: st.subtype, decodePath: 'none', parts: [], wires: [], blocks: [], warnings: [shown], decodeError: shown };
       }
     }
+    if (generation !== loadGeneration || activation !== activationGeneration || state.streams[idx] !== st) return;
     state.wires = st.parsed.wires || [];
     state.tree = st.parsed.tree || null;
     // 1.8.0: every body gets a default name per type (Body_n / Sheet_n / Mesh_n, file order); the file's own label stays
@@ -4168,7 +4174,7 @@
     // (fitSkippedTris) and the large-model banner count these. The two differ only by the degenerate triangles.
     const tris = (p.parts || []).reduce((n, q) => n + (q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
     const trisParsed = (p.parts || []).reduce((n, q) => n + (q.triCount != null ? q.triCount : q.idx ? q.idx.length / 3 : (q.faces ? q.faces.length : 0)), 0);
-    const base = { format: st.subtype, stream: idx, streams: state.streams.length, decodePath: p.decodePath || 'none' };
+    const base = { format: st.subtype, stream: idx, streams: state.streams.length, decodePath: p.decodePath || 'none', ...(st.extractionWarning ? {warning:st.extractionWarning} : {}) };
     if (tris) return { status: 'ok', reasonCode: null, ...base, parts: (p.parts || []).length, tris, trisParsed, ...(p.damaged ? { damaged: p.damaged } : {}) };
     if (p.decodeError) return { status: 'error', reasonCode: 'DECODE_ERROR', ...base, detail: p.decodeError,
       message: `This PDF has a 3D model, but the app could not decode it (${st.subtype}: ${p.decodeError}).` };
@@ -4204,10 +4210,64 @@
     (window.PDF3D = window.PDF3D || {}).lastLoad = r; return r;
   }
 
-  async function loadPDFBuffer(u8, fileName) {
-    state.fileName = fileName || 'document-3d.pdf';
-    state.fileSize = u8.length;
-    const streams = await extract3DStreamsFromPDF(u8, state.fileName);
+  let loadGeneration = 0, cancelPasswordPrompt = null;
+  function passwordPrompt(incorrect) {
+    if (!document.createElement) return Promise.resolve(null);
+    const dialog = document.createElement('dialog');
+    if (typeof dialog.showModal !== 'function') return Promise.resolve(null);
+    dialog.className = 'pdf-password';
+    // No interpolated user data and no form submission/navigation. Clear on every exit.
+    dialog.innerHTML = '<form method="dialog"><h2>PDF password</h2><p class="pdf-password-message"></p><label>Password <input type="password" autocomplete="off" spellcheck="false" aria-label="PDF password"></label><div><button type="button" data-cancel>Cancel</button><button type="submit">Open PDF</button></div></form>';
+    const input = dialog.querySelector('input');
+    dialog.querySelector('p').textContent = incorrect ? 'Incorrect password. Try again or Cancel.' : 'This PDF needs a password. It stays on this device.';
+    return new Promise(resolve => {
+      let finished = false;
+      const finish = value => { if (finished) return; finished = true; input.value = ''; if (cancelPasswordPrompt === cancel) cancelPasswordPrompt = null; dialog.close(); dialog.remove(); resolve(value); };
+      const cancel = () => finish(null); cancelPasswordPrompt = cancel;
+      dialog.querySelector('form').addEventListener('submit', e => { e.preventDefault(); finish(input.value); });
+      dialog.querySelector('[data-cancel]').addEventListener('click', cancel);
+      dialog.addEventListener('cancel', e => { e.preventDefault(); cancel(); });
+      document.body.appendChild(dialog); dialog.showModal(); input.focus();
+    });
+  }
+  function beginLoad() { loadGeneration++; if (cancelPasswordPrompt) cancelPasswordPrompt(); return loadGeneration; }
+  function clearModelForLoad() {
+    state.streams = []; state.activeStreamIdx = -1; state.parts = []; state.wires = []; state.tree = null; state.attachments = []; state.selectedPartIdx = -1;
+  }
+  async function loadPDFBuffer(u8, fileName, options = {}) {
+    const generation = options._generation || beginLoad();
+    if (generation !== loadGeneration) return { status: 'cancelled', reasonCode: 'STALE_LOAD' };
+    let password, supplied = Object.prototype.hasOwnProperty.call(options,'password'), streams;
+    if (supplied) password = options.password;
+    state.fileName = fileName || 'document-3d.pdf'; state.fileSize = u8.length;
+    clearModelForLoad(); setLastLoad({status:'loading',reasonCode:null,streams:0,format:null}); refreshAllUI();
+    const failed = (code,message) => { clearModelForLoad(); setLastLoad({status:code==='PDF_PASSWORD_CANCELLED'?'cancelled':'error',reasonCode:code,message,detail:message,streams:0,format:null}); refreshAllUI(); return window.PDF3D.lastLoad; };
+    try {
+      for (let attempts = 0; attempts < 20; attempts++) {
+        if (generation !== loadGeneration) return {status:'cancelled',reasonCode:'STALE_LOAD'};
+        try { streams = await extract3DStreamsFromPDF(u8, fileName, supplied ? {password} : {}); password = undefined; break; }
+        catch (e) {
+          password = undefined;
+          if (generation !== loadGeneration) return {status:'cancelled',reasonCode:'STALE_LOAD'};
+          if (!['PDF_PASSWORD_REQUIRED','PDF_PASSWORD_INCORRECT'].includes(e.code)) throw e;
+          if (attempts === 19) return failed('PDF_PASSWORD_INCORRECT','Too many password attempts. Open the PDF again to retry.');
+          // Every retry requires a fresh user submit (or a caller callback); no automatic password guessing.
+          const request = options.requestPassword || (options.prompt === false ? null : passwordPrompt);
+          if (!request) return failed(e.code,e.message);
+          password = await request(e.code === 'PDF_PASSWORD_INCORRECT');
+          if (generation !== loadGeneration) { password = undefined; return {status:'cancelled',reasonCode:'STALE_LOAD'}; }
+          if (password === null || password === undefined) return failed('PDF_PASSWORD_CANCELLED','Password entry cancelled. Open another file to continue.');
+          supplied = true;
+        }
+      }
+      if (generation !== loadGeneration) return {status:'cancelled',reasonCode:'STALE_LOAD'};
+      if (!streams) return failed('PDF_PASSWORD_INCORRECT','Too many password attempts. Open the PDF again to retry.');
+    } catch (e) {
+      if (generation !== loadGeneration) return {status:'cancelled',reasonCode:'STALE_LOAD'};
+      if (/^PDF_/.test(e.code || '')) return failed(e.code,e.message);
+      throw e;
+    } finally { password = undefined; }
+
     state.attachments = (streams && streams.attachments) || [];
     if (streams.length === 0) {
       setLastLoad({ status: 'no3d', reasonCode: 'NO_3D', format: null, streams: 0,
@@ -4355,14 +4415,17 @@
     const fileInput = document.getElementById('fileInput');
     if (fileInput) {
       fileInput.addEventListener('change', (ev) => {
-        if (ev.target.files && ev.target.files[0]) handleFileObj(ev.target.files[0]);
+        const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
+        if (file) handleFileObj(file);
       });
     }
   }
   async function handleFileObj(file) {
     if (!file) return;
+    const generation = beginLoad();
     const ab = await file.arrayBuffer();
-    await loadPDFBuffer(new Uint8Array(ab), file.name);
+    if (generation !== loadGeneration) return;
+    await loadPDFBuffer(new Uint8Array(ab), file.name, {_generation:generation});
   }
   function loadSample() {
     if (!window.SAMPLE_3D_PDF_B64) return Promise.resolve(false);

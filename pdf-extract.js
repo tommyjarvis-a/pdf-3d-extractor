@@ -6,7 +6,7 @@
  *  F1  Real object parser instead of "lastIndexOf('<<') within 1024 chars": nested dictionaries inside a 3D
  *      stream dict (/VA [<< /Type /3DView .. >>], Asymptote/media9/HOOPS) made /Subtype and /Filter invisible.
  *  F2  /DecodeParms predictors (PNG 10-15, TIFF 2) applied after FlateDecode; also ASCIIHex, ASCII85, LZW, RunLength.
- *  F3  PDF Standard security handler with the empty user password (owner-password-only files):
+ *  F3  PDF Standard security handler with local user/owner passwords and automatic empty-user authentication:
  *      RC4 40/128 (R2/R3), V4 AESV2 / V2 crypt filters (R4), AESV3 (R5 and R6 / ISO 32000-2 Algorithm 2.B).
  *  F4  Annotation-driven discovery: /3D annots (/3DD stream or /3DRef), /RichMedia annots (RichMediaContent /Assets
  *      name tree -> filespec /EF), with xref tables, xref streams, object streams (ObjStm) and incremental updates;
@@ -15,9 +15,9 @@
  * {objNum, page, annot, container, encrypted, sameAs}.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./crypto-lite'));
-  else root.PDF3DExtract = factory(root.CryptoLite);
-})(typeof self !== 'undefined' ? self : this, function (C) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./crypto-lite'), require('./saslprep'));
+  else root.PDF3DExtract = factory(root.CryptoLite, root.PDF3DSASLprep);
+})(typeof self !== 'undefined' ? self : this, function (C, preparePassword) {
   const WS = new Uint8Array(256); [0, 9, 10, 12, 13, 32].forEach((c) => (WS[c] = 1));
   const DELIM = new Uint8Array(256); '()<>[]{}/%'.split('').forEach((c) => (DELIM[c.charCodeAt(0)] = 1));
   class Ref { constructor(n, g) { this.num = n; this.gen = g; } }
@@ -117,11 +117,13 @@
       let e = dict[code]; if (!e) e = prev.concat([prev[0]]); out.push(...e); if (prev) dict.push(prev.concat([e[0]])); prev = e;
       if (dict.length + early >= (1 << bits) && bits < 12) bits++; } } return Uint8Array.from(out); }
   function runLength(u8) { const o = []; for (let i = 0; i < u8.length;) { const n = u8[i++]; if (n === 128) break; if (n < 128) { for (let k = 0; k <= n; k++) o.push(u8[i++]); } else { const b = u8[i++]; for (let k = 0; k < 257 - n; k++) o.push(b); } } return Uint8Array.from(o); }
+  // ISO32000 PDFDocEncoding; table cross-checked against libqpdf String decoding.
+  const PDFDOC = "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u02d8\u02c7\u02c6\u02d9\u02dd\u02db\u02da\u02dc !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\ufffd\u2022\u2020\u2021\u2026\u2014\u2013\u0192\u2044\u2039\u203a\u2212\u2030\u201e\u201c\u201d\u2018\u2019\u201a\u2122\ufb01\ufb02\u0141\u0152\u0160\u0178\u017d\u0131\u0142\u0153\u0161\u017e\ufffd\u20ac\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\ufffd\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff";
   const num = (v, d) => (typeof v === 'number' ? v : d);
 
   // ---------------- document ----------------
   class Doc {
-    constructor(u8, opts) { this.d = u8; this.opts = opts || {}; this.offsets = new Map(); this.inObjStm = new Map(); this.cache = new Map(); this.objStmCache = new Map(); this.trailer = {}; this.crypt = null; this.log = []; }
+    constructor(u8, opts) { this.d = u8; this.opts = { ...(opts || {}) }; this.offsets = new Map(); this.inObjStm = new Map(); this.cache = new Map(); this.objStmCache = new Map(); this.trailer = {}; this.crypt = null; this.log = []; }
     async open() {
       try { await this.readXrefChain(); } catch (e) { this.log.push('xref: ' + e.message); }
       if (!this.offsets.size && !this.inObjStm.size) await this.scanObjects(); else await this.scanObjects(true);
@@ -214,35 +216,77 @@
     resolve(v) { let k = 0; while (v instanceof Ref && k++ < 32) v = this.getSync(v.num); return v; }
     // --- encryption (ISO 32000-2 7.6) ---
     async initCrypt() {
+      const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
+      const unsupported = message => fail('PDF_SECURITY_UNSUPPORTED', 'Unsupported PDF security: ' + message);
       if (this.trailer.Encrypt instanceof Ref) this.encNum = this.trailer.Encrypt.num;
-      const E = this.resolve(this.trailer.Encrypt); if (!E || !isName(E.Filter, 'Standard')) { this.cryptError = 'unsupported security handler ' + (E && E.Filter && E.Filter.name); return; }
-      const V = num(E.V, 0), R = num(E.R, 2); const O = this.strBytes(E.O), U = this.strBytes(E.U);
-      const id0 = this.trailer.ID ? this.strBytes(this.resolve(this.trailer.ID)[0]) : new Uint8Array(0);
-      let method = 'RC4', keyLen = V === 1 ? 5 : num(E.Length, 40) / 8;
-      if (V >= 4) { const cf = this.resolve(E.CF) || {}; const stmf = (E.StmF && E.StmF.name) || 'Identity'; this.stmIdentity = stmf === 'Identity';
-        const f = this.resolve(cf[stmf]) || {}; const cfm = f.CFM && f.CFM.name; method = cfm === 'AESV2' ? 'AES' : cfm === 'AESV3' ? 'AES256' : cfm === 'None' ? 'None' : 'RC4'; if (f.Length) keyLen = f.Length > 32 ? f.Length / 8 : f.Length; if (method === 'AES') keyLen = 16;
-        this.efMethod = (E.EFF && E.EFF.name && this.resolve(cf[E.EFF.name])) ? ((this.resolve(cf[E.EFF.name]).CFM || {}).name) : null;
-        const strf = (E.StrF && E.StrF.name) || 'Identity'; const sf = this.resolve(cf[strf]) || {};
-        this.strMethod = strf === 'Identity' ? 'None' : ({ AESV2: 'AES', AESV3: 'AES256', None: 'None' })[sf.CFM && sf.CFM.name] || 'RC4';
-        // AESV2 is always 128-bit, whichever of StmF / StrF / EFF uses it (StmF may be Identity in an EFF-only file)
-        if (this.efMethod === 'AESV2' || this.strMethod === 'AES') keyLen = 16; }
+      const E = this.resolve(this.trailer.Encrypt);
+      if (!E || !isName(E.Filter, 'Standard')) unsupported('certificate/public-key security or DRM handler (only Standard password security is supported)');
+      const V = num(E.V, 0), R = num(E.R, 0);
+      if (!({2:[1],3:[2,3],4:[4],5:[5],6:[5]})[R]?.includes(V)) unsupported('unhandled revision/version');
+      if (!Number.isInteger(E.P)) fail('PDF_DAMAGED','Damaged PDF permissions dictionary');
+      const O = this.strBytes(E.O), U = this.strBytes(E.U);
+      if (O.length < (R >= 5 ? 48 : 32) || U.length < (R >= 5 ? 48 : 32)) fail('PDF_DAMAGED', 'Damaged PDF encryption dictionary');
+      let keyLen = R === 2 ? 5 : R >= 5 ? 32 : num(E.Length, 40) / 8;
+      if (!Number.isInteger(keyLen) || keyLen < 5 || (R < 5 && keyLen > 16)) unsupported('invalid encryption key length');
+      const cf = this.resolve(E.CF) || {};
+      this.cryptFilters = { Identity: 'None' };
+      for (const name of Object.keys(cf)) {
+        const f = this.resolve(cf[name]); const method = ({V2:'RC4',AESV2:'AES',AESV3:'AES256',None:'None'})[f?.CFM?.name];
+        if (!method || (R < 5 && method === 'AES256') || (R >= 5 && !['AES256','None'].includes(method))) unsupported('unhandled crypt filter');
+        if (method !== 'None' && f.Length && (f.Length > 32 ? f.Length / 8 : f.Length) !== keyLen) unsupported('incompatible crypt-filter key length');
+        if (method === 'AES' && keyLen !== 16) unsupported('AESV2 requires a 128-bit key');
+        this.cryptFilters[name] = method;
+      }
+      const filter = name => { if (!Object.prototype.hasOwnProperty.call(this.cryptFilters,name)) unsupported('unknown crypt filter name'); return this.cryptFilters[name]; };
+      const method = V >= 4 ? filter(E.StmF?.name || 'Identity') : 'RC4';
+      this.strMethod = V >= 4 ? filter(E.StrF?.name || 'Identity') : 'RC4';
+      this.efMethod = V >= 4 && E.EFF ? filter(E.EFF.name) : method;
+      this.encryptMetadata = R < 4 || E.EncryptMetadata !== false;
+      const supplied = Object.prototype.hasOwnProperty.call(this.opts, 'password');
+      const password = supplied ? String(this.opts.password) : ''; delete this.opts.password;
+      // Password bytes live only in this invocation/document, never in exported records/logs.
       let key;
       if (R >= 5) {
-        const pw = new Uint8Array(0); // empty user password (owner-password-only files)
-        const vs = U.subarray(32, 40), ks = U.subarray(40, 48); const h = await this.hash2B(pw, vs, R, null);
-        if (!eq(h, U.subarray(0, 32))) { this.cryptError = 'user password is not empty (cannot open without it)'; return; }
-        const ik = await this.hash2B(pw, ks, R, null); key = C.aesCbcDecrypt(ik, this.strBytes(E.UE), new Uint8Array(16), false); method = 'AES256';
+        let pw;
+        try { pw = new TextEncoder().encode(R === 6 ? preparePassword(password) : password).subarray(0,127); }
+        catch (_) { fail(supplied ? 'PDF_PASSWORD_INCORRECT' : 'PDF_PASSWORD_REQUIRED', 'Password could not authenticate this PDF'); }
+        const user = eq(await this.hash2B(pw, U.subarray(32,40), R, null), U.subarray(0,32));
+        const owner = !user && eq(await this.hash2B(pw, O.subarray(32,40), R, U.subarray(0,48)), O.subarray(0,32));
+        if (!user && !owner) fail(supplied ? 'PDF_PASSWORD_INCORRECT' : 'PDF_PASSWORD_REQUIRED', supplied ? 'Incorrect PDF password. Try again or Cancel.' : 'This PDF needs a password.');
+        const entry = user ? U : O, encryptedKey = this.strBytes(user ? E.UE : E.OE);
+        if (encryptedKey.length !== 32) fail('PDF_DAMAGED','Damaged PDF encrypted file key');
+        key = C.aesCbcDecrypt(await this.hash2B(pw, entry.subarray(40,48), R, user ? null : U.subarray(0,48)), encryptedKey, new Uint8Array(16), false);
+        const perms = this.strBytes(E.Perms);
+        if (perms.length !== 16) fail('PDF_DAMAGED','Damaged PDF permissions block');
+        const dec = C.aesCbcDecrypt(key, perms, new Uint8Array(16), false), P = num(E.P,0);
+        if (dec[9] !== 97 || dec[10] !== 100 || dec[11] !== 98 || dec[8] !== (this.encryptMetadata ? 84 : 70) || !dec.subarray(4,8).every(x=>x===255) || !dec.subarray(0,4).every((x,i)=>x===((P >>> (i*8)) & 255))) fail('PDF_DAMAGED','Damaged PDF permissions validation');
       } else {
-        const PAD = Uint8Array.from([0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A]);
-        const P = num(E.P, 0); const buf = [...PAD, ...O.subarray(0, 32), P & 255, (P >>> 8) & 255, (P >>> 16) & 255, (P >>> 24) & 255, ...id0];
-        if (R >= 4 && E.EncryptMetadata === false) buf.push(255, 255, 255, 255);
-        key = C.md5(Uint8Array.from(buf)); if (R >= 3) for (let i = 0; i < 50; i++) key = C.md5(key.subarray(0, keyLen)); key = key.subarray(0, keyLen);
-        // verify (Algorithm 4/5)
-        let ok; if (R === 2) ok = eq(C.rc4(key, PAD), U.subarray(0, 32));
-        else { let x = C.rc4(key, C.md5(Uint8Array.from([...PAD, ...id0]))); for (let i = 1; i <= 19; i++) x = C.rc4(key.map((b) => b ^ i), x); ok = eq(x.subarray(0, 16), U.subarray(0, 16)); }
-        if (!ok) { this.cryptError = 'user password is not empty (cannot open without it)'; return; }
+        const PAD = Uint8Array.from([0x28,0xBF,0x4E,0x5E,0x4E,0x75,0x8A,0x41,0x64,0,0x4E,0x56,0xFF,0xFA,1,8,0x2E,0x2E,0,0xB6,0xD0,0x68,0x3E,0x80,0x2F,0x0C,0xA9,0xFE,0x64,0x53,0x69,0x7A]);
+        const pad = bytes => cat(bytes, PAD).subarray(0,32);
+        // Legacy Standard passwords are byte strings, not UTF-8. Reject unrepresentable input.
+        const legacy = Array.from(password).map(c=>PDFDOC.indexOf(c));
+        const bytes = Uint8Array.from(legacy);
+        const representable = legacy.every(c=>c>=0) && !password.includes('\ufffd');
+        const id0 = this.trailer.ID ? this.strBytes(this.resolve(this.trailer.ID)[0]) : new Uint8Array(0), P = num(E.P,0);
+        const derive = padded => {
+          let k = C.md5(cat(padded,O.subarray(0,32),Uint8Array.of(P&255,(P>>>8)&255,(P>>>16)&255,(P>>>24)&255),id0,R>=4&&!this.encryptMetadata?Uint8Array.of(255,255,255,255):new Uint8Array(0)));
+          if (R>=3) for(let i=0;i<50;i++) k=C.md5(k.subarray(0,keyLen)); return k.subarray(0,keyLen);
+        };
+        const check = k => {
+          if(R===2) return eq(C.rc4(k,PAD),U.subarray(0,32));
+          let x=C.rc4(k,C.md5(cat(PAD,id0))); for(let i=1;i<=19;i++) x=C.rc4(k.map(b=>b^i),x); return eq(x.subarray(0,16),U.subarray(0,16));
+        };
+        key=derive(pad(bytes));
+        if (!representable || !check(key)) {
+          let digest=C.md5(pad(bytes)); if(R>=3) for(let i=0;i<50;i++) digest=C.md5(digest);
+          const ownerKey=digest.subarray(0,keyLen); let recovered=O.subarray(0,32);
+          if(R===2) recovered=C.rc4(ownerKey,recovered); else for(let i=19;i>=0;i--) recovered=C.rc4(ownerKey.map(b=>b^i),recovered);
+          key=derive(recovered);
+          if (!representable || !check(key)) fail(supplied ? 'PDF_PASSWORD_INCORRECT':'PDF_PASSWORD_REQUIRED', supplied?'Incorrect PDF password. Try again or Cancel.':'This PDF needs a password.');
+        }
       }
-      this.crypt = { key, method, R, V }; this.log.push(`decrypt: Standard R${R} V${V} ${method} key ${key.length * 8} bit (empty user password)${V >= 4 && (this.stmIdentity || this.efMethod) ? ` [StmF ${this.stmIdentity ? 'Identity' : method}, StrF ${this.strMethod}, EFF ${this.efMethod || 'StmF'}]` : ''}`);
+      this.crypt = { key, method, R, V };
+      this.log.push(`decrypt: Standard R${R} V${V} ${method} (${key.length*8} bit)`);
     }
     async hash2B(pw, salt, R, udata) {
       let K = await C.sha('SHA-256', cat(pw, salt, udata || new Uint8Array(0))); if (R === 5) return K;
@@ -251,7 +295,7 @@
         const E = C.aesCbcEncryptNoPad(K.subarray(0, 16), K1, K.subarray(16, 32));
         let m = 0; for (let i = 0; i < 16; i++) m += E[i]; m %= 3;
         K = await C.sha(m === 0 ? 'SHA-256' : m === 1 ? 'SHA-384' : 'SHA-512', E);
-        if (round >= 63 && E[E.length - 1] <= round - 32) break;
+        if (round >= 63 && E[E.length - 1] <= round - 31) break;
       }
       return K.subarray(0, 32);
     }
@@ -259,30 +303,31 @@
     // strings: the string crypt filter (V4+ /StrF; V1-3 the file's method); a string that fails to decrypt stays as it was
     decryptStrings(v, num_, gen, depth) {
       if (depth > 64 || v == null || typeof v !== 'object') return v;
-      if (v instanceof Str) { if (!v.bytes.length) return v; try { return new Str(this.decryptWith(this.strMethod || this.crypt.method, num_, gen, v.bytes)); } catch (_) { return v; } }
+      if (v instanceof Str) { if (!v.bytes.length) return v;
+        try { return new Str(this.decryptWith(this.strMethod || this.crypt.method,num_,gen,v.bytes)); }
+        catch (e) { if (e.code !== 'PDF_DAMAGED') throw e; this.log.push(`Damaged optional encrypted string in object ${num_}; omitted (3D stream decryption remains strict)`); return new Str(new Uint8Array(0)); } }
       if (v instanceof Ref || v instanceof Name) return v;
       if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = this.decryptStrings(v[i], num_, gen, depth + 1); return v; }
-      for (const k of Object.keys(v)) v[k] = this.decryptStrings(v[k], num_, gen, depth + 1); return v;
+      for (const k of Object.keys(v)) { if (k === 'Contents' && isName(v.Type,'Sig')) continue; v[k] = this.decryptStrings(v[k], num_, gen, depth + 1); } return v;
     }
     decryptWith(method, num_, gen, data) {
       const c = this.crypt; if (method === 'None') return data;
-      if (method === 'AES256') return C.aesCbcDecrypt(c.key, data);
+      if (method === 'AES256') { try { return C.aesCbcDecrypt(c.key,data); } catch (_) { const e=new Error('Damaged encrypted PDF stream or string');e.code='PDF_DAMAGED';throw e; } }
       const k = cat(c.key, Uint8Array.from([num_ & 255, (num_ >> 8) & 255, (num_ >> 16) & 255, gen & 255, (gen >> 8) & 255]), method === 'AES' ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0));
       const ok = C.md5(k).subarray(0, Math.min(c.key.length + 5, 16));
-      return method === 'AES' ? C.aesCbcDecrypt(ok, data) : C.rc4(ok, data);
+      if (method !== 'AES') return C.rc4(ok,data);
+      try { return C.aesCbcDecrypt(ok,data); } catch (_) { const e=new Error('Damaged encrypted PDF stream or string');e.code='PDF_DAMAGED';throw e; }
     }
     decryptFor(num_, gen, data, isEF) {
-      const c = this.crypt; if (!c) return data;
-      // embedded files use /EFF's crypt filter when given (it may differ from /StmF), otherwise /StmF's
-      if (isEF && this.efMethod) return this.decryptWith(({ AESV2: 'AES', AESV3: 'AES256', None: 'None' })[this.efMethod] || 'RC4', num_, gen, data);
-      if (this.stmIdentity) return data;
-      return this.decryptWith(c.method, num_, gen, data);
+      return this.decryptWith(isEF ? this.efMethod : this.crypt.method, num_, gen, data);
     }
     async streamData(o, isEF) {
       let data = this.rawStream(o); const v = o.value; const isXref = isName(v.Type, 'XRef');
-      if (this.crypt && !isXref) data = this.decryptFor(o.num, o.gen, data, isEF);
-      const filters = [].concat(this.resolve(v.Filter) || []).map((f) => this.resolve(f)).filter(Boolean).map((f) => f.name);
-      const parms = [].concat(this.resolve(v.DecodeParms || v.DP) || []).map((x) => this.resolve(x));
+      const filters = [].concat(this.resolve(v.Filter) || []).map(f=>this.resolve(f)).filter(Boolean).map(f=>f.name);
+      const parms = [].concat(this.resolve(v.DecodeParms || v.DP) || []).map(x=>this.resolve(x));
+      if (filters.includes('Crypt') && (filters[0] !== 'Crypt' || filters.lastIndexOf('Crypt') !== 0)) { const e=new Error('Unsupported PDF security: Crypt must be the first and only crypt filter'); e.code='PDF_SECURITY_UNSUPPORTED'; throw e; }
+      const encrypted = this.crypt && !isXref && !(isName(v.Type,'Metadata') && !this.encryptMetadata);
+      if (encrypted && !filters.includes('Crypt')) data = this.decryptFor(o.num,o.gen,data,isEF);
       const applied = [];
       for (let i = 0; i < filters.length; i++) {
         const f = filters[i], p = parms[i] || (filters.length === 1 ? parms[0] : null);
@@ -291,7 +336,11 @@
         else if (f === 'ASCII85Decode' || f === 'A85') data = ascii85(data);
         else if (f === 'LZWDecode' || f === 'LZW') { data = lzw(data, p && p.EarlyChange === 0 ? 0 : 1); data = predictor(data, p); }
         else if (f === 'RunLengthDecode' || f === 'RL') data = runLength(data);
-        else if (f === 'Crypt') { /* Identity crypt filter */ } else throw new Error('unsupported filter /' + f);
+        else if (f === 'Crypt') {
+          const name = p?.Name?.name || 'Identity'; const method = this.cryptFilters?.[name] || (name === 'Identity' ? 'None' : null);
+          if (!method || (!encrypted && method !== 'None')) { const e=new Error('Unsupported PDF security: unknown Crypt filter'); e.code='PDF_SECURITY_UNSUPPORTED'; throw e; }
+          if (encrypted) data=this.decryptWith(method,o.num,o.gen,data);
+        } else throw new Error('unsupported filter /' + f);
         applied.push(f + (p && p.Predictor > 1 ? `(Predictor ${p.Predictor})` : ''));
       }
       return { data, filters: applied };
@@ -320,7 +369,7 @@
     await doc.open();
     // object streams need async decode (inflate + decryption): pre-decode every ObjStm we know about
     const stmNums = new Set([...doc.inObjStm.values()].map((x) => x.stm)); const dec = new Map();
-    for (const sn of stmNums) { const so = doc.getObj(sn); if (so && so.stream) { try { dec.set(sn, (await doc.streamData(so)).data); } catch (e) { doc.log.push(`ObjStm ${sn}: ${e.message}`); } } }
+    for (const sn of stmNums) { const so = doc.getObj(sn); if (so && so.stream) { try { dec.set(sn, (await doc.streamData(so)).data); } catch (e) { if (/^PDF_/.test(e.code || '')) throw e; doc.log.push(`ObjStm ${sn}: ${e.message}`); } } }
     doc._objStmDecoded = (so) => dec.get(so.num); doc.cache.clear(); doc.objStmCache.clear();
     if (!doc.trailer.Root) await doc.scanObjects(true);
     if (doc.trailer.Encrypt && !doc.crypt) { await doc.initCrypt(); doc.cache.clear(); }
@@ -332,7 +381,7 @@
       if (!(ref instanceof Ref)) return; const o = doc.getObj(ref.num); if (!o || !o.stream) return;
       if (seenObj.has(ref.num)) { seenObj.get(ref.num).refs.push(meta); return; }
       const claims3D = meta.container === '/3D' || (meta.container === 'stream scan');
-      let r; try { r = await doc.streamData(o, isEF); } catch (e) { doc.log.push(`obj ${ref.num}: ${e.message}`);
+      let r; try { r = await doc.streamData(o, isEF); } catch (e) { if (/^PDF_/.test(e.code || '')) throw e; doc.log.push(`obj ${ref.num}: ${e.message}`);
         if (claims3D) { seenObj.set(ref.num, { st: null, o, r: null, meta, refs: [meta] }); bad.push({ o, meta, data: new Uint8Array(0), why: `the 3D stream (obj ${ref.num}) could not be decoded: ${e.message}` }); } return; }
       const h = latin1(r.data, 0, 4); const st = h.startsWith('U3D') ? 'U3D' : h.startsWith('PRC') ? 'PRC' : null;
       const entry = { st, o, r, meta, refs: [meta] }; seenObj.set(ref.num, entry); if (st) found.push(entry);
@@ -372,7 +421,7 @@
       let data = null, error = null, errorName = null, o = null, sref = refs[0];
       for (const r of refs) { const oo = doc.getObj(r.num);
         if (!oo || !oo.stream) { if (!error) { error = 'embedded file stream missing (object ' + r.num + ')'; errorName = 'Error'; } continue; }
-        try { data = (await doc.streamData(oo, true)).data; o = oo; sref = r; error = null; errorName = null; break; } catch (e) { if (!o) { o = oo; sref = r; } error = e.message; errorName = (e && e.name) || 'Error'; data = null; } }
+        try { data = (await doc.streamData(oo, true)).data; o = oo; sref = r; error = null; errorName = null; break; } catch (e) { if (/^PDF_/.test(e.code || '')) throw e; if (!o) { o = oo; sref = r; } error = e.message; errorName = (e && e.name) || 'Error'; data = null; } }
       const ext = (/\.([A-Za-z0-9_]+)$/.exec(name) || [, ''])[1].toLowerCase();
       const sub = o && o.value && doc.resolve(o.value.Subtype); const mime = sub instanceof Name && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(sub.name) ? sub.name.toLowerCase() : null;
       const params = o && o.value && doc.resolve(o.value.Params); const declaredSize = params && typeof doc.resolve(params.Size) === 'number' ? doc.resolve(params.Size) : null;
@@ -388,22 +437,23 @@
           if (isName(a.Subtype, 'FileAttachment')) await takeFS(a.FS, 'FileAttachment p' + (pi + 1));
           await takeAF(a.AF, 'AF annot p' + (pi + 1)); } }
       for (const e of seenObj.values()) if (!e.st && e.meta && e.meta.container === '/RichMedia') { /* non-3D RichMedia assets (e.g. .swf/.js) are not CAD */ }
-    } catch (e) { doc.log.push('attachments: ' + e.message); }
+    } catch (e) { if (/^PDF_/.test(e.code || '')) throw e; doc.log.push('attachments: ' + e.message); }
     const bySha = new Map();
     if (!found.length && bad.length) { // 3D content is declared but unreadable: report it (the app shows DECODE_ERROR), not "no 3D"
       const out = bad.map((e, i) => { const st = dictSubtype(e.o);
         return { index: i, subtype: st || 'U3D', declaredSubtype: st, filter: e.r ? (e.r.filters.join(' + ') || 'None') : 'undecodable', compressedLength: doc.rawStream(e.o).length, rawBytes: e.data,
           title: `${e.meta.title || '3D Stream'} #${i + 1} (damaged, ${e.meta.container}${e.meta.page ? ' p' + e.meta.page : ''})`, objNum: e.o.num, page: e.meta.page, annot: e.meta.annot,
           container: e.meta.container, annotations: 1, encrypted: !!doc.crypt, sameAs: undefined, badHeader: e.why, log: i === 0 ? doc.log : undefined }; });
-      out.attachments = attachments; out.log = doc.log; return out;
+      out.attachments = attachments; out.log = doc.log; out.securityHandled = !!doc.trailer.Encrypt; return out;
     }
     const out = found.map((e, i) => {
       const fp = e.r.data.length + ':' + latin1(e.r.data, 0, 64) + latin1(e.r.data, Math.max(0, e.r.data.length - 64)); const same = bySha.get(fp); if (same === undefined) bySha.set(fp, i);
       return { index: i, subtype: e.st, filter: e.r.filters.join(' + ') || 'None', compressedLength: doc.rawStream(e.o).length, rawBytes: e.r.data,
         title: `${e.meta.title || '3D Stream'} #${i + 1} (${e.st}, ${e.meta.container}${e.meta.page ? ' p' + e.meta.page : ''})`, objNum: e.o.num, page: e.meta.page, annot: e.meta.annot,
+        extractionWarning: doc.log.some(x=>/^Damaged optional encrypted string/.test(x)) ? 'Some optional PDF text could not be decrypted; 3D streams were decrypted separately.' : undefined,
         container: e.meta.container, annotations: e.refs.length, encrypted: !!doc.crypt, sameAs: same, log: i === 0 ? doc.log : undefined };
     });
-    out.attachments = attachments; out.log = doc.log;
+    out.attachments = attachments; out.log = doc.log; out.securityHandled = !!doc.trailer.Encrypt;
     return out;
   }
   return { extract3DStreamsFromPDF, _Doc: Doc, _Parser: Parser, _predictor: predictor };

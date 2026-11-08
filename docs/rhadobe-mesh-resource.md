@@ -60,8 +60,30 @@ When the standard U3D parse yields 0 triangles, `parseU3DStream` calls `RHAdobeM
 - The second mesh ends exactly at the end of the U3D block.
 
 ## Limits
-- Encodings 8/9 (U3D arithmetic coder) are not implemented. Files that use them keep the "unsupported" message.
+- Encodings 8/9 are implemented in 1.9.0: static declared domain and dynamic U16 escapes. This RH mapping is empirically validated on all 110 arrays from one producer, not guaranteed for undocumented variants. See `../test/fixtures/README.md`.
 - Normals type 3 (alpha/theta, one UINT block of 2n values) is verified by the SAP VEA 9.0 screw (r18): all 394,596 normals agree with their faces. The multi-material face ID, skeleton and subchunk paths are still unverified: only two producers (CoreTechnologie, SAP VEA) were available, and neither file is known to use them.
 
 ## Offline fallback (not built in)
 For an unknown vendor mesh encoding, one option is to capture the geometry while Acrobat/Reader renders the 3D annotation, by intercepting graphics API calls (for example an OpenGL/Direct3D call capture tool such as RenderDoc). This is manual, platform-specific, and depends on the Acrobat EULA. It is documented only as an offline last resort and is not part of the app.
+
+## 1.9.0 validation and recovery
+
+The independent synthetic encoder in `test/arithmetic-reference.js` follows
+ECMA-363 10.4, including histogram division **rounding down**, escape frequency
+increment on rescale, and the uncompressed zero U32 flush. The production decoder
+uses bounded bit reads and a Fenwick histogram; it verifies the known flush by
+forward interval updates rather than fabricating missing lookahead bits.
+
+The real Ohio sample's candidate matrix accepts static declared-domain arithmetic
+for both encoding-8 arrays and dynamic U16 escapes for all 108 encoding-9 arrays.
+U8/U32 escapes and swapped static/dynamic models fail the complete count/domain/
+flush/end checks. Static arrays have no escapes, so varying escape width there
+is the same rule, not an alternative decode. No runtime heuristic tries widths.
+
+All 90 RH meshes recover; four retain a single unexplained trailing zero byte
+inside their declared payload, not external U3D padding. They remain non-exact and
+produce a visible warning and partial-export marking. Counts, materials, float
+values, every integer domain, payload ends and per-mesh allocation budgets are
+validated. Skeleton/subchunk data is explicitly rejected. No geometric ground-truth
+render/reference exists: normals/winding, components, finite bboxes and face areas
+are structural checks, not proof of exact visual equivalence.

@@ -1,0 +1,1102 @@
+[
+  {
+    "mesh": "erectile vein",
+    "label": "texcoords.0",
+    "count": 14225,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 33309071,
+    "end_offset": 33317468,
+    "payload_bytes": 8397
+  },
+  {
+    "mesh": "erectile vein",
+    "label": "texcoords.3",
+    "count": 14225,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 33329459,
+    "end_offset": 33331436,
+    "payload_bytes": 1977
+  },
+  {
+    "mesh": "lateral nasal vein",
+    "label": "texcoords.0",
+    "count": 26037,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 33841390,
+    "end_offset": 33857989,
+    "payload_bytes": 16599
+  },
+  {
+    "mesh": "medial nasal vein",
+    "label": "texcoords.0",
+    "count": 30537,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 34638768,
+    "end_offset": 34657457,
+    "payload_bytes": 18689
+  },
+  {
+    "mesh": "preconchal vein",
+    "label": "texcoords.0",
+    "count": 10237,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 35333006,
+    "end_offset": 35339668,
+    "payload_bytes": 6662
+  },
+  {
+    "mesh": "postconchal vein",
+    "label": "texcoords.0",
+    "count": 19053,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 35712438,
+    "end_offset": 35724470,
+    "payload_bytes": 12032
+  },
+  {
+    "mesh": "conchal vein",
+    "label": "texcoords.0",
+    "count": 12209,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 36188701,
+    "end_offset": 36196569,
+    "payload_bytes": 7868
+  },
+  {
+    "mesh": "nasal vein",
+    "label": "texcoords.0",
+    "count": 28007,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 36694936,
+    "end_offset": 36719028,
+    "payload_bytes": 24092
+  },
+  {
+    "mesh": "dorsal longitudinal sinus",
+    "label": "texcoords.0",
+    "count": 21197,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 37464743,
+    "end_offset": 37479541,
+    "payload_bytes": 14798
+  },
+  {
+    "mesh": "cerebrotectal sinus",
+    "label": "texcoords.0",
+    "count": 16533,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 38033256,
+    "end_offset": 38044065,
+    "payload_bytes": 10809
+  },
+  {
+    "mesh": "caudal head vein",
+    "label": "texcoords.0",
+    "count": 1225,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 38353279,
+    "end_offset": 38354107,
+    "payload_bytes": 828
+  },
+  {
+    "mesh": "caudal head vein",
+    "label": "texcoords.1",
+    "count": 1225,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 38354122,
+    "end_offset": 38355081,
+    "payload_bytes": 959
+  },
+  {
+    "mesh": "maxillary vein",
+    "label": "texcoords.0",
+    "count": 16664,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 38545997,
+    "end_offset": 38556202,
+    "payload_bytes": 10205
+  },
+  {
+    "mesh": "palatine vein",
+    "label": "texcoords.0",
+    "count": 73574,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 39538500,
+    "end_offset": 39586802,
+    "payload_bytes": 48302
+  },
+  {
+    "mesh": "anas maxillary palatine vein",
+    "label": "texcoords.0",
+    "count": 5826,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 41023096,
+    "end_offset": 41026843,
+    "payload_bytes": 3747
+  },
+  {
+    "mesh": "supraorbital vein",
+    "label": "texcoords.0",
+    "count": 13950,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 41271309,
+    "end_offset": 41279554,
+    "payload_bytes": 8245
+  },
+  {
+    "mesh": "anas rostral auricular supraorbital vein",
+    "label": "texcoords.0",
+    "count": 16385,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 41704719,
+    "end_offset": 41714887,
+    "payload_bytes": 10168
+  },
+  {
+    "mesh": "postorbital vein",
+    "label": "texcoords.0",
+    "count": 11699,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 42122127,
+    "end_offset": 42128733,
+    "payload_bytes": 6606
+  },
+  {
+    "mesh": "ophthalmotemporal vein",
+    "label": "texcoords.0",
+    "count": 51935,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 42859360,
+    "end_offset": 42896803,
+    "payload_bytes": 37443
+  },
+  {
+    "mesh": "profundus vein",
+    "label": "texcoords.0",
+    "count": 825,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 43849324,
+    "end_offset": 43849897,
+    "payload_bytes": 573
+  },
+  {
+    "mesh": "profundus vein",
+    "label": "texcoords.1",
+    "count": 825,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 43849912,
+    "end_offset": 43850504,
+    "payload_bytes": 592
+  },
+  {
+    "mesh": "anas supraorbital ophthalmotemporal vein",
+    "label": "texcoords.0",
+    "count": 16065,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 44042098,
+    "end_offset": 44053549,
+    "payload_bytes": 11451
+  },
+  {
+    "mesh": "temporoorbital vein",
+    "label": "texcoords.0",
+    "count": 37926,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 44729890,
+    "end_offset": 44756003,
+    "payload_bytes": 26113
+  },
+  {
+    "mesh": "stapedial vein",
+    "label": "texcoords.0",
+    "count": 7881,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 45535445,
+    "end_offset": 45540794,
+    "payload_bytes": 5349
+  },
+  {
+    "mesh": "infraorbital vein",
+    "label": "texcoords.0",
+    "count": 32782,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 46011740,
+    "end_offset": 46032166,
+    "payload_bytes": 20426
+  },
+  {
+    "mesh": "cavernous sinus",
+    "label": "normals.alpha_theta",
+    "count": 12484,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 46661446,
+    "end_offset": 46682906,
+    "payload_bytes": 21460
+  },
+  {
+    "mesh": "cavernous sinus",
+    "label": "texcoords.0",
+    "count": 6473,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 46682922,
+    "end_offset": 46688776,
+    "payload_bytes": 5854
+  },
+  {
+    "mesh": "palatomaxillary vein",
+    "label": "texcoords.0",
+    "count": 5125,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 46864095,
+    "end_offset": 46867211,
+    "payload_bytes": 3116
+  },
+  {
+    "mesh": "rostral auricular  vein",
+    "label": "texcoords.0",
+    "count": 13253,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 47101725,
+    "end_offset": 47109920,
+    "payload_bytes": 8195
+  },
+  {
+    "mesh": "maxillomandibular vein",
+    "label": "texcoords.0",
+    "count": 4125,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 47392370,
+    "end_offset": 47394903,
+    "payload_bytes": 2533
+  },
+  {
+    "mesh": "pterygoid vein",
+    "label": "texcoords.0",
+    "count": 12673,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 47605335,
+    "end_offset": 47613408,
+    "payload_bytes": 8073
+  },
+  {
+    "mesh": "temporomandibular vein",
+    "label": "texcoords.0",
+    "count": 2125,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 47869111,
+    "end_offset": 47870475,
+    "payload_bytes": 1364
+  },
+  {
+    "mesh": "temporomandibular vein",
+    "label": "texcoords.1",
+    "count": 2125,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 47870490,
+    "end_offset": 47872347,
+    "payload_bytes": 1857
+  },
+  {
+    "mesh": "mandibular vein",
+    "label": "texcoords.0",
+    "count": 43825,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 48311507,
+    "end_offset": 48337064,
+    "payload_bytes": 25557
+  },
+  {
+    "mesh": "oromandibular vein",
+    "label": "texcoords.0",
+    "count": 71048,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 49788758,
+    "end_offset": 49833098,
+    "payload_bytes": 44340
+  },
+  {
+    "mesh": "jugular vein",
+    "label": "texcoords.0",
+    "count": 34496,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 51505410,
+    "end_offset": 51529304,
+    "payload_bytes": 23894
+  },
+  {
+    "mesh": "olfactory sinus",
+    "label": "texcoords.0",
+    "count": 3485,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 52203432,
+    "end_offset": 52206173,
+    "payload_bytes": 2741
+  },
+  {
+    "mesh": "facial vein",
+    "label": "texcoords.0",
+    "count": 16725,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 52438706,
+    "end_offset": 52448707,
+    "payload_bytes": 10001
+  },
+  {
+    "mesh": "palpebral vein",
+    "label": "texcoords.0",
+    "count": 9925,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 52860910,
+    "end_offset": 52866810,
+    "payload_bytes": 5900
+  },
+  {
+    "mesh": "orbital vein",
+    "label": "texcoords.0",
+    "count": 12617,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 53187887,
+    "end_offset": 53196264,
+    "payload_bytes": 8377
+  },
+  {
+    "mesh": "cerebral carotid vein",
+    "label": "texcoords.0",
+    "count": 28455,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 53721314,
+    "end_offset": 53740073,
+    "payload_bytes": 18759
+  },
+  {
+    "mesh": "cerebellotectal sinus",
+    "label": "texcoords.0",
+    "count": 28079,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 54566616,
+    "end_offset": 54586604,
+    "payload_bytes": 19988
+  },
+  {
+    "mesh": "occipital sinus",
+    "label": "texcoords.0",
+    "count": 3434,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55152996,
+    "end_offset": 55155909,
+    "payload_bytes": 2913
+  },
+  {
+    "mesh": "transverse sinus",
+    "label": "texcoords.0",
+    "count": 4951,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55276152,
+    "end_offset": 55279875,
+    "payload_bytes": 3723
+  },
+  {
+    "mesh": "transverse sinus",
+    "label": "texcoords.3",
+    "count": 4951,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55284054,
+    "end_offset": 55293828,
+    "payload_bytes": 9774
+  },
+  {
+    "mesh": "internal carotid artery",
+    "label": "texcoords.1",
+    "count": 57,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55379501,
+    "end_offset": 55379525,
+    "payload_bytes": 24
+  },
+  {
+    "mesh": "internal carotid artery",
+    "label": "position_indices",
+    "count": 312,
+    "encoding": 8,
+    "domain": 54,
+    "payload_offset": 55379562,
+    "end_offset": 55379791,
+    "payload_bytes": 229
+  },
+  {
+    "mesh": "internal carotid artery",
+    "label": "texcoord_indices",
+    "count": 312,
+    "encoding": 8,
+    "domain": 57,
+    "payload_offset": 55379992,
+    "end_offset": 55380224,
+    "payload_bytes": 232
+  },
+  {
+    "mesh": "common carotid artery",
+    "label": "texcoords.0",
+    "count": 1995,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55403897,
+    "end_offset": 55405036,
+    "payload_bytes": 1139
+  },
+  {
+    "mesh": "stapedial artery",
+    "label": "texcoords.0",
+    "count": 4530,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55492259,
+    "end_offset": 55495050,
+    "payload_bytes": 2791
+  },
+  {
+    "mesh": "occipital artery",
+    "label": "texcoords.0",
+    "count": 4853,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55632106,
+    "end_offset": 55634933,
+    "payload_bytes": 2827
+  },
+  {
+    "mesh": "caudal auricular artery",
+    "label": "texcoords.0",
+    "count": 2325,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55754990,
+    "end_offset": 55756179,
+    "payload_bytes": 1189
+  },
+  {
+    "mesh": "temporoorbital artery",
+    "label": "texcoords.0",
+    "count": 7654,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 55876068,
+    "end_offset": 55879950,
+    "payload_bytes": 3882
+  },
+  {
+    "mesh": "anas temporoorbital cerebral carotid artery",
+    "label": "texcoords.0",
+    "count": 4335,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56059042,
+    "end_offset": 56061338,
+    "payload_bytes": 2296
+  },
+  {
+    "mesh": "infraorbital artery",
+    "label": "texcoords.0",
+    "count": 6774,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56211092,
+    "end_offset": 56214711,
+    "payload_bytes": 3619
+  },
+  {
+    "mesh": "profundus artery",
+    "label": "texcoords.0",
+    "count": 481,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56333718,
+    "end_offset": 56333986,
+    "payload_bytes": 268
+  },
+  {
+    "mesh": "profundus artery",
+    "label": "texcoords.1",
+    "count": 481,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56334001,
+    "end_offset": 56334389,
+    "payload_bytes": 388
+  },
+  {
+    "mesh": "supraorbital artery",
+    "label": "texcoords.0",
+    "count": 3601,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56381422,
+    "end_offset": 56383144,
+    "payload_bytes": 1722
+  },
+  {
+    "mesh": "anas supraorbital ophthalmotemporal artery",
+    "label": "texcoords.0",
+    "count": 5316,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56500690,
+    "end_offset": 56504048,
+    "payload_bytes": 3358
+  },
+  {
+    "mesh": "palpebral artery",
+    "label": "texcoords.0",
+    "count": 3003,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56626490,
+    "end_offset": 56627935,
+    "payload_bytes": 1445
+  },
+  {
+    "mesh": "ophthalmotemporal artery",
+    "label": "texcoords.0",
+    "count": 6705,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56756217,
+    "end_offset": 56759568,
+    "payload_bytes": 3351
+  },
+  {
+    "mesh": "cerebral carotid artery",
+    "label": "texcoords.0",
+    "count": 2907,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56907211,
+    "end_offset": 56908827,
+    "payload_bytes": 1616
+  },
+  {
+    "mesh": "orbital artery",
+    "label": "texcoords.0",
+    "count": 1577,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 56979172,
+    "end_offset": 56980087,
+    "payload_bytes": 915
+  },
+  {
+    "mesh": "trigeminal artery",
+    "label": "texcoords.0",
+    "count": 3237,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57043520,
+    "end_offset": 57045081,
+    "payload_bytes": 1561
+  },
+  {
+    "mesh": "common encephalic artery",
+    "label": "texcoords.0",
+    "count": 819,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57108816,
+    "end_offset": 57109331,
+    "payload_bytes": 515
+  },
+  {
+    "mesh": "common encephalic artery",
+    "label": "texcoords.1",
+    "count": 819,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57109346,
+    "end_offset": 57109969,
+    "payload_bytes": 623
+  },
+  {
+    "mesh": "common encephalic artery",
+    "label": "texcoords.3",
+    "count": 819,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57109991,
+    "end_offset": 57110108,
+    "payload_bytes": 117
+  },
+  {
+    "mesh": "caudal encephalic basilar artery",
+    "label": "texcoords.0",
+    "count": 4305,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57171490,
+    "end_offset": 57173649,
+    "payload_bytes": 2159
+  },
+  {
+    "mesh": "rostral encephalic artery",
+    "label": "texcoords.0",
+    "count": 2751,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57278559,
+    "end_offset": 57280156,
+    "payload_bytes": 1597
+  },
+  {
+    "mesh": "caudal cerebral artery",
+    "label": "texcoords.0",
+    "count": 2919,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57363380,
+    "end_offset": 57365058,
+    "payload_bytes": 1678
+  },
+  {
+    "mesh": "interhemispheric artery",
+    "label": "texcoords.0",
+    "count": 3801,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57460919,
+    "end_offset": 57463084,
+    "payload_bytes": 2165
+  },
+  {
+    "mesh": "ethmoid artery",
+    "label": "texcoords.0",
+    "count": 4221,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57579596,
+    "end_offset": 57581993,
+    "payload_bytes": 2397
+  },
+  {
+    "mesh": "common nasal artery",
+    "label": "texcoords.0",
+    "count": 695,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57665955,
+    "end_offset": 57666435,
+    "payload_bytes": 480
+  },
+  {
+    "mesh": "common nasal artery",
+    "label": "texcoords.1",
+    "count": 695,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57666450,
+    "end_offset": 57666980,
+    "payload_bytes": 530
+  },
+  {
+    "mesh": "medial nasal artery",
+    "label": "normals.alpha_theta",
+    "count": 13330,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 57727457,
+    "end_offset": 57753782,
+    "payload_bytes": 26325
+  },
+  {
+    "mesh": "medial nasal artery",
+    "label": "texcoords.0",
+    "count": 7241,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57753798,
+    "end_offset": 57757201,
+    "payload_bytes": 3403
+  },
+  {
+    "mesh": "postconchal artery",
+    "label": "normals.alpha_theta",
+    "count": 8446,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 57915876,
+    "end_offset": 57932496,
+    "payload_bytes": 16620
+  },
+  {
+    "mesh": "postconchal artery",
+    "label": "texcoords.0",
+    "count": 4615,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 57932512,
+    "end_offset": 57934712,
+    "payload_bytes": 2200
+  },
+  {
+    "mesh": "preconchal artery",
+    "label": "texcoords.0",
+    "count": 1485,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58032147,
+    "end_offset": 58032778,
+    "payload_bytes": 631
+  },
+  {
+    "mesh": "conchal artery",
+    "label": "normals.alpha_theta",
+    "count": 3144,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 58071438,
+    "end_offset": 58077530,
+    "payload_bytes": 6092
+  },
+  {
+    "mesh": "conchal artery",
+    "label": "texcoords.0",
+    "count": 1769,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58077546,
+    "end_offset": 58078293,
+    "payload_bytes": 747
+  },
+  {
+    "mesh": "lateral nasal artery",
+    "label": "normals.alpha_theta",
+    "count": 14258,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 58163692,
+    "end_offset": 58192188,
+    "payload_bytes": 28496
+  },
+  {
+    "mesh": "lateral nasal artery",
+    "label": "texcoords.0",
+    "count": 7599,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58192204,
+    "end_offset": 58196156,
+    "payload_bytes": 3952
+  },
+  {
+    "mesh": "erectile artery",
+    "label": "texcoords.0",
+    "count": 3497,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58370610,
+    "end_offset": 58372287,
+    "payload_bytes": 1677
+  },
+  {
+    "mesh": "middle cerebral artery",
+    "label": "texcoords.0",
+    "count": 2227,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58458851,
+    "end_offset": 58460065,
+    "payload_bytes": 1214
+  },
+  {
+    "mesh": "rostral cerebral artery",
+    "label": "texcoords.0",
+    "count": 1491,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58517610,
+    "end_offset": 58518510,
+    "payload_bytes": 900
+  },
+  {
+    "mesh": "external carotid artery",
+    "label": "texcoords.0",
+    "count": 1495,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58562381,
+    "end_offset": 58563116,
+    "payload_bytes": 735
+  },
+  {
+    "mesh": "external carotid artery",
+    "label": "texcoords.3",
+    "count": 1495,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58564389,
+    "end_offset": 58564411,
+    "payload_bytes": 22
+  },
+  {
+    "mesh": "anas stapedial external carotid artery",
+    "label": "texcoords.0",
+    "count": 279,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58591218,
+    "end_offset": 58591358,
+    "payload_bytes": 140
+  },
+  {
+    "mesh": "anas stapedial external carotid artery",
+    "label": "texcoords.1",
+    "count": 279,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58591372,
+    "end_offset": 58591607,
+    "payload_bytes": 235
+  },
+  {
+    "mesh": "anas stapedial external carotid artery",
+    "label": "texcoords.3",
+    "count": 279,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58591629,
+    "end_offset": 58591729,
+    "payload_bytes": 100
+  },
+  {
+    "mesh": "temporomandibular artery",
+    "label": "texcoords.0",
+    "count": 297,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58599353,
+    "end_offset": 58599501,
+    "payload_bytes": 148
+  },
+  {
+    "mesh": "temporomandibular artery",
+    "label": "texcoords.1",
+    "count": 297,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58599515,
+    "end_offset": 58599768,
+    "payload_bytes": 253
+  },
+  {
+    "mesh": "pterygoid artery",
+    "label": "texcoords.0",
+    "count": 3435,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58641676,
+    "end_offset": 58643426,
+    "payload_bytes": 1750
+  },
+  {
+    "mesh": "pterygoid artery",
+    "label": "texcoords.3",
+    "count": 3435,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58646199,
+    "end_offset": 58646215,
+    "payload_bytes": 16
+  },
+  {
+    "mesh": "mandibular artery",
+    "label": "normals.alpha_theta",
+    "count": 23096,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 58776413,
+    "end_offset": 58822051,
+    "payload_bytes": 45638
+  },
+  {
+    "mesh": "mandibular artery",
+    "label": "texcoords.0",
+    "count": 12947,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 58822067,
+    "end_offset": 58827726,
+    "payload_bytes": 5659
+  },
+  {
+    "mesh": "maxillomandibular artery",
+    "label": "texcoords.0",
+    "count": 1215,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59051895,
+    "end_offset": 59052411,
+    "payload_bytes": 516
+  },
+  {
+    "mesh": "palatomaxillary artery",
+    "label": "texcoords.0",
+    "count": 1611,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59090639,
+    "end_offset": 59091313,
+    "payload_bytes": 674
+  },
+  {
+    "mesh": "rostral auricular artery",
+    "label": "texcoords.0",
+    "count": 4365,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59163642,
+    "end_offset": 59165830,
+    "payload_bytes": 2188
+  },
+  {
+    "mesh": "facial artery",
+    "label": "texcoords.0",
+    "count": 4693,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59288130,
+    "end_offset": 59290362,
+    "payload_bytes": 2232
+  },
+  {
+    "mesh": "anas facial profundus artery",
+    "label": "texcoords.0",
+    "count": 4199,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59418256,
+    "end_offset": 59420483,
+    "payload_bytes": 2227
+  },
+  {
+    "mesh": "maxillary artery",
+    "label": "texcoords.0",
+    "count": 5031,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59543704,
+    "end_offset": 59545736,
+    "payload_bytes": 2032
+  },
+  {
+    "mesh": "palatine artery",
+    "label": "normals.alpha_theta",
+    "count": 31540,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 59728202,
+    "end_offset": 59790748,
+    "payload_bytes": 62546
+  },
+  {
+    "mesh": "palatine artery",
+    "label": "texcoords.0",
+    "count": 17269,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 59790764,
+    "end_offset": 59800867,
+    "payload_bytes": 10103
+  },
+  {
+    "mesh": "anas maxillary palatine artery",
+    "label": "texcoords.0",
+    "count": 5826,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 60169786,
+    "end_offset": 60173533,
+    "payload_bytes": 3747
+  },
+  {
+    "mesh": "anas maxillary conchal artery",
+    "label": "normals.alpha_theta",
+    "count": 16884,
+    "encoding": 9,
+    "domain": 65536,
+    "payload_offset": 60330208,
+    "end_offset": 60363870,
+    "payload_bytes": 33662
+  },
+  {
+    "mesh": "anas maxillary conchal artery",
+    "label": "texcoords.0",
+    "count": 9212,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 60363886,
+    "end_offset": 60368637,
+    "payload_bytes": 4751
+  },
+  {
+    "mesh": "vagus artery",
+    "label": "texcoords.0",
+    "count": 2043,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 60550060,
+    "end_offset": 60550913,
+    "payload_bytes": 853
+  },
+  {
+    "mesh": "oromandibular artery",
+    "label": "texcoords.0",
+    "count": 12051,
+    "encoding": 9,
+    "domain": 32768,
+    "payload_offset": 60709344,
+    "end_offset": 60714972,
+    "payload_bytes": 5628
+  }
+]

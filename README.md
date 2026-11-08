@@ -13,26 +13,59 @@ Client-side web workbench that extracts embedded 3D streams (`/Subtype /U3D` ECM
 
 Open `index.html` (multi-file, served or via `file://`) or the single-file offline build `pdf-3d-extractor-standalone.html`, then drop a 3D PDF. Everything runs client-side; no build step.
 
-## What 1.7.0 decodes
+## What 1.9.0 decodes
 
 | Source in the PDF | Decode path | Status badge |
 |---|---|---|
 | `/3D` or `/RichMedia` PRC stream with tessellation (`TESS_3D`, `TESS_3D_Compressed`, `TESS_3D_Wire`) | `prc-decoder.js` | `PRC TESS • …` |
 | PRC stream with exact B-Rep only (`TOPO_BrepData`, `TOPO_BrepDataCompress`) | `prc-brep.js` tessellates NURBS/analytic faces | `PRC EXACT B-REP • …` |
 | U3D (ECMA-363) CLOD mesh | `app.js` U3D parser plus `u3d-guard.js` (bounded reads, unsupported-block warnings) | `U3D • …` |
-| U3D vendor `RHAdobeMeshResource` mesh | `u3d-rhadobe-mesh.js` (RH39 and UIC1 encodings; CoreTechnologie and SAP VEA 9.0 output; see `docs/rhadobe-mesh-resource.md`) | `U3D/RHAdobeMeshResource` |
+| U3D vendor `RHAdobeMeshResource` mesh | `u3d-rhadobe-mesh.js` (RH39, static/dynamic arithmetic and UIC1 integer encodings; see `docs/rhadobe-mesh-resource.md`) | `U3D/RHAdobeMeshResource` |
 | Embedded CAD file (`/EmbeddedFiles` name tree or `/FileAttachment` annotation: STEP, IGES, Parasolid, JT, NX/CATIA/SolidWorks, STL/OBJ/3MF, …) | `pdf-extract.js` | `NO 3D STREAM • EMBEDDED CAD ATTACHMENT: name` |
-| Nothing usable | n/a | alert "No embedded /3D (U3D / PRC) streams or file attachments found" |
+| Nothing usable | n/a | `NO_3D` load card |
 
 PDF layer (`pdf-extract.js`, `crypto-lite.js`):
 - classic xref tables and xref streams, object streams, and incremental updates
 - broken-xref recovery
 - Flate, LZW, ASCIIHex, ASCII85 and RunLength filters, with predictors
-- Standard security handler: RC4 40/128, AES-128 and AES-256 (R2–R6) with the empty user password. AES-256 needs WebCrypto.
+- Standard security handler: RC4 40/128, AES-128 and AES-256 (R2–R6) with local user/owner password entry and automatic empty-user authentication. AES-256 needs WebCrypto (HTTPS, localhost or standalone). Generated tests cover R2/R3/R4/R6; R5 coverage uses existing empty-user r11 only.
 
 Every 3D annotation on every page is listed. Each stream gets its product tree (PRC product occurrences, with names), part transforms, and the `/3DU` unit scale. Wire and polyline geometry is drawn as well. Embedded attachments can be saved from the "Product Tree & Attachments" panel.
 
 Large models: parts are stored as typed arrays with one compact welded B-Rep each, and every exporter streams part by part into a chunked `Blob`, so 1–2M triangle models parse and export without `RangeError: Invalid string length` or out-of-memory. The viewport shows a decimated preview (≤200k tris) and a banner above 1M tris. An optional "Export detail" setting (off = 100% by default) decimates exports.
+
+## Password security and compatibility tests (1.9.0)
+
+The masked dialog appears only after empty-password authentication fails. Submit to
+retry, Cancel/Esc to stop; reopen the same file to try again. Opening a new file
+cancels old prompts/decode activation. Passwords are not saved in storage, logs,
+URLs or exports. Certificates, public-key handlers, DRM and unknown crypt methods
+are unsupported. There is no password cracking or server upload.
+
+API: `CAD3DExtractor.loadPDFBuffer(bytes, name, {password, prompt:false})` supplies
+an ephemeral password without a dialog. Omit `password` for automatic empty-user
+handling; `{requestPassword: async incorrect => stringOrNull}` allows a host-owned
+local prompt. Do not store the supplied password in your own integration.
+Security outcomes are `PDF_PASSWORD_REQUIRED`, `PDF_PASSWORD_INCORRECT`,
+`PDF_PASSWORD_CANCELLED`, `PDF_SECURITY_UNSUPPORTED` and `PDF_DAMAGED`.
+Optional damaged PDF text gets `lastLoad.warning`; unverified geometry gets
+`lastLoad.damaged`, the visible note and existing partial-export marking.
+
+Focused checks:
+```
+node test/run.js --exports
+node test/compatibility190.js
+node test/password-dialog190.js
+node test/export-regression190.js
+```
+The compatibility test creates small temporary encrypted copies of the built-in
+U3D+PRC sample using independent libqpdf via pikepdf. Passwords are random,
+test-only and passed to Python in memory; generated files are removed afterwards.
+Set `PDF3D_QPDF_PYTHON` to a Python with pikepdf installed; absent tooling is an
+explicit SKIP, not a pass for encryption. `PDF3D_R5` selects existing r11;
+`PDF3D_RH_STREAM` selects the real Ohio U3D stream (both optional external fixtures).
+`PDF3D_BASELINE_ROOT` selects an existing v1.8.0 directory for 28-export identity.
+See `test/fixtures/README.md` for attribution, hashes and evidence limits.
 
 ## Load result (API)
 

@@ -42,6 +42,7 @@
   const M2 = new Uint8Array(256), M3 = new Uint8Array(256), M9 = new Uint8Array(256), M11 = new Uint8Array(256), M13 = new Uint8Array(256), M14 = new Uint8Array(256);
   for (let i = 0; i < 256; i++) { M2[i] = mul(i, 2); M3[i] = mul(i, 3); M9[i] = mul(i, 9); M11[i] = mul(i, 11); M13[i] = mul(i, 13); M14[i] = mul(i, 14); }
   function expandKey(key) {
+    if (![16, 32].includes(key.length)) throw new Error('Invalid AES key length');
     const Nk = key.length / 4, Nr = Nk + 6, w = new Uint8Array(16 * (Nr + 1)); w.set(key); let rcon = 1;
     for (let i = Nk; i < 4 * (Nr + 1); i++) {
       let t0 = w[(i - 1) * 4], t1 = w[(i - 1) * 4 + 1], t2 = w[(i - 1) * 4 + 2], t3 = w[(i - 1) * 4 + 3];
@@ -73,22 +74,25 @@
     }
     out.set(s, outOff);
   }
-  // CBC decrypt. data = IV(16) || ciphertext unless iv given. Strips PKCS#5 padding when pad=true (tolerant of bad padding).
+  // CBC decrypt. data = IV(16) || ciphertext unless iv given. Strips PKCS#5 padding when pad=true (strict length and padding validation).
   function aesCbcDecrypt(key, data, iv, pad = true) {
+    if (Object.prototype.toString.call(data) !== '[object Uint8Array]' || (iv && iv.length !== 16) || (!iv && data.length < 32) || ((data.length - (iv ? 0 : 16)) % 16)) throw new Error('Damaged AES-CBC ciphertext length');
     const ks = expandKey(key); let off = 0; if (!iv) { iv = data.subarray(0, 16); off = 16; }
     const n = Math.floor((data.length - off) / 16) * 16; const out = new Uint8Array(n); let prev = iv; const blk = new Uint8Array(16);
     for (let i = 0; i < n; i += 16) { const c = data.subarray(off + i, off + i + 16); decBlock(ks, c, blk, 0); for (let k = 0; k < 16; k++) out[i + k] = blk[k] ^ prev[k]; prev = c; }
     if (pad && n) { const p = out[n - 1]; if (p >= 1 && p <= 16) { let ok = true; for (let k = n - p; k < n; k++) if (out[k] !== p) ok = false; if (ok) return out.subarray(0, n - p); } }
+    if (pad) throw new Error('Damaged AES-CBC padding');
     return out;
   }
   function aesCbcEncryptNoPad(key, data, iv) {
+    if (iv.length !== 16 || data.length % 16) throw new Error('Invalid AES-CBC input length');
     const ks = expandKey(key); const out = new Uint8Array(data.length); let prev = iv; const blk = new Uint8Array(16);
     for (let i = 0; i < data.length; i += 16) { for (let k = 0; k < 16; k++) blk[k] = data[i + k] ^ prev[k]; encBlock(ks, blk, blk); out.set(blk, i); prev = out.subarray(i, i + 16); }
     return out;
   }
   async function sha(alg, data) {
     const c = (typeof globalThis !== 'undefined' && globalThis.crypto && globalThis.crypto.subtle) ? globalThis.crypto.subtle : null;
-    if (!c) throw new Error('WebCrypto (crypto.subtle) unavailable: needed for AES-256 (R5/R6) PDF encryption');
+    if (!c) { const e=new Error('AES-256 PDF security requires WebCrypto; use HTTPS, localhost or the standalone build.');e.code='PDF_SECURITY_UNSUPPORTED';throw e; }
     return new Uint8Array(await c.digest(alg, data));
   }
   return { md5, rc4, aesCbcDecrypt, aesCbcEncryptNoPad, sha, _expandKey: expandKey, _encBlock: encBlock };

@@ -43,7 +43,7 @@ const args = process.argv.slice(2); const flag = (n) => args.find((a) => a.start
 const only = (flag('only') || '').split('=')[1]; const update = !!flag('update'); const doExports = !!flag('exports'); const identity = !!flag('identity');
 const corpus = args.find((a) => !a.startsWith('--')) || process.env.PDF3D_CORPUS || '';
 
-function loadApp(extraWindow) {
+function loadApp(extraWindow, root = ROOT, page = 'index.html') {
   const noop = () => {};
   const el = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'length' ? 0 : el()), apply: () => el(), set: () => true });
   const document = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => el(), addEventListener: noop, body: el(), documentElement: el() };
@@ -54,9 +54,10 @@ function loadApp(extraWindow) {
     DecompressionStream: typeof DecompressionStream !== 'undefined' ? DecompressionStream : undefined, Response: typeof Response !== 'undefined' ? Response : undefined,
     URL, atob, btoa, performance, crypto: globalThis.crypto, alert: window.alert, matchMedia: window.matchMedia, requestAnimationFrame: () => 0 };
   ctx.globalThis = ctx; vm.createContext(ctx);
-  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, page), 'utf8');
   const scripts = [...html.matchAll(/<script[^>]+src="([^"?]+)/g)].map((m) => m[1]);
-  for (const s of scripts) vm.runInContext(fs.readFileSync(path.join(ROOT, s), 'utf8'), ctx, { filename: s });
+  if (scripts.length) for (const s of scripts) vm.runInContext(fs.readFileSync(path.join(root,s),'utf8'),ctx,{filename:s});
+  else for (const m of html.matchAll(/<script data-src="([^"]+)">([\s\S]*?)<\/script>/g)) { scripts.push(m[1]);vm.runInContext(m[2],ctx,{filename:m[1]}); }
   if (!window.CAD3DExtractor) throw new Error('window.CAD3DExtractor not exposed');
   return { api: window.CAD3DExtractor, window, scripts, ctx };
 }
@@ -263,7 +264,7 @@ function syntheticAttachmentPDF(names) {
   return Buffer.from(out, 'latin1');
 }
 
-(async () => {
+if (require.main === module) (async () => {
   const { api, window, scripts, ctx } = loadApp(); let corpusRan = 0;
   console.log(`app ${window.CAD3DExtractorVersion} scripts: ${scripts.join(', ')}`);
 
@@ -356,7 +357,7 @@ function syntheticAttachmentPDF(names) {
       const ok = X.set('units', 'in') && X.get().units === 'in' && !X.set('units', 'yd') && X.get().units === 'in' && !X.set('nope', 1);
       X.set('units', 'mm');
       check(ok && X.get().units === 'mm', 'exportSettings.set accept / reject'); }
-    check(!/[?&]v=1\.(6\.2|7\.0)/.test(html) && /recon\/cad-export\.js\?v=1\.8\.0"/.test(html) && (html.match(/\?v=1\.8\.0"/g) || []).length === 18, 'index.html ?v= not 1.8.0 everywhere (worker key 1.8.0-w1)');
+    check(!/[?&]v=1\.(6\.2|7\.0)/.test(html) && /recon\/cad-export\.js\?v=1\.9\.0"/.test(html) && (html.match(/\?v=1\.9\.0"/g) || []).length === 19, 'index.html ?v= not 1.9.0 everywhere (worker key 1.9.0-w1)');
     check(/WORKER_REV = '1'/.test(fs.readFileSync(path.join(ROOT, 'recon/cad-export.js'), 'utf8')), 'WORKER_REV is not 1');
     const V = window.PDF3DView; const d = V && V.get();
     check(d && d.background === 'default' && d.grid === true && d.projection === 'perspective', `PDF3DView defaults ${JSON.stringify(d)}`);
@@ -491,3 +492,5 @@ function syntheticAttachmentPDF(names) {
   else console.log(`ALL OK (${corpusRan} corpus files)`);
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });
+
+module.exports = {loadApp};

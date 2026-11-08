@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.9.0 (alpha) — 2026-11-08
+
+Compatibility candidate; not a general converter and not fitted Parasolid.
+
+### Added
+- RHAdobeMeshResource integer-array arithmetic encodings **8 (static domain)** and
+  **9 (dynamic, U16 escapes)**. The mapping is inferred from all 110 arithmetic arrays
+  in one Ohio University producer sample, independently checked by a spec-derived
+  test encoder, declared domains, exact flush bytes and mesh structure. Existing
+  RH39/7 and UIC1/10 are retained. This is not an independent visual-equivalence claim.
+- Local masked password entry, wrong-password retry and Cancel/Esc. Empty-user PDFs
+  still open without prompting. New loads clear entry state and supersede old loads.
+- Standard R2/R3 RC4, R4 RC4/AESV2, R5/R6 AES-256 user/owner authentication;
+  R6 uses RFC4013 SASLprep with Unicode 3.2 tables. Generated libqpdf fixtures cover
+  R2/R3/R4/R6, including Unicode R6; deprecated R5 is checked against existing r11 only.
+
+### Fixed / hardened
+- Strict per-array bounds, RH39 offset widths/overflow, counts/allocation budgets,
+  integer/float/index domains, UIC1 run lengths and U3D framing limits.
+- Partial RH recovery is explicit: unknown trailing data rejects the chunk; one
+  unexplained trailing zero byte preserves geometry with a visible warning and
+  partial-export marking. The real sample recovers 90/90 meshes (86 exact, 4 warned).
+  Skeleton/subchunk descriptions remain explicitly unsupported, never silently ignored.
+- Unknown security revisions/handlers/crypt methods are rejected before prompting;
+  security errors never fall back to scanning ciphertext. Named `/Crypt`, Identity,
+  metadata and attachment filters follow the selected security method.
+- AES-CBC length/padding validation is strict. Damaged optional encrypted text is
+  omitted with a visible metadata warning, not passed off as decrypted text; stream
+  failures remain errors. Corrected the R6 Algorithm 2.B round-number termination.
+- All 28 built-in sample exports remain byte-identical to 1.8.0. No new backend,
+  password persistence, main/tag/release/Pages change or UI redesign.
+- Served cache keys: `1.9.0` / worker `1.9.0-w1`; standalone rebuilt.
+
 ## 1.8.0 (alpha) — 2026-11-02
 
 Alpha: the Solid Bodies list redesign, list / viewport selection sync, a face-types panel per body, and no fitted STEP

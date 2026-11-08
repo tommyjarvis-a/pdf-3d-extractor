@@ -655,6 +655,11 @@
   var warnedLoad = null;
   function loadCard(ll) {
     switch (ll.reasonCode) {
+      case 'PDF_PASSWORD_REQUIRED': return {tone:'warn',title:'Password required',line:'Open this PDF again and enter its password.'};
+      case 'PDF_PASSWORD_INCORRECT': return {tone:'warn',title:'Incorrect PDF password',line:'Open this PDF again to retry, or choose another file.'};
+      case 'PDF_PASSWORD_CANCELLED': return {tone:'muted',title:'Password entry cancelled',line:'Open another file, or reopen this PDF to try again.'};
+      case 'PDF_SECURITY_UNSUPPORTED': return {tone:'warn',title:'Unsupported PDF security',line:ll.message || 'Certificate security, DRM and unknown encryption revisions are not supported.'};
+      case 'PDF_DAMAGED': return {tone:'warn',title:'Damaged encrypted PDF',line:ll.message || 'The encrypted data could not be read safely.'};
       case 'UNSUPPORTED_MESH': return { tone: 'warn', title: "This 3D model can't be read yet",
         line: `The PDF has a 3D model, but it's saved in a format the app doesn't support yet (${ll.format}, ${ll.detail}).` };
       case 'NO_3D': return { tone: 'muted', title: 'No 3D model in this PDF',
@@ -765,13 +770,14 @@
   function syncDamaged() {
     if (!ui.dmg) return;
     const ll = (window.PDF3D || {}).lastLoad;
-    const raw = ll && ll.status === 'ok' && typeof ll.damaged === 'string' ? ll.damaged.trim() : '';
+    const raw = ll && ll.status === 'ok' ? String(ll.damaged || ll.warning || '').trim() : '';
     if (raw && warnedDamaged !== ll) { warnedDamaged = ll; console.warn('[PDF3D] model loaded partly:', ll.damaged); }
     const on = !!raw && ui.dmgDismissed !== ll;
     ui.dmg.hidden = !on;
     if (!on) return;
     const n = Number.isFinite(+ll.parts) && +ll.parts > 0 && typeof ll.parts !== 'boolean' ? Math.round(+ll.parts) : 0;
-    const t = n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
+    const tails = (raw.match(/unexplained trailing byte/g) || []).length;
+    const t = ll.warning && !ll.damaged ? ll.warning : tails ? `Unexplained trailing byte (0x00) in ${tails} mesh ${tails === 1 ? 'block' : 'blocks'}; verify this model against the source.` : n ? `Part of this model couldn\u2019t be read, so only ${n} ${n === 1 ? 'body' : 'bodies'} loaded.`
       : 'Part of this model couldn\u2019t be read, so some bodies may be missing.';
     if (ui.dmgText.textContent !== t) { ui.dmgText.textContent = t; ui.dmg.title = t; }
   }

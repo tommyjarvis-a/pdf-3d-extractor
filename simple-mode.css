@@ -461,3 +461,10 @@ body.sm-simple .sm-empty {
   .sm-sheet .part-eye { width: 40px; height: 40px; margin: -10px -7px -10px -7px; }
   .sm-sheet .part-head, .sm-sheet .part-row { grid-template-columns: 26px 11px minmax(0, 1fr) 44px 30px 40px; }
 }
+
+/* 1.9 password entry: local-only, native keyboard/escape semantics. */
+.pdf-password { color: #e4e9ef; background: #18212d; border: 1px solid #526375; border-radius: 8px; max-width: 420px; padding: 24px; }
+.pdf-password::backdrop { background: #0009; }
+.pdf-password input { display: block; width: 100%; box-sizing: border-box; padding: 8px; margin: 8px 0 16px; }
+.pdf-password form > div { display: flex; justify-content: flex-end; gap: 10px; }
+.pdf-password button { padding: 8px 14px; cursor: pointer; }

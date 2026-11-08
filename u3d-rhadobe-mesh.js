@@ -25,7 +25,7 @@
  *       diffuse idx, specular idx (for faces whose material has the flag), texcoord idx [3F per tex layer]
  *   UINT block: U8 (b0-5 encoding, b6-7 bytes-1 of size field); 0 all-zero (no size), 1 replicate U32 (no size);
  *       otherwise U8|16|24|32 byte size, then data: 2 U4, 3 U8, 4 U16, 5 U24, 6 U32, 7 RH39, 8/9 U3D arithmetic
- *       (NOT implemented - not used by r09), 10 UIC1 (appendix A; verified on the spec's cube example and byte-exact on
+ *       (static-domain and dynamic-U16; validated on the Ohio fixture), 10 UIC1 (appendix A; verified on the spec's cube example and byte-exact on
  *       SAP Visual Enterprise Author 9.0 output, where every array is UIC1). UIC1 notes from the VEA file: the
  *       DeltaU4*_V/V2 "prevVertical" (value 3 back) applies to every array, not only face indices; LongReplicate16
  *       (cmd 13) keeps the current value and queues U16+36 MORE copies (U16+37 in total); the previous-values ring
@@ -42,39 +42,110 @@
  *   Typed arrays (m.positions Float32Array, m.indices Uint32Array) are available for Dev's typed-array parts.
  * CLI: node fixes/u3d-rhadobe-mesh.js <in.u3d|in.pdf> [-o out.stl] [--obj out.obj] [--json summary.json] [--no-transform]
  *   (.pdf input uses fixes/pdf-extract.js + crypto-lite.js, so AES/RC4 owner-only files work.)
- * LIMITS: encodings 8/9 (U3D arithmetic coder) are not implemented (they throw); skeleton and subchunk data are
- *   ignored; texture coordinates are decoded (OBJ vt) but textures/materials are not mapped. Tested on the
+ * LIMITS: skeleton and subchunk data are rejected; texture coordinates are decoded (OBJ vt) but textures/materials are not mapped. Tested on the
  *   CoreTechnologie producer in r09 (RH39, 1 material, no normals) and SAP VEA 9.0 (UIC1, type-3 normals, texcoords).
  */
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.RHAdobeMesh = factory(); })(typeof self !== 'undefined' ? self : this, function () {
   const GUID = '96a804a6-3fb9-43c5-b2df-2a31b5569340';
   const MAX_COUNT = 1 << 24; // per-array element cap (16.7M faces/positions per mesh block)
   function Reader(u8, p, end) {
+    if (Object.prototype.toString.call(u8) !== '[object Uint8Array]' || !Number.isSafeInteger(p) || !Number.isSafeInteger(end) || p < 0 || end < p || end > u8.length) throw new Error('RHAdobe: invalid reader bounds');
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-    const R = { p, end,
+    const R = { p, end, _bytes: u8, budget: { left: 32000000 },
+      reserve(n) { if (!Number.isSafeInteger(n) || n < 0 || n > MAX_COUNT * 3 || n > R.budget.left || (R.streamBudget && n > R.streamBudget.left)) throw new Error('RHAdobe: allocation budget exceeded'); R.budget.left -= n; if (R.streamBudget) R.streamBudget.left -= n; },
       u8() { if (R.p >= R.end) throw new Error('RHAdobe: read past block end'); return u8[R.p++]; },
-      need(k) { if (R.p + k > R.end) throw new Error('RHAdobe: read past block end'); },
+      need(k) { if (!Number.isSafeInteger(k) || k < 0 || R.p + k > R.end) throw new Error('RHAdobe: read past block end'); },
       u16() { R.need(2); const v = dv.getUint16(R.p, true); R.p += 2; return v; },
       u24() { R.need(3); const v = u8[R.p] | (u8[R.p + 1] << 8) | (u8[R.p + 2] << 16); R.p += 3; return v >>> 0; },
       u32() { R.need(4); const v = dv.getUint32(R.p, true); R.p += 4; return v; },
       f32() { R.need(4); const v = dv.getFloat32(R.p, true); R.p += 4; return v; },
-      n(bytes) { return bytes === 1 ? R.u8() : bytes === 2 ? R.u16() : bytes === 3 ? R.u24() : R.u32(); },
+      n(bytes) { if (![1, 2, 3, 4].includes(bytes)) throw new Error('RHAdobe: invalid integer width'); return bytes === 1 ? R.u8() : bytes === 2 ? R.u16() : bytes === 3 ? R.u24() : R.u32(); },
       str() { const L = R.u16(); R.need(L); const s = new TextDecoder().decode(u8.subarray(R.p, R.p + L)); R.p += L; return s; } };
     return R;
+  }
+  // ECMA-363 10.4 inverse. RH mapping inferred against all 110 arithmetic arrays
+  // in the Ohio fixture: static domain N; dynamic single context, U16 escapes.
+  // This is deliberately separate from the stock U3D decoder (whose rescale differs).
+  function arithmetic(bytes, count, encoding, domain, escapeWidth = 16) {
+    if (!Number.isSafeInteger(count) || count < 0 || count > MAX_COUNT * 3) throw new Error('RH arithmetic: invalid count');
+    if (!Number.isSafeInteger(domain) || domain < 1 || domain > 0x100000000) throw new Error('RH arithmetic: invalid domain');
+    let low = 0, high = 65535, pos = 0, under = 0;
+    const freq = new Uint16Array(65536), tree = new Uint32Array(65537); let total = 0;
+    function inc(s) { freq[s]++; total++; for (let k = s + 1; k <= 65536; k += k & -k) tree[k]++; }
+    function add(s) {
+      if (s > 65535) return;
+      if (total >= 8191) {
+        total = 0; tree.fill(0);
+        for (let i = 0; i < freq.length; i++) { freq[i] >>= 1; if (!i) freq[i]++; total += freq[i]; tree[i + 1] = freq[i]; }
+        for (let i = 1; i <= 65536; i++) { const j = i + (i & -i); if (j <= 65536) tree[j] += tree[i]; }
+      }
+      inc(s);
+    }
+    inc(0);
+    function bit(p) { if (p < 0 || p >= bytes.length * 8) throw new Error('RH arithmetic: truncated payload'); return (bytes[p >> 3] >> (p & 7)) & 1; }
+    function symbol(n, dynamic) {
+      const t = dynamic ? total : n;
+      let code = bit(pos) * 32768, q = pos + 1 + under;
+      for (let i = 14; i >= 0; i--) code += bit(q++) * 2 ** i;
+      const range = high - low + 1;
+      const target = Math.floor(((code - low + 1) * t - 1) / range);
+      if (target < 0 || target >= t) throw new Error('RH arithmetic: invalid probability interval');
+      let sym, cumulative, frequency;
+      if (dynamic) {
+        let k = 0, acc = 0;
+        for (let step = 65536; step; step >>= 1) { const next = k + step; if (next <= 65536 && acc + tree[next] <= target) { k = next; acc += tree[next]; } }
+        sym = k; cumulative = acc; frequency = freq[sym];
+      } else { sym = target + 1; cumulative = target; frequency = 1; }
+      if (!frequency) throw new Error('RH arithmetic: zero-frequency symbol');
+      high = low + Math.floor(range * (cumulative + frequency) / t) - 1;
+      low += Math.floor(range * cumulative / t);
+      if (dynamic) add(sym);
+      let shifted = false;
+      while (((high ^ low) & 0x8000) === 0) {
+        pos += shifted ? 1 : 1 + under; under = 0; shifted = true;
+        low = (low << 1) & 65535; high = ((high << 1) | 1) & 65535;
+      }
+      while ((~high & low & 0x4000) !== 0) { under++; low = (low << 1) & 32767; high = ((high << 1) & 32767) | 0x8001; }
+      if (pos + under > bytes.length * 8) throw new Error('RH arithmetic: truncated payload');
+      return sym;
+    }
+    const reverse = v => { let r = 0; for (let i = 0; i < 8; i++) { r = (r << 1) | (v & 1); v >>= 1; } return r; };
+    function raw(width) { let v = 0; for (let i = 0; i < width / 8; i++) v += reverse(symbol(256, false) - 1) * 2 ** (8 * i); return v; }
+    const out = new Uint32Array(count);
+    for (let i = 0; i < count; i++) {
+      let v;
+      if (encoding === 8) v = domain <= 16382 ? symbol(domain, false) - 1 : raw(domain <= 65536 ? 16 : 32);
+      else { const sym = symbol(0, true); if (sym) v = sym - 1; else { v = raw(escapeWidth); add(v + 1); } }
+      if (v >= domain) throw new Error('RH arithmetic: value outside declared domain'); out[i] = v;
+    }
+    // Verify the known zero U32 flush by FORWARD interval updates. Decoding its
+    // last byte would demand nonexistent lookahead; never pad geometry with zeros.
+    const emit = expected => { if (bit(pos++) !== expected) throw new Error('RH arithmetic: invalid final flush'); };
+    for (let byte = 0; byte < 4; byte++) {
+      high = low + Math.floor((high - low + 1) / 256) - 1;
+      while (((high ^ low) & 0x8000) === 0) {
+        const top = high >>> 15; emit(top); while (under) { emit(1 - top); under--; }
+        low = (low << 1) & 65535; high = ((high << 1) | 1) & 65535;
+      }
+      while ((~high & low & 0x4000) !== 0) { under++; low = (low << 1) & 32767; high = ((high << 1) & 32767) | 0x8001; }
+    }
+    if (Math.ceil(pos / 8) !== bytes.length) throw new Error('RH arithmetic: payload size mismatch');
+    for (; pos < bytes.length * 8; pos++) if (bit(pos)) throw new Error('RH arithmetic: nonzero alignment bits');
+    return out;
   }
   function rh39(R, count, end) {
     const out = new Uint32Array(count); let o = 0, offset = 0, c = count;
     while (c && R.p < end) {
       const b = R.u8(); const op = (b >> 4) & 7; let len = b & 15;
       if (b & 0x80) len = 17 + (len << 8) + R.u8(); else len++;
-      if (op === 7) { offset = R.n(len); continue; }
+      if (op === 7) { if (len > 4) throw new Error('RH39: invalid offset width'); offset = R.n(len); continue; }
       if (c < len) throw new Error('RH39: run longer than remaining count'); c -= len; let b4 = 0;
       for (let i = 0; i < len; i++) {
         let v;
         switch (op) { case 6: v = R.u8(); break; case 4: v = R.u16(); break; case 0: v = R.u32(); break;
           case 2: v = offset + R.u8(); break; case 3: v = offset + R.u16(); break; case 5: v = offset; break;
           default: if (i & 1) v = offset + (b4 >> 4); else { b4 = R.u8(); v = offset + (b4 & 15); } }
-        out[o++] = v >>> 0;
+        if (v > 0xffffffff) throw new Error('RH39: offset overflow'); out[o++] = v >>> 0;
       }
     }
     if (c) throw new Error('RH39: data ended ' + c + ' values early');
@@ -115,52 +186,60 @@
       r >>>= 0; out[i] = r; cv = (cv + 1) & 31; PV[cv] = r;
       if (r !== prev) { const d = r > prev ? r - prev : -(prev - r); if (Math.abs(d) < 0x7fffffff) { cd = (cd + 1) & 31; PD[cd] = d; } }
     }
+    if (q) throw new Error('UIC1: run longer than remaining count');
     return out;
   }
-  function uintBlock(R, count, vertical, info) {
+  function uintBlock(R, count, vertical, info, domain = 0x100000000) {
+    R.reserve(count);
+    if (!Number.isSafeInteger(domain) || domain < 0 || domain > 0x100000000 || (count && domain === 0)) throw new Error('RHAdobe: invalid index/value domain');
     const b = R.u8(), t = b & 63;
     if (t === 0) return new Uint32Array(count);
-    if (t === 1) return new Uint32Array(count).fill(R.u32());
+    if (t === 1) { const v = R.u32(); if (v >= domain) throw new Error('RHAdobe: replicated index/value out of range'); return new Uint32Array(count).fill(v); }
     const size = R.n((b >> 6) + 1), start = R.p, end = start + size; let out;
-    if (end > R.end) throw new Error('RHAdobe: UINT block of ' + size + ' bytes overruns the mesh block');
-    if (t === 2) { out = new Uint32Array(count); let b4 = 0; for (let i = 0; i < count; i++) { if (!(i & 1)) b4 = R.u8(); out[i] = i & 1 ? b4 >> 4 : b4 & 15; } }
-    else if (t >= 3 && t <= 6) { out = new Uint32Array(count); for (let i = 0; i < count; i++) out[i] = R.n(t - 2); }
-    else if (t === 7) out = rh39(R, count, end);
-    else if (t === 10) out = uic1(R, count, end, vertical);
-    else throw new Error('RHAdobe: UINT encoding ' + t + (t === 8 || t === 9 ? ' (U3D arithmetic coder) not implemented' : ' unknown'));
-    if (info) info.push({ enc: t, size, consumed: R.p - start });
+    R.need(size); const Q = Reader(R._bytes, start, end); Q.budget = R.budget;
+    if (t === 2) { out = new Uint32Array(count); let b4 = 0; for (let i = 0; i < count; i++) { if (!(i & 1)) b4 = Q.u8(); out[i] = i & 1 ? b4 >> 4 : b4 & 15; } }
+    else if (t >= 3 && t <= 6) { out = new Uint32Array(count); for (let i = 0; i < count; i++) out[i] = Q.n(t - 2); }
+    else if (t === 7) out = rh39(Q, count, end);
+    else if (t === 8 || t === 9) { out = arithmetic(R._bytes.subarray(start, end), count, t, domain); Q.p = end; }
+    else if (t === 10) out = uic1(Q, count, end, vertical);
+    else throw new Error('RHAdobe: unknown UINT encoding ' + t);
+    if (Q.p !== end) throw new Error('RHAdobe: UINT payload size mismatch');
+    for (const v of out) if (v >= domain) throw new Error('RHAdobe: index/value out of range');
+    if (info) info.push({ enc: t, size, consumed: Q.p - start });
     R.p = end; return out;
   }
   function floatArray(R, n, comps, info) {
-    const dt = R.u8(); const out = [];
+    R.reserve(n * comps); const dt = R.u8(); const out = [];
     for (let c = 0; c < comps; c++) {
-      if (dt === 0) { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = R.f32(); out.push(a); continue; }
+      if (dt === 0) { const a = new Float32Array(n); for (let i = 0; i < n; i++) { a[i] = R.f32(); if (!Number.isFinite(a[i])) throw new Error('RHAdobe: non-finite float value'); } out.push(a); continue; }
       if (dt === 3) { // alpha/theta normals: whole 3-vector from 2 arrays
         // one UINT block of 2n values: n alphas then n thetas (verified on SAP VEA 9.0: block ends exactly, thetas <= nq/2)
-        const nq = R.u32(); const at = uintBlock(R, 2 * n, false, info);
+        const nq = R.u32(); if (!nq) throw new Error('RHAdobe: zero normal quantization'); const at = uintBlock(R, 2 * n, false, info, nq);
         const x = new Float32Array(n), y = new Float32Array(n), z = new Float32Array(n), k = 2 * Math.PI / nq;
         for (let i = 0; i < n; i++) { const A = at[i] * k, T = at[n + i] * k; x[i] = Math.sin(T) * Math.cos(A); y[i] = Math.sin(T) * Math.sin(A); z[i] = Math.cos(T); }
         return [x, y, z];
       }
       if (dt !== 2) throw new Error('RHAdobe: float DataType ' + dt);
-      const mn = R.f32(), mx = R.f32();
+      const mn = R.f32(), mx = R.f32(); if (!Number.isFinite(mn) || !Number.isFinite(mx) || mn > mx) throw new Error('RHAdobe: invalid float range');
       if (mn === mx) { out.push(new Float32Array(n).fill(mn)); continue; }
-      const nq = R.u32(); const q = uintBlock(R, n, false, info); const a = new Float32Array(n), s = (mx - mn) / nq;
+      const nq = R.u32(); if (!nq || !Number.isFinite(mn) || !Number.isFinite(mx) || mn > mx) throw new Error('RHAdobe: invalid quantization'); const q = uintBlock(R, n, false, info, nq + 1); const a = new Float32Array(n), s = (mx - mn) / nq;
       for (let i = 0; i < n; i++) a[i] = mn + q[i] * s; out.push(a);
     }
     return out;
   }
   /** Decode one RHAdobeMeshResource New Object Block payload (u8[off .. off+size)). */
-  function decodeBlock(u8, off, size) {
-    const R = Reader(u8, off, off + size); const info = [];
+  function decodeBlock(u8, off, size, streamBudget) {
+    const R = Reader(u8, off, off + size); R.streamBudget = streamBudget; const info = [];
     const name = R.str();
     const flags = R.u8(); if (flags & 15) throw new Error('RHAdobe: chunk version ' + (flags & 15) + ' != 0');
+    if (flags & 32) throw new Error('RHAdobe: skeleton description unsupported');
     if (flags & 16) throw new Error('RHAdobe: subchunk extension data not supported');
     const mcEnc = flags >> 6; const nMat = mcEnc === 0 ? 1 : R.n([0, 1, 2, 4][mcEnc]);
-    if (nMat > size) throw new Error('RHAdobe: bad material count ' + nMat);
+    if (!nMat || nMat > Math.min(size, 65536)) throw new Error('RHAdobe: bad material count ' + nMat);
     const materials = [];
     for (let m = 0; m < nMat; m++) {
       const mf = R.u8(); const layers = R.n(((mf >> 4) & 3) + 1); const shadingId = R.n(((mf >> 2) & 3) + 1);
+      if (layers > 8) throw new Error('RHAdobe: texture-layer budget exceeded');
       const dims = [mf & 3]; const extra = Math.max(0, layers - 1); for (let k = 0; k < Math.ceil(extra / 4); k++) { const b = R.u8(); for (let j = 0; j < 4 && dims.length < layers; j++) dims.push((b >> (2 * j)) & 3); }
       materials.push({ layers, shadingId, texDims: dims, hasDiffuse: !!(mf & 64), hasSpecular: !!(mf & 128) });
     }
@@ -174,52 +253,63 @@
     const D = cnt.diffuse ? floatArray(R, cnt.diffuse, 4, info) : null;
     const S = cnt.specular ? floatArray(R, cnt.specular, 4, info) : null;
     const T = cnt.texCoords ? floatArray(R, cnt.texCoords, 4, info) : null;
-    const matIds = nMat > 1 ? uintBlock(R, F, false, info) : new Uint32Array(F);
-    const indices = uintBlock(R, F * 3, true, info);
-    const normalIdx = cnt.normals ? uintBlock(R, F * 3, true, info) : null;
-    const nDif = materials.some((m) => m.hasDiffuse) ? 3 * Array.from(matIds).filter((id) => materials[id] && materials[id].hasDiffuse).length : 0;
-    const diffuseIdx = nDif ? uintBlock(R, nDif, true, info) : null;
-    const nSpc = materials.some((m) => m.hasSpecular) ? 3 * Array.from(matIds).filter((id) => materials[id] && materials[id].hasSpecular).length : 0;
-    const specularIdx = nSpc ? uintBlock(R, nSpc, true, info) : null;
+    if (nMat === 1) R.reserve(F);
+    const matIds = nMat > 1 ? uintBlock(R, F, false, info, nMat) : new Uint32Array(F);
+    const indices = uintBlock(R, F * 3, true, info, cnt.positions);
+    const normalIdx = cnt.normals ? uintBlock(R, F * 3, true, info, cnt.normals) : null;
+    let nDif = 0, nSpc = 0; for (const id of matIds) { if (materials[id].hasDiffuse) nDif += 3; if (materials[id].hasSpecular) nSpc += 3; }
+    const diffuseIdx = nDif ? uintBlock(R, nDif, true, info, cnt.diffuse) : null;
+    const specularIdx = nSpc ? uintBlock(R, nSpc, true, info, cnt.specular) : null;
     const texIdx = []; const maxLayers = Math.max(0, ...materials.map((m) => m.layers));
-    if (cnt.texCoords) for (let l = 0; l < maxLayers; l++) texIdx.push(uintBlock(R, F * 3, true, info)); // assumes every face uses all layers
+    if (cnt.texCoords) for (let l = 0; l < maxLayers; l++) { let n = 0; for (const id of matIds) if (materials[id].layers > l) n += 3; texIdx.push(uintBlock(R, n, true, info, cnt.texCoords)); }
+    R.reserve(cnt.positions * 3);
     const positions = new Float32Array(cnt.positions * 3);
     for (let i = 0; i < cnt.positions; i++) { positions[3 * i] = P[0][i]; positions[3 * i + 1] = P[1][i]; positions[3 * i + 2] = P[2][i]; }
+    for (const v of positions) if (!Number.isFinite(v)) throw new Error('RHAdobe: non-finite position');
+    const warnings = [];
+    if (R.p !== R.end) { if (R.end - R.p === 1 && u8[R.p] === 0) warnings.push('RHAdobe: unexplained trailing byte 0x00'); else throw new Error('RHAdobe: unexplained trailing data'); }
     let badIndex = 0; for (let i = 0; i < indices.length; i++) if (indices[i] >= cnt.positions) badIndex++;
+    if (T) R.reserve(cnt.texCoords * 2);
     const uv = T ? (() => { const a = new Float32Array(cnt.texCoords * 2); for (let i = 0; i < cnt.texCoords; i++) { a[2 * i] = T[0][i]; a[2 * i + 1] = T[1][i]; } return a; })() : null;
-    return { name, materials, counts: cnt, positions, indices, matIds, uv, uvIndices: texIdx[0] || null, normals: N, normalIdx, diffuse: D, diffuseIdx, specular: S, specularIdx,
+    return { name, warnings, materials, counts: cnt, positions, indices, matIds, uv, uvIndices: texIdx[0] || null, normals: N, normalIdx, diffuse: D, diffuseIdx, specular: S, specularIdx,
       badIndex, bytesUsed: R.p - off, bytesDeclared: size, exactEnd: R.p === off + size, arrays: info,
       positionsAoA() { const a = new Array(cnt.positions); for (let i = 0; i < cnt.positions; i++) a[i] = [positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]]; return a; },
       facesAoA() { const a = new Array(F); for (let i = 0; i < F; i++) a[i] = [indices[3 * i], indices[3 * i + 1], indices[3 * i + 2]]; return a; } };
   }
-  const p4 = (x) => (x + 3) & ~3;
+  const p4 = (x) => Math.ceil(x / 4) * 4;
   /** Walk a U3D stream: blocks + modifier chains; returns {decls, meshes, nodes, warnings}. */
   function scan(u8) {
-    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); const td = new TextDecoder();
-    const str = (o) => { const L = dv.getUint16(o, true); return [td.decode(u8.subarray(o + 2, o + 2 + L)), o + 2 + L]; };
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); const str = (o, end = u8.length) => { const r = Reader(u8,o,end), s = r.str(); return [s,r.p]; };
     const decls = new Map(), meshes = [], nodes = [], warnings = [], meshErrors = [];
-    function block(o, lim) {
+    const streamBudget = {left:128000000};
+    let blockBudget = 1000000;
+    function block(o, lim, depth = 0) {
+      if (!blockBudget-- || depth > 32 || o < 0 || o + 12 > lim) throw new Error('U3D: block bounds/nesting budget exceeded');
       const type = dv.getUint32(o, true), ds = dv.getUint32(o + 4, true), ms = dv.getUint32(o + 8, true); const d0 = o + 12;
-      if (d0 + ds > lim) throw new Error('U3D block overruns stream at ' + o);
+      if (d0 + p4(ds) + p4(ms) > lim) throw new Error('U3D block overruns stream at ' + o);
       if (type === 0xFFFFFF14) { // modifier chain: name, type, attrs, [sphere], [aabb], pad, count, blocks
-        let [, q] = str(d0); const attr = dv.getUint32(q + 4, true); q += 8; if (attr & 1) q += 16; if (attr & 2) q += 24;
-        q = d0 + p4(q - d0); const n = dv.getUint32(q, true); q += 4;
-        for (let i = 0; i < n; i++) q = block(q, d0 + ds);
+        const r=Reader(u8,d0,d0+ds);r.str();r.u32();const attr=r.u32();
+        if(attr&1){r.need(16);r.p+=16;}if(attr&2){r.need(24);r.p+=24;}
+        const padding=p4(r.p-d0)-(r.p-d0);r.need(padding);r.p+=padding;
+        const n=r.u32();let q=r.p;if(n>Math.floor((r.end-q)/12))throw new Error('U3D: invalid modifier block count');
+        for(let i=0;i<n;i++)q=block(q,d0+ds,depth+1);
+
       } else if (type === 0xFFFFFF16) {
-        let [name, q] = str(d0); q += 4; const g = [dv.getUint32(q, true).toString(16).padStart(8, '0'), dv.getUint16(q + 4, true).toString(16).padStart(4, '0'), dv.getUint16(q + 6, true).toString(16).padStart(4, '0'),
+        let [name, q] = str(d0,d0+ds); if (q+24>d0+ds) throw new Error('U3D: truncated extension declaration'); q += 4; const g = [dv.getUint32(q, true).toString(16).padStart(8, '0'), dv.getUint16(q + 4, true).toString(16).padStart(4, '0'), dv.getUint16(q + 6, true).toString(16).padStart(4, '0'),
           Array.from(u8.subarray(q + 8, q + 10), (b) => b.toString(16).padStart(2, '0')).join(''), Array.from(u8.subarray(q + 10, q + 16), (b) => b.toString(16).padStart(2, '0')).join('')].join('-');
         q += 16; const declType = dv.getUint32(q, true); decls.set(declType, { name, guid: g });
         if (name !== 'RHAdobeMeshResource' || g !== GUID) warnings.push(`New Object Type '${name}' ${g} is not RHAdobeMeshResource; its blocks are skipped`);
       } else if (type >= 0x100 && type <= 0xFFFFFF && type !== 0x00443355) {
         const dcl = decls.get(type);
         if (dcl && dcl.name === 'RHAdobeMeshResource') {
-          try { meshes.push(decodeBlock(u8, d0, ds)); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); meshErrors.push({ offset: o, message: e.message }); }
+          try { const mesh = decodeBlock(u8, d0, ds, streamBudget); meshes.push(mesh); for (const warning of mesh.warnings) warnings.push(`${mesh.name}: ${warning}`); } catch (e) { warnings.push(`RHAdobeMeshResource block at ${o}: ${e.message}`); meshErrors.push({ offset: o, message: e.message }); }
         } else warnings.push(`New Object Block type 0x${type.toString(16)} at ${o} has no RHAdobeMeshResource declaration`);
       } else if (type === 0xFFFFFF21 || type === 0xFFFFFF22) { // group/model node: name, parents{name, 4x4 col-major}, [resource]
-        let [name, q] = str(d0); const np = dv.getUint32(q, true); q += 4; const parents = [];
-        for (let i = 0; i < np; i++) { let pn; [pn, q] = str(q); const m = new Float64Array(16); for (let k = 0; k < 16; k++) m[k] = dv.getFloat32(q + 4 * k, true); q += 64; parents.push({ name: pn, m }); }
-        let resource = null; if (type === 0xFFFFFF22) [resource] = str(q);
-        nodes.push({ name, model: type === 0xFFFFFF22, parents, resource });
+        const r = Reader(u8,d0,d0+ds), name=r.str(), np=r.u32(), parents=[];
+        if(np>65536 || np*66>r.end-r.p) throw new Error('U3D: invalid parent count');
+        for(let i=0;i<np;i++){const pn=r.str(), m=new Float64Array(16);for(let k=0;k<16;k++){m[k]=r.f32();if(!Number.isFinite(m[k]))throw new Error('U3D: nonfinite node transform');}parents.push({name:pn,m});}
+        const resource=type===0xFFFFFF22?r.str():null;
+        nodes.push({name,model:type===0xFFFFFF22,parents,resource});
       }
       return d0 + p4(ds) + p4(ms);
     }
@@ -230,17 +320,19 @@
   const I = () => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; };
   function worldMatrices(nodes, name, depth = 0) {
     const n = nodes.find((x) => x.name === name); if (!n || depth > 64) return [I()];
-    const out = []; for (const p of n.parents) { const base = p.name && p.name !== '' && nodes.some((x) => x.name === p.name) ? worldMatrices(nodes, p.name, depth + 1) : [I()]; for (const B of base) out.push(mul(B, p.m)); }
+    const out = []; for (const p of n.parents) { const base = p.name && p.name !== '' && nodes.some((x) => x.name === p.name) ? worldMatrices(nodes, p.name, depth + 1) : [I()]; for (const B of base) { if(out.length>=4096)throw new Error('U3D: instance budget exceeded');out.push(mul(B,p.m)); } }
     return out.length ? out : [I()];
   }
   /** App-shaped result: parts with node transforms applied (one part per model-node instance). */
   function parseU3D(u8, opts = {}) {
-    const sc = scan(u8); const parts = [];
+    const sc = scan(u8); const parts = []; let instanceValuesLeft = 32000000;
     for (const m of sc.meshes) {
       const users = sc.nodes.filter((n) => n.model && n.resource === m.name);
       const insts = opts.noTransform || !users.length ? [{ node: m.name.replace(/Resource$/, ''), M: I() }] : users.flatMap((u) => worldMatrices(sc.nodes, u.name).map((M) => ({ node: u.name, M })));
       for (const { node, M } of insts) {
-        const P = m.positions, nv = P.length / 3, pos = new Float32Array(P.length);
+        const P = m.positions, nv = P.length / 3;
+        if (P.length > instanceValuesLeft || parts.length >= 65536) throw new Error('RHAdobe: instance allocation budget exceeded');
+        instanceValuesLeft -= P.length; const pos = new Float32Array(P.length);
         for (let i = 0; i < nv; i++) { const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2];
           pos[3 * i] = M[0] * x + M[4] * y + M[8] * z + M[12]; pos[3 * i + 1] = M[1] * x + M[5] * y + M[9] * z + M[13]; pos[3 * i + 2] = M[2] * x + M[6] * y + M[10] * z + M[14]; }
         parts.push({ name: node, meshName: m.name, visible: true, positionsTyped: pos, indices: m.indices, uv: m.uv, uvIndices: m.uvIndices, matrix: Array.from(M),
@@ -250,7 +342,7 @@
     }
     return { format: 'U3D (ECMA-363) + RHAdobeMeshResource', parts, meshes: sc.meshes, nodes: sc.nodes, warnings: sc.warnings, meshErrors: sc.meshErrors, decodePath: 'U3D/RHAdobeMeshResource' };
   }
-  return { GUID, decodeBlock, scan, parseU3D, _rh39: rh39, _uic1: uic1, _uintBlock: uintBlock, Reader };
+  return { GUID, _arithmetic: arithmetic, decodeBlock, scan, parseU3D, _rh39: rh39, _uic1: uic1, _uintBlock: uintBlock, Reader };
 });
 
 if (typeof require !== 'undefined' && require.main === module) (async () => {
