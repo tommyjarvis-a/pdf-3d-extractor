@@ -23,7 +23,8 @@ Compatibility candidate; not a general converter and not fitted Parasolid.
   integer/float/index domains, UIC1 run lengths and U3D framing limits.
 - Partial RH recovery is explicit: unknown trailing data rejects the chunk; one
   unexplained trailing zero byte preserves geometry with a visible warning and
-  partial-export marking. The real sample recovers 90/90 meshes (86 exact, 4 warned).
+  partial-export marking. The real Ohio sample recovers 90/90 meshes (86 exact);
+  **four Ohio chunks** load with the trailing-byte warning and partial-export marking.
   The load card shows unreadable/missing mesh-block counts together with recovered
   trailing-byte-warning counts, wrapping rather than hiding either warning.
   Skeleton/subchunk descriptions remain explicitly unsupported, never silently ignored.
@@ -43,6 +44,15 @@ Compatibility candidate; not a general converter and not fitted Parasolid.
 - Ohio export evidence is full raw/STL/OBJ and subset STEP/XT/IGES only. Full Ohio
   XT exceeded Tester's **4 GB test heap**; full Ohio STEP/XT success is not claimed.
 - Served cache keys: `1.9.0` / worker `1.9.0-w1`; standalone rebuilt.
+
+
+### Known limitations
+- **L1 (Low):** libqpdf (and tools that use it, such as pikepdf / `qpdf --encrypt`)
+  does not apply SASLprep to R6 passwords. The app follows ISO 32000-2 and does
+  apply SASLprep, so an R6 password that SASLprep would change can fail to open
+  some libqpdf-made files. This is a known interop gap, not a cryptographic defect.
+- **L4 (Low):** cosmetic console / `lastLoad` text (for example a leading
+  "0 mesh blocks unreadable" when the only issues are trailing-byte warnings).
 
 ## 1.8.0 (alpha) — 2026-11-02
 
